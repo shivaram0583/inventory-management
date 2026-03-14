@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: inventory-management-api
+    env: node
+    rootDir: server
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SQLITE_DB_PATH
+        value: /var/data/inventory.db
+      - key: CORS_ORIGIN
+        value: ""
+    disks:
+      - name: inventory-data
+        mountPath: /var/data
+        sizeGB: 1

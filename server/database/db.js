@@ -1,8 +1,18 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 const bcrypt = require('bcryptjs');
 
-const dbPath = path.join(__dirname, 'inventory.db');
+const dbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, 'inventory.db');
+
+try {
+  const dir = path.dirname(dbPath);
+  if (dir && dir !== '.' && !fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+} catch (e) {
+  console.error('Error ensuring database directory exists:', e.message);
+}
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {

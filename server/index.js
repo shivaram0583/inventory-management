@@ -13,7 +13,13 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(
+  cors({
+    origin: corsOrigin ? corsOrigin.split(',').map((s) => s.trim()) : true,
+    credentials: true
+  })
+);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
