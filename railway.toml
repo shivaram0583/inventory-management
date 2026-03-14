@@ -1,0 +1,10 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm ci"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+restartPolicyType = "ON_FAILURE"
+
+# Note: In Railway service settings, set the Root Directory to `server`
