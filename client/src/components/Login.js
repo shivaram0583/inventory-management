@@ -39,7 +39,7 @@ const Login = () => {
             Shri Lakshmi Vigneswara Traders
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            Inventory Management System
+            Inventory Management
           </p>
         </div>
 
@@ -105,18 +105,6 @@ const Login = () => {
               >
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
-            </div>
-
-            <div className="mt-4 p-4 bg-gray-50 rounded-md">
-              <p className="text-xs text-gray-600 font-medium mb-2">Default Credentials:</p>
-              <div className="space-y-1">
-                <p className="text-xs text-gray-500">
-                  <span className="font-medium">Admin:</span> admin / admin123
-                </p>
-                <p className="text-xs text-gray-500">
-                  <span className="font-medium">Operator:</span> operator / operator123
-                </p>
-              </div>
             </div>
           </div>
         </form>

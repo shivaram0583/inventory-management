@@ -11,10 +11,14 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await getRow('SELECT id, username, role FROM users WHERE id = ?', [decoded.userId]);
+    const user = await getRow('SELECT id, username, role, is_active FROM users WHERE id = ?', [decoded.userId]);
     
     if (!user) {
       return res.status(401).json({ message: 'Invalid token' });
+    }
+
+    if (user.is_active === 0) {
+      return res.status(403).json({ message: 'Account disabled' });
     }
 
     req.user = user;

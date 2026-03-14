@@ -20,12 +20,35 @@ function initializeDatabase() {
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'operator')),
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`, (err) => {
     if (err) {
       console.error('Error creating users table:', err.message);
     } else {
       console.log('Users table created successfully');
+    }
+  });
+
+  db.all(`PRAGMA table_info(users)`, (err, columns) => {
+    if (err) {
+      console.error('Error checking users table schema:', err.message);
+      return;
+    }
+
+    const hasIsActive = columns.some((c) => c.name === 'is_active');
+    if (!hasIsActive) {
+      db.run(
+        `ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))`,
+        (alterErr) => {
+          if (alterErr) {
+            console.error('Error adding is_active column:', alterErr.message);
+          } else {
+            console.log('Added is_active column to users table');
+            db.run('UPDATE users SET is_active = 1 WHERE is_active IS NULL');
+          }
+        }
+      );
     }
   });
 
