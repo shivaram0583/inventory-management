@@ -6,6 +6,7 @@ import {
   Package, 
   ShoppingCart, 
   FileText, 
+  Users,
   LogOut, 
   Store,
   Menu,
@@ -51,6 +52,15 @@ const Layout = () => {
       current: isActive('/reports')
     }
   ];
+
+  if (user?.role === 'admin') {
+    navigation.push({
+      name: 'Users',
+      href: '/users',
+      icon: Users,
+      current: isActive('/users')
+    });
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

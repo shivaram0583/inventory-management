@@ -9,6 +9,7 @@ import Sales from './components/Sales';
 import Reports from './components/Reports';
 import Receipt from './components/Receipt';
 import Layout from './components/Layout';
+import Users from './components/Users';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -28,6 +29,28 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" />;
+  }
+
+  if (user.role !== 'admin') {
+    return <Navigate to="/" />;
+  }
+
+  return children;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -41,6 +64,11 @@ function AppRoutes() {
         <Route path="inventory" element={<Inventory />} />
         <Route path="sales" element={<Sales />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="users" element={
+          <AdminRoute>
+            <Users />
+          </AdminRoute>
+        } />
         <Route path="receipt/:saleId" element={<Receipt />} />
       </Route>
     </Routes>
