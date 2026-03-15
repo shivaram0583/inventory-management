@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
+import SharedModal from './shared/Modal';
 import { 
   FileText, 
   Calendar, 
@@ -8,10 +10,15 @@ import {
   IndianRupee,
   Download,
   BarChart3,
-  ShoppingCart
+  ShoppingCart,
+  Truck,
+  Users,
+  Trash2
 } from 'lucide-react';
 
 const Reports = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [activeTab, setActiveTab] = useState('daily');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
@@ -19,6 +26,25 @@ const Reports = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleteModal, setDeleteModal] = useState({ open: false, id: null, label: '' });
+
+  const formatCurrency = (value) => {
+    const amount = Number(value);
+    if (Number.isNaN(amount) || amount == null) return '0';
+    return amount.toLocaleString('en-IN');
+  };
+
+  const handleDeleteArchive = async () => {
+    const { id } = deleteModal;
+    setDeleteModal({ open: false, id: null, label: '' });
+    if (!id) return;
+    try {
+      await axios.delete(`/api/reports/customer-sales/${id}`);
+      fetchReportData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete record');
+    }
+  };
 
   useEffect(() => {
     fetchReportData();
@@ -29,6 +55,27 @@ const Reports = () => {
     setError('');
     
     try {
+      if (activeTab === 'range') {
+        if (!startDate || !endDate) {
+          setError('Start date and end date are required');
+          setLoading(false);
+          return;
+        }
+
+        const paramsRange = { start_date: startDate, end_date: endDate };
+        const [salesRangeResponse, purchasesRangeResponse] = await Promise.all([
+          axios.get('/api/reports/sales-range', { params: paramsRange }),
+          axios.get('/api/reports/purchases', { params: paramsRange })
+        ]);
+
+        setData({
+          ...salesRangeResponse.data,
+          purchaseSummary: purchasesRangeResponse.data.summary,
+          purchaseRecords: purchasesRangeResponse.data.purchases
+        });
+        return;
+      }
+
       let url = '';
       let params = {};
 
@@ -36,10 +83,6 @@ const Reports = () => {
         case 'daily':
           url = '/api/reports/daily-sales';
           params = { date: selectedDate };
-          break;
-        case 'range':
-          url = '/api/reports/sales-range';
-          params = { start_date: startDate, end_date: endDate };
           break;
         case 'inventory':
           url = '/api/reports/inventory-status';
@@ -52,6 +95,22 @@ const Reports = () => {
           break;
         case 'trend':
           url = '/api/reports/monthly-trend';
+          break;
+        case 'purchases':
+          url = '/api/reports/purchases';
+          if (startDate && endDate) {
+            params = { start_date: startDate, end_date: endDate };
+          }
+          break;
+        case 'customerSales':
+          url = '/api/reports/customer-sales';
+          if (startDate && endDate) {
+            params = { start_date: startDate, end_date: endDate };
+          }
+          break;
+        default:
+          url = '/api/reports/daily-sales';
+          params = { date: selectedDate };
           break;
       }
 
@@ -97,7 +156,7 @@ const Reports = () => {
               <IndianRupee className="h-6 w-6 text-purple-500" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-                <p className="text-2xl font-bold text-gray-900">₹{data.summary.total_revenue.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(data.summary?.total_revenue)}</p>
               </div>
             </div>
           </div>
@@ -118,20 +177,66 @@ const Reports = () => {
                 </tr>
               </thead>
               <tbody>
-                {data.sales.map((sale, index) => (
+                {(data.sales || []).map((sale, index) => (
                   <tr key={index}>
                     <td className="font-medium">{sale.product_name}</td>
                     <td>{sale.variety || '-'}</td>
                     <td>{sale.total_quantity} {sale.unit}</td>
-                    <td>₹{sale.total_amount.toLocaleString()}</td>
+                    <td>₹{formatCurrency(sale.total_amount)}</td>
                     <td>{sale.transaction_count}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {data.sales.length === 0 && (
+            {(data.sales || []).length === 0 && (
               <div className="text-center py-8 text-gray-500">
                 No sales data available for this date
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Customer Sales for the day */}
+        <div className="card">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            <Users className="h-5 w-5 inline mr-2" />
+            Customer Sales
+          </h3>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Mobile</th>
+                  <th>Address</th>
+                  <th>Item</th>
+                  <th>Quantity</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.customerSales || []).map((cs, idx) => (
+                  <tr key={idx}>
+                    <td className="font-medium">{cs.customer_name || '-'}</td>
+                    <td>{cs.customer_mobile || '-'}</td>
+                    <td>{cs.customer_address || '-'}</td>
+                    <td>{cs.product_name}</td>
+                    <td>{cs.quantity}</td>
+                    <td className="text-sm">
+                      {new Date(cs.sale_date).toLocaleTimeString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {(data.customerSales || []).length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No customer sales data for this date
               </div>
             )}
           </div>
@@ -172,7 +277,7 @@ const Reports = () => {
               <IndianRupee className="h-6 w-6 text-purple-500" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-                <p className="text-2xl font-bold text-gray-900">₹{(data.summary?.total_revenue || 0).toLocaleString()}</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(data.summary?.total_revenue)}</p>
               </div>
             </div>
           </div>
@@ -187,7 +292,7 @@ const Reports = () => {
                 <div className="flex justify-between items-center mb-3">
                   <h4 className="font-medium text-gray-900">{day.date}</h4>
                   <div className="flex space-x-4 text-sm">
-                    <span className="text-gray-600">₹{(day.daily_total || 0).toLocaleString()}</span>
+                    <span className="text-gray-600">₹{formatCurrency(day.daily_total)}</span>
                     <span className="text-gray-600">{day.daily_transactions || 0} transactions</span>
                   </div>
                 </div>
@@ -238,7 +343,7 @@ const Reports = () => {
               <IndianRupee className="h-6 w-6 text-purple-500" />
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Total Value</p>
-                <p className="text-2xl font-bold text-gray-900">₹{(data.stats?.total_value || 0).toLocaleString()}</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(data.stats?.total_value)}</p>
               </div>
             </div>
           </div>
@@ -264,7 +369,7 @@ const Reports = () => {
                 <div className="space-y-1 text-sm">
                   <p className="text-gray-600">Products: {category.product_count}</p>
                   <p className="text-gray-600">Total Quantity: {category.total_quantity}</p>
-                  <p className="text-gray-600">Total Value: ₹{(category.total_value || 0).toLocaleString()}</p>
+                  <p className="text-gray-600">Total Value: ₹{formatCurrency(category.total_value)}</p>
                 </div>
               </div>
             ))}
@@ -296,7 +401,7 @@ const Reports = () => {
                     <td className={product.quantity_available <= 10 ? 'text-red-600 font-medium' : ''}>
                       {product.quantity_available} {product.unit}
                     </td>
-                    <td>₹{(product.quantity_available * product.selling_price).toLocaleString()}</td>
+                    <td>₹{formatCurrency(product.quantity_available * product.selling_price)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -324,7 +429,7 @@ const Reports = () => {
                     <p className="text-sm text-gray-500">{product.variety}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-medium text-gray-900">₹{(product.total_revenue || 0).toLocaleString()}</p>
+                    <p className="font-medium text-gray-900">₹{formatCurrency(product.total_revenue)}</p>
                     <p className="text-sm text-gray-500">{product.total_sold} {product.unit}</p>
                   </div>
                 </div>
@@ -343,7 +448,7 @@ const Reports = () => {
                     <p className="text-sm text-gray-500">{product.variety}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-medium text-gray-900">₹{(product.total_revenue || 0).toLocaleString()}</p>
+                    <p className="font-medium text-gray-900">₹{formatCurrency(product.total_revenue)}</p>
                     <p className="text-sm text-gray-500">{product.total_sold} {product.unit}</p>
                   </div>
                 </div>
@@ -378,7 +483,7 @@ const Reports = () => {
                     <td className="font-medium">{month.month}</td>
                     <td>{month.transactions}</td>
                     <td>{month.items_sold}</td>
-                    <td>₹{(month.revenue || 0).toLocaleString()}</td>
+                    <td>₹{formatCurrency(month.revenue)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -389,18 +494,191 @@ const Reports = () => {
     );
   };
 
+  const renderPurchasesReport = () => {
+    if (!data) return null;
+
+    return (
+      <div className="space-y-6">
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="stat-card border-blue-500 bg-blue-50">
+            <div className="flex items-center">
+              <Truck className="h-6 w-6 text-blue-500" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Purchases</p>
+                <p className="text-2xl font-bold text-gray-900">{data.summary?.total_purchases || 0}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="stat-card border-green-500 bg-green-50">
+            <div className="flex items-center">
+              <Package className="h-6 w-6 text-green-500" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Items Purchased</p>
+                <p className="text-2xl font-bold text-gray-900">{data.summary?.total_items || 0}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="stat-card border-purple-500 bg-purple-50">
+            <div className="flex items-center">
+              <IndianRupee className="h-6 w-6 text-purple-500" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Cost</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(data.summary?.total_cost)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Purchase Details */}
+        <div className="card">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Purchase Details</h3>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Purchase ID</th>
+                  <th>Product</th>
+                  <th>Category</th>
+                  <th>Quantity</th>
+                  <th>Price/Unit</th>
+                  <th>Total</th>
+                  <th>Supplier</th>
+                  <th>Date</th>
+                  <th>Added By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.purchases || []).map((purchase) => (
+                  <tr key={purchase.id}>
+                    <td className="font-medium text-xs">{purchase.purchase_id}</td>
+                    <td>
+                      <div>
+                        <p className="font-medium">{purchase.product_name}</p>
+                        {purchase.variety && <p className="text-xs text-gray-500">{purchase.variety}</p>}
+                      </div>
+                    </td>
+                    <td className="capitalize">{purchase.category}</td>
+                    <td>{purchase.quantity} {purchase.unit}</td>
+                    <td>₹{formatCurrency(purchase.price_per_unit)}</td>
+                    <td>₹{formatCurrency(purchase.total_amount)}</td>
+                    <td>{purchase.supplier || '-'}</td>
+                    <td className="text-sm">
+                      {new Date(purchase.purchase_date).toLocaleString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true
+                      })}
+                    </td>
+                    <td>{purchase.added_by || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {(data.purchases || []).length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No purchase data available
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCustomerSalesArchive = () => {
+    if (!data) return null;
+    const records = data.records || [];
+
+    return (
+      <div className="space-y-6">
+        <div className="card">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            <Users className="h-5 w-5 inline mr-2" />
+            Sales Archive ({records.length} records)
+          </h3>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Sale ID</th>
+                  <th>Customer</th>
+                  <th>Mobile</th>
+                  <th>Address</th>
+                  <th>Item</th>
+                  <th>Quantity</th>
+                  <th>Date</th>
+                  {isAdmin && <th>Action</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((r) => (
+                  <tr key={r.id}>
+                    <td className="text-xs font-mono">{r.sale_id}</td>
+                    <td className="font-medium">{r.customer_name || '-'}</td>
+                    <td>{r.customer_mobile || '-'}</td>
+                    <td>{r.customer_address || '-'}</td>
+                    <td>{r.product_name}</td>
+                    <td>{r.quantity}</td>
+                    <td className="text-sm">
+                      {new Date(r.sale_date).toLocaleString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true
+                      })}
+                    </td>
+                    {isAdmin && (
+                      <td>
+                        <button
+                          onClick={() => setDeleteModal({ open: true, id: r.id, label: `${r.customer_name} - ${r.product_name}` })}
+                          className="text-red-500 hover:text-red-700"
+                          title="Delete record"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {records.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No sales archive data available
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'daily':
         return renderDailyReport();
-      case 'range':
-        return renderRangeReport();
       case 'inventory':
         return renderInventoryReport();
+      case 'purchases':
+        return renderPurchasesReport();
+      case 'range':
+        return renderRangeReport();
       case 'performance':
         return renderPerformanceReport();
       case 'trend':
         return renderTrendReport();
+      case 'customerSales':
+        return renderCustomerSalesArchive();
       default:
         return null;
     }
@@ -418,10 +696,12 @@ const Reports = () => {
         <nav className="-mb-px flex space-x-8">
           {[
             { id: 'daily', label: 'Daily Sales', icon: Calendar },
-            { id: 'range', label: 'Date Range', icon: Calendar },
             { id: 'inventory', label: 'Inventory Status', icon: Package },
+            { id: 'purchases', label: 'Purchases', icon: Truck },
+            { id: 'range', label: 'Date Range', icon: Calendar },
             { id: 'performance', label: 'Product Performance', icon: TrendingUp },
-            { id: 'trend', label: 'Monthly Trend', icon: BarChart3 }
+            { id: 'trend', label: 'Monthly Trend', icon: BarChart3 },
+            { id: 'customerSales', label: 'Sales Archive', icon: Users }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -454,7 +734,7 @@ const Reports = () => {
             </div>
           )}
           
-          {(activeTab === 'range' || activeTab === 'performance') && (
+          {(activeTab === 'range' || activeTab === 'performance' || activeTab === 'purchases' || activeTab === 'customerSales') && (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
@@ -492,6 +772,19 @@ const Reports = () => {
       ) : (
         renderContent()
       )}
+
+      <SharedModal
+        isOpen={deleteModal.open}
+        onClose={() => setDeleteModal({ open: false, id: null, label: '' })}
+        title="Delete Archive Record"
+        type="warning"
+        confirmText="Delete"
+        onConfirm={handleDeleteArchive}
+      >
+        <p>Are you sure you want to delete this record?</p>
+        <p className="mt-1 font-medium text-gray-900">{deleteModal.label}</p>
+        <p className="mt-2 text-xs text-gray-500">This action cannot be undone.</p>
+      </SharedModal>
     </div>
   );
 };

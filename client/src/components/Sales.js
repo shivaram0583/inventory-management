@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
+import SharedModal from './shared/Modal';
 import { 
   ShoppingCart, 
   Plus, 
@@ -11,7 +12,9 @@ import {
   Package,
   IndianRupee,
   User,
-  CreditCard
+  CreditCard,
+  Phone,
+  FileText
 } from 'lucide-react';
 
 const Sales = () => {
@@ -20,10 +23,14 @@ const Sales = () => {
   const [cart, setCart] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [customerName, setCustomerName] = useState('');
+  const [customerMobile, setCustomerMobile] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
   const [paymentMode, setPaymentMode] = useState('cash');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [receiptModal, setReceiptModal] = useState({ open: false, saleId: null, receiptNumber: null });
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const pendingSaleRef = useRef(null);
 
   useEffect(() => {
     fetchProducts();
@@ -38,6 +45,14 @@ const Sales = () => {
       console.error('Fetch products error:', error);
     }
   };
+
+  const openReceipt = (saleId) => {
+    if (!saleId) return;
+    const receiptUrl = `${window.location.origin}/receipt/${saleId}`;
+    window.open(receiptUrl, '_blank', 'noopener');
+  };
+
+  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const filteredProducts = products.filter(product =>
     product.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -99,36 +114,60 @@ const Sales = () => {
     return cart.reduce((total, item) => total + (item.quantity * item.price_per_unit), 0);
   };
 
-  const handleSale = async () => {
+  const handleSale = () => {
     if (cart.length === 0) {
       setError('Cart is empty');
       return;
     }
 
+    if (!customerName.trim() || !customerMobile.trim() || !customerAddress.trim()) {
+      setError('Customer name, mobile number, and address are required.');
+      return;
+    }
+
+    const saleData = {
+      items: cart.map(item => ({
+        product_id: item.product_id,
+        quantity: item.quantity
+      })),
+      customer_name: customerName,
+      customer_mobile: customerMobile,
+      customer_address: customerAddress,
+      payment_mode: paymentMode
+    };
+
+    pendingSaleRef.current = saleData;
+    setError('');
+    setConfirmModalOpen(true);
+  };
+
+  const confirmSale = async () => {
+    if (!pendingSaleRef.current) {
+      setConfirmModalOpen(false);
+      return;
+    }
+
     setLoading(true);
     setError('');
-    
-    try {
-      const saleData = {
-        items: cart.map(item => ({
-          product_id: item.product_id,
-          quantity: item.quantity
-        })),
-        customer_name: customerName || 'Walk-in Customer',
-        payment_mode: paymentMode
-      };
+    setConfirmModalOpen(false);
 
-      const response = await axios.post('/api/sales', saleData);
-      
-      setSuccess(`Sale completed successfully! Receipt: ${response.data.receiptNumber}`);
+    try {
+      const response = await axios.post('/api/sales', pendingSaleRef.current);
+
+      setReceiptModal({
+        open: true,
+        saleId: response.data.saleId,
+        receiptNumber: response.data.receiptNumber
+      });
       setCart([]);
       setCustomerName('');
+      setCustomerMobile('');
+      setCustomerAddress('');
       setPaymentMode('cash');
-      
+      pendingSaleRef.current = null;
+
       // Refresh products to update stock
       fetchProducts();
-      
-      setTimeout(() => setSuccess(''), 5000);
     } catch (error) {
       setError(error.response?.data?.message || 'Failed to complete sale');
     } finally {
@@ -149,11 +188,6 @@ const Sales = () => {
         </div>
       )}
 
-      {success && (
-        <div className="bg-green-50 border border-green-200 rounded-md p-4">
-          <p className="text-green-700">{success}</p>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Product Selection */}
@@ -285,9 +319,39 @@ const Sales = () => {
                     <input
                       type="text"
                       className="input-field"
-                      placeholder="Enter customer name (optional)"
+                      placeholder="Enter customer name"
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Phone className="h-4 w-4 inline mr-1" />
+                      Mobile Number
+                    </label>
+                    <input
+                      type="tel"
+                      className="input-field"
+                      placeholder="Enter mobile number"
+                      value={customerMobile}
+                      onChange={(e) => setCustomerMobile(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Address
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Enter address"
+                      value={customerAddress}
+                      onChange={(e) => setCustomerAddress(e.target.value)}
+                      required
                     />
                   </div>
                   
@@ -330,6 +394,69 @@ const Sales = () => {
           </div>
         </div>
       </div>
+
+      <SharedModal
+        isOpen={confirmModalOpen}
+        onClose={() => setConfirmModalOpen(false)}
+        title="Confirm Sale"
+        type="warning"
+        confirmText={loading ? 'Processing...' : 'Confirm Sale'}
+        onConfirm={!loading ? confirmSale : undefined}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-700">
+            Please review the order before completing the sale.
+          </p>
+          <div className="bg-gray-50 rounded border max-h-48 overflow-y-auto">
+            {cart.map((item) => (
+              <div key={item.product_id} className="flex justify-between items-start px-3 py-2 border-b last:border-b-0 text-sm">
+                <div>
+                  <p className="font-medium text-gray-900">{item.product_name}</p>
+                  {item.variety && <p className="text-xs text-gray-500">{item.variety}</p>}
+                </div>
+                <div className="text-right text-gray-700">
+                  <p>{item.quantity} {item.unit}</p>
+                  <p className="text-xs text-gray-500">₹{(item.quantity * item.price_per_unit).toFixed(2)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="text-sm text-gray-700">
+            <p>Customer: <span className="font-medium">{customerName}</span></p>
+            <p>Mobile: <span className="font-medium">{customerMobile}</span></p>
+            <p>Address: <span className="font-medium">{customerAddress}</span></p>
+            <p className="mt-2">Total Items: <span className="font-medium">{totalItems}</span></p>
+            <p>Total Amount: <span className="font-semibold text-gray-900">₹{calculateTotal().toFixed(2)}</span></p>
+          </div>
+        </div>
+      </SharedModal>
+
+      <SharedModal
+        isOpen={receiptModal.open}
+        onClose={() => setReceiptModal({ open: false, saleId: null, receiptNumber: null })}
+        title="Receipt Generated"
+        type="success"
+        confirmText="Close"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-700">
+            Sale completed successfully.
+          </p>
+          {receiptModal.receiptNumber && (
+            <p className="text-sm text-gray-900">
+              Receipt <span className="font-semibold">#{receiptModal.receiptNumber}</span> is ready.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => openReceipt(receiptModal.saleId)}
+            className="w-full inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Open Receipt PDF
+          </button>
+        </div>
+      </SharedModal>
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
+import SharedModal from './shared/Modal';
 import { 
   Package, 
   Plus, 
@@ -25,6 +26,9 @@ const Inventory = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddStockModal, setShowAddStockModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [duplicateIdModal, setDuplicateIdModal] = useState(false);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState({ open: false, product: null });
+  const [actionModal, setActionModal] = useState({ open: false, title: '', message: '', type: 'success' });
   const [formData, setFormData] = useState({
     product_id: '',
     category: 'seeds',
@@ -36,6 +40,11 @@ const Inventory = () => {
     selling_price: '',
     supplier: ''
   });
+
+  const closeActionModal = () => setActionModal((prev) => ({ ...prev, open: false }));
+  const showActionModal = (title, message, type = 'success') => {
+    setActionModal({ open: true, title, message, type });
+  };
 
   useEffect(() => {
     fetchProducts();
@@ -77,50 +86,76 @@ const Inventory = () => {
 
   const handleAddProduct = async (e) => {
     e.preventDefault();
+    const { product_name, product_id } = formData;
     try {
       await axios.post('/api/inventory', formData);
       setShowAddModal(false);
       resetForm();
-      fetchProducts();
+      await fetchProducts();
+      showActionModal('Product Added', `Added "${product_name}" (${product_id}) to inventory.`);
     } catch (error) {
-      setError(error.response?.data?.message || 'Failed to add product');
+      if (error.response?.status === 400 && error.response?.data?.message === 'Product ID already exists') {
+        setDuplicateIdModal(true);
+      } else {
+        const message = error.response?.data?.message || 'Failed to add product';
+        setError(message);
+        showActionModal('Add Product Failed', message, 'error');
+      }
     }
   };
 
   const handleUpdateProduct = async (e) => {
     e.preventDefault();
+    const updatedName = formData.product_name;
+    const productCode = selectedProduct?.product_id || formData.product_id;
     try {
       await axios.put(`/api/inventory/${selectedProduct.id}`, formData);
       setShowEditModal(false);
       resetForm();
-      fetchProducts();
+      await fetchProducts();
+      showActionModal('Product Updated', `Updated "${updatedName}" (${productCode}).`);
     } catch (error) {
-      setError(error.response?.data?.message || 'Failed to update product');
+      const message = error.response?.data?.message || 'Failed to update product';
+      setError(message);
+      showActionModal('Update Failed', message, 'error');
     }
   };
 
-  const handleDeleteProduct = async (productId) => {
-    if (!window.confirm('Are you sure you want to delete this product?')) return;
-    
+  const handleDeleteProduct = async (product) => {
+    setDeleteConfirmModal({ open: true, product });
+  };
+
+  const confirmDeleteProduct = async () => {
+    const product = deleteConfirmModal.product;
+    setDeleteConfirmModal({ open: false, product: null });
+    if (!product) return;
     try {
-      await axios.delete(`/api/inventory/${productId}`);
-      fetchProducts();
+      await axios.delete(`/api/inventory/${product.id}`);
+      await fetchProducts();
+      showActionModal('Product Deleted', `Deleted "${product.product_name}" (${product.product_id}).`, 'warning');
     } catch (error) {
-      setError(error.response?.data?.message || 'Failed to delete product');
+      const message = error.response?.data?.message || 'Failed to delete product';
+      setError(message);
+      showActionModal('Delete Failed', message, 'error');
     }
   };
 
   const handleAddStock = async (e) => {
     e.preventDefault();
+    const quantityToAdd = parseFloat(formData.addStock) || 0;
+    const productName = selectedProduct?.product_name;
     try {
       await axios.post(`/api/inventory/${selectedProduct.id}/add-stock`, {
-        quantity: parseFloat(formData.addStock)
+        quantity: quantityToAdd
       });
       setShowAddStockModal(false);
       resetForm();
-      fetchProducts();
+      await fetchProducts();
+      showActionModal('Stock Updated', `Added ${quantityToAdd} ${selectedProduct?.unit || ''} to "${productName}".`);
     } catch (error) {
-      setError(error.response?.data?.message || 'Failed to add stock');
+      const message = error.response?.data?.message || 'Failed to add stock';
+      setError(message);
+      showActionModal('Stock Update Failed', message, 'error');
     }
   };
 
@@ -276,7 +311,7 @@ const Inventory = () => {
                           <Plus className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => handleDeleteProduct(product.id)}
+                          onClick={() => handleDeleteProduct(product)}
                           className="text-red-600 hover:text-red-800"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -572,6 +607,43 @@ const Inventory = () => {
           </form>
         </Modal>
       )}
+
+      {/* Duplicate Product ID Modal */}
+      <SharedModal
+        isOpen={duplicateIdModal}
+        onClose={() => setDuplicateIdModal(false)}
+        title="Duplicate Product ID"
+        type="error"
+        confirmText="OK"
+      >
+        <p>A product with ID <strong>"{formData.product_id}"</strong> already exists.</p>
+        <p className="mt-2">Please use a different Product ID.</p>
+      </SharedModal>
+
+      {/* Delete Confirmation Modal */}
+      <SharedModal
+        isOpen={deleteConfirmModal.open}
+        onClose={() => setDeleteConfirmModal({ open: false, product: null })}
+        title="Delete Product"
+        type="warning"
+        confirmText="Delete"
+        onConfirm={confirmDeleteProduct}
+      >
+        <p>Are you sure you want to delete <strong>"{deleteConfirmModal.product?.product_name}"</strong>?</p>
+        <p className="mt-2">This action cannot be undone.</p>
+      </SharedModal>
+
+      {/* Action Feedback Modal */}
+      <SharedModal
+        isOpen={actionModal.open}
+        onClose={closeActionModal}
+        title={actionModal.title}
+        type={actionModal.type}
+        confirmText="OK"
+        hideClose={false}
+      >
+        <p>{actionModal.message}</p>
+      </SharedModal>
     </div>
   );
 };

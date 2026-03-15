@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 
 // Set base URL for all axios requests
@@ -17,6 +17,16 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const idleTimerRef = useRef(null);
+  const logoutInProgressRef = useRef(false);
+
+  const clearIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -70,17 +80,80 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = useCallback(async (isSessionExpired = false) => {
+    if (logoutInProgressRef.current) return;
+    logoutInProgressRef.current = true;
+
+    try {
+      await axios.post('/api/auth/logout');
+    } catch (e) {
+      // ignore
+    }
     localStorage.removeItem('token');
     delete axios.defaults.headers.common['Authorization'];
     setUser(null);
-  };
+
+    if (isSessionExpired) {
+      setSessionExpired(true);
+    }
+
+    logoutInProgressRef.current = false;
+  }, []);
+
+  const dismissSessionExpired = useCallback(() => {
+    setSessionExpired(false);
+  }, []);
+
+  const resetIdleTimer = useCallback(() => {
+    clearIdleTimer();
+    idleTimerRef.current = setTimeout(() => {
+      logout(true);
+    }, 5 * 60 * 1000);
+  }, [clearIdleTimer, logout]);
+
+  useEffect(() => {
+    if (!user) {
+      clearIdleTimer();
+      return;
+    }
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    const handler = () => resetIdleTimer();
+
+    events.forEach((evt) => window.addEventListener(evt, handler, { passive: true }));
+    resetIdleTimer();
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, handler));
+      clearIdleTimer();
+    };
+  }, [user, resetIdleTimer, clearIdleTimer]);
+
+  useEffect(() => {
+    const id = axios.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const status = error.response?.status;
+        const message = error.response?.data?.message;
+        if (status === 401 && message === 'Session expired') {
+          await logout(true);
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      axios.interceptors.response.eject(id);
+    };
+  }, [logout]);
 
   const value = {
     user,
     login,
     logout,
-    loading
+    loading,
+    sessionExpired,
+    dismissSessionExpired
   };
 
   return (

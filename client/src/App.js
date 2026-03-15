@@ -10,6 +10,7 @@ import Reports from './components/Reports';
 import Receipt from './components/Receipt';
 import Layout from './components/Layout';
 import Users from './components/Users';
+import Modal from './components/shared/Modal';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -75,10 +76,29 @@ function AppRoutes() {
   );
 }
 
+function SessionExpiredModal() {
+  const { sessionExpired, dismissSessionExpired } = useAuth();
+
+  return (
+    <Modal
+      isOpen={sessionExpired}
+      onClose={dismissSessionExpired}
+      title="Session Expired"
+      type="warning"
+      confirmText="Login Again"
+      hideClose
+    >
+      <p>Your session has expired due to inactivity.</p>
+      <p className="mt-2">Please log in again to renew your session.</p>
+    </Modal>
+  );
+}
+
 function App() {
   return (
     <AuthProvider>
       <Router>
+        <SessionExpiredModal />
         <AppRoutes />
       </Router>
     </AuthProvider>

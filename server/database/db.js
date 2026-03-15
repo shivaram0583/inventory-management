@@ -112,6 +112,8 @@ function initializeDatabase() {
     receipt_number TEXT UNIQUE NOT NULL,
     sale_id INTEGER NOT NULL,
     customer_name TEXT,
+    customer_mobile TEXT,
+    customer_address TEXT,
     payment_mode TEXT DEFAULT 'cash',
     total_amount REAL NOT NULL,
     receipt_date DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -123,6 +125,92 @@ function initializeDatabase() {
       console.error('Error creating receipts table:', err.message);
     } else {
       console.log('Receipts table created successfully');
+    }
+  });
+
+  // Migrate receipts table: add customer_mobile and customer_address if missing
+  db.all(`PRAGMA table_info(receipts)`, (err, columns) => {
+    if (err) return;
+    const hasMobile = columns.some((c) => c.name === 'customer_mobile');
+    const hasAddress = columns.some((c) => c.name === 'customer_address');
+    if (!hasMobile) {
+      db.run(`ALTER TABLE receipts ADD COLUMN customer_mobile TEXT`, (e) => {
+        if (!e) console.log('Added customer_mobile column to receipts table');
+      });
+    }
+    if (!hasAddress) {
+      db.run(`ALTER TABLE receipts ADD COLUMN customer_address TEXT`, (e) => {
+        if (!e) console.log('Added customer_address column to receipts table');
+      });
+    }
+  });
+
+  // Create customer_sales table for archival customer-level sales data
+  db.run(`CREATE TABLE IF NOT EXISTS customer_sales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id TEXT NOT NULL,
+    receipt_id INTEGER,
+    customer_name TEXT,
+    customer_mobile TEXT,
+    customer_address TEXT,
+    product_name TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating customer_sales table:', err.message);
+    } else {
+      console.log('Customer sales table created successfully');
+    }
+  });
+
+  // Create purchases table
+  db.run(`CREATE TABLE IF NOT EXISTS purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id TEXT UNIQUE NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity REAL NOT NULL,
+    price_per_unit REAL NOT NULL,
+    total_amount REAL NOT NULL,
+    supplier TEXT,
+    purchase_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    added_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (added_by) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating purchases table:', err.message);
+    } else {
+      console.log('Purchases table created successfully');
+    }
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating sessions table:', err.message);
+    }
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS login_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    role TEXT NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    logged_in_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating login_logs table:', err.message);
     }
   });
 

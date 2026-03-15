@@ -159,6 +159,26 @@ const Receipt = () => {
               <span className="text-sm font-medium text-gray-700">Customer:</span>
             </div>
             <p className="text-sm text-gray-900 ml-6">{receipt.customer_name}</p>
+
+            {receipt.customer_mobile && (
+              <>
+                <div className="flex items-center mt-2 mb-1">
+                  <Phone className="h-4 w-4 text-gray-500 mr-2" />
+                  <span className="text-sm font-medium text-gray-700">Mobile:</span>
+                </div>
+                <p className="text-sm text-gray-900 ml-6">{receipt.customer_mobile}</p>
+              </>
+            )}
+
+            {receipt.customer_address && (
+              <>
+                <div className="flex items-center mt-2 mb-1">
+                  <Mail className="h-4 w-4 text-gray-500 mr-2" />
+                  <span className="text-sm font-medium text-gray-700">Address:</span>
+                </div>
+                <p className="text-sm text-gray-900 ml-6">{receipt.customer_address}</p>
+              </>
+            )}
             
             <div className="flex items-center mt-2 mb-1">
               <CreditCard className="h-4 w-4 text-gray-500 mr-2" />

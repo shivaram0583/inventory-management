@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const { getRow, runQuery, getAll } = require('../database/db');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
@@ -34,8 +35,25 @@ router.post('/login', [
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
+    const sessionId = crypto.randomUUID();
+    await runQuery(
+      'INSERT INTO sessions (id, user_id, last_activity) VALUES (?, ?, CURRENT_TIMESTAMP)',
+      [sessionId, user.id]
+    );
+
+    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
+    const userAgent = (req.headers['user-agent'] || '').toString();
+    
+    // Get current time in India timezone (UTC+5:30)
+    const indiaTime = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ');
+    
+    await runQuery(
+      'INSERT INTO login_logs (user_id, username, role, ip, user_agent, logged_in_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [user.id, user.username, user.role, ip, userAgent, indiaTime]
+    );
+
     const token = jwt.sign(
-      { userId: user.id, username: user.username, role: user.role },
+      { userId: user.id, username: user.username, role: user.role, sessionId },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -50,6 +68,18 @@ router.post('/login', [
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    if (req.sessionId) {
+      await runQuery('DELETE FROM sessions WHERE id = ?', [req.sessionId]);
+    }
+    res.json({ message: 'Logged out' });
+  } catch (error) {
+    console.error('Logout error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -168,6 +198,18 @@ router.delete('/users/:id', [authenticateToken, authorizeRole(['admin'])], async
     res.json({ message: 'User deleted successfully' });
   } catch (error) {
     console.error('Delete user error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/login-logs', [authenticateToken, authorizeRole(['admin'])], async (req, res) => {
+  try {
+    const logs = await getAll(
+      'SELECT id, user_id, username, role, ip, user_agent, logged_in_at FROM login_logs ORDER BY logged_in_at DESC LIMIT 10'
+    );
+    res.json(logs);
+  } catch (error) {
+    console.error('Get login logs error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

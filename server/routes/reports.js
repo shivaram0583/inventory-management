@@ -1,6 +1,6 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
-const { getRow, getAll } = require('../database/db');
+const { authenticateToken, authorizeRole } = require('../middleware/auth');
+const { getRow, getAll, runQuery } = require('../database/db');
 const moment = require('moment');
 
 const router = express.Router();
@@ -37,6 +37,11 @@ router.get('/daily-sales', authenticateToken, async (req, res) => {
       [date]
     );
 
+    const customerSales = await getAll(
+      `SELECT * FROM customer_sales WHERE DATE(sale_date) = ? ORDER BY sale_date DESC`,
+      [date]
+    );
+
     res.json({
       date,
       sales,
@@ -44,7 +49,8 @@ router.get('/daily-sales', authenticateToken, async (req, res) => {
         total_transactions: summary?.total_transactions || 0,
         total_items_sold: summary?.total_items_sold || 0,
         total_revenue: summary?.total_revenue || 0
-      }
+      },
+      customerSales
     });
   } catch (error) {
     console.error('Daily sales report error:', error);
@@ -265,6 +271,111 @@ router.get('/monthly-trend', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Monthly trend report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Purchase report
+router.get('/purchases', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    let dateFilter = '';
+    const params = [];
+
+    if (start_date && end_date) {
+      dateFilter = 'WHERE DATE(pu.purchase_date) BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+    }
+
+    const purchases = await getAll(
+      `SELECT 
+        pu.id,
+        pu.purchase_id,
+        p.product_id AS product_code,
+        p.product_name,
+        p.variety,
+        p.unit,
+        p.category,
+        pu.quantity,
+        pu.price_per_unit,
+        pu.total_amount,
+        pu.supplier,
+        pu.purchase_date,
+        u.username AS added_by
+       FROM purchases pu
+       JOIN products p ON pu.product_id = p.id
+       LEFT JOIN users u ON pu.added_by = u.id
+       ${dateFilter}
+       ORDER BY pu.purchase_date DESC`,
+      params
+    );
+
+    const summary = await getRow(
+      `SELECT 
+        COUNT(*) as total_purchases,
+        SUM(quantity) as total_items,
+        SUM(total_amount) as total_cost
+       FROM purchases
+       ${start_date && end_date ? 'WHERE DATE(purchase_date) BETWEEN ? AND ?' : ''}`,
+      start_date && end_date ? [start_date, end_date] : []
+    );
+
+    res.json({
+      purchases,
+      summary: {
+        total_purchases: summary?.total_purchases || 0,
+        total_items: summary?.total_items || 0,
+        total_cost: summary?.total_cost || 0
+      }
+    });
+  } catch (error) {
+    console.error('Purchase report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Customer sales archive
+router.get('/customer-sales', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    let dateFilter = '';
+    const params = [];
+
+    if (start_date && end_date) {
+      dateFilter = 'WHERE DATE(sale_date) BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+    }
+
+    const records = await getAll(
+      `SELECT *
+       FROM customer_sales
+       ${dateFilter}
+       ORDER BY sale_date DESC, id DESC`,
+      params
+    );
+
+    res.json({
+      records,
+      range: { start_date, end_date }
+    });
+  } catch (error) {
+    console.error('Customer sales archive error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Delete customer sales record (admin only)
+router.delete('/customer-sales/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const record = await getRow('SELECT id FROM customer_sales WHERE id = ?', [id]);
+    if (!record) {
+      return res.status(404).json({ message: 'Record not found' });
+    }
+    await runQuery('DELETE FROM customer_sales WHERE id = ?', [id]);
+    res.json({ message: 'Record deleted successfully' });
+  } catch (error) {
+    console.error('Delete customer sale error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

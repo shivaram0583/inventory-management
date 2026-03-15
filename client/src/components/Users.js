@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import SharedModal from './shared/Modal';
 
 const Users = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [loginLogs, setLoginLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
   const [actionError, setActionError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -14,17 +17,18 @@ const Users = () => {
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState('operator');
   const [creating, setCreating] = useState(false);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState({ open: false, user: null });
 
   const canManage = useMemo(() => user?.role === 'admin', [user]);
 
   const fetchUsers = async () => {
     setLoading(true);
-    setError('');
+    setActionError('');
     try {
       const res = await axios.get('/api/auth/users');
       setUsers(res.data || []);
     } catch (e) {
-      setError(e.response?.data?.message || 'Failed to load users');
+      setActionError(e.response?.data?.message || 'Failed to load users');
     } finally {
       setLoading(false);
     }
@@ -33,6 +37,23 @@ const Users = () => {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  const fetchLoginLogs = async () => {
+    if (!canManage) return;
+    setLogsLoading(true);
+    try {
+      const res = await axios.get('/api/auth/login-logs');
+      setLoginLogs(res.data || []);
+    } catch (e) {
+      console.error('Failed to load login logs:', e);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (canManage) fetchLoginLogs();
+  }, [canManage]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -74,11 +95,15 @@ const Users = () => {
     }
   };
 
-  const handleDelete = async (u) => {
+  const handleDelete = (u) => {
     if (!canManage) return;
+    setDeleteConfirmModal({ open: true, user: u });
+  };
 
-    const ok = window.confirm(`Delete user "${u.username}"?`);
-    if (!ok) return;
+  const confirmDelete = async () => {
+    const u = deleteConfirmModal.user;
+    setDeleteConfirmModal({ open: false, user: null });
+    if (!u) return;
 
     setActionError('');
     setSuccess('');
@@ -98,21 +123,15 @@ const Users = () => {
         <p className="text-sm text-gray-600 mt-1">Admin can create users, disable/enable access, and delete users.</p>
       </div>
 
-      {error && (
+      {actionError && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
-          {error}
+          {actionError}
         </div>
       )}
 
-      {(actionError || success) && (
-        <div
-          className={`p-3 border rounded-md text-sm ${
-            actionError
-              ? 'bg-red-50 border-red-200 text-red-700'
-              : 'bg-green-50 border-green-200 text-green-700'
-          }`}
-        >
-          {actionError || success}
+      {success && (
+        <div className="p-3 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm">
+          {success}
         </div>
       )}
 
@@ -240,6 +259,76 @@ const Users = () => {
           </div>
         )}
       </div>
+
+      {canManage && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-medium text-gray-900">Login History</h2>
+            <button
+              type="button"
+              onClick={fetchLoginLogs}
+              className="px-3 py-2 text-sm rounded-md border border-gray-300 hover:bg-gray-50"
+              disabled={logsLoading}
+            >
+              Refresh
+            </button>
+          </div>
+
+          {logsLoading ? (
+            <div className="text-sm text-gray-600">Loading login logs...</div>
+          ) : loginLogs.length === 0 ? (
+            <div className="text-sm text-gray-600">No login history found.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Login Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Agent</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {loginLogs.map((log) => (
+                    <tr key={log.id}>
+                      <td className="px-4 py-3 text-sm text-gray-900">{log.username}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700 capitalize">{log.role}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {new Date(log.logged_in_at).toLocaleString('en-IN', {
+                          timeZone: 'Asia/Kolkata',
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                          hour12: true
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{log.ip}</td>
+                      <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate" title={log.user_agent}>{log.user_agent}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Delete User Confirmation Modal */}
+      <SharedModal
+        isOpen={deleteConfirmModal.open}
+        onClose={() => setDeleteConfirmModal({ open: false, user: null })}
+        title="Delete User"
+        type="warning"
+        confirmText="Delete"
+        onConfirm={confirmDelete}
+      >
+        <p>Are you sure you want to delete user <strong>"{deleteConfirmModal.user?.username}"</strong>?</p>
+        <p className="mt-2">This action cannot be undone.</p>
+      </SharedModal>
     </div>
   );
 };

@@ -17,9 +17,35 @@ const Dashboard = () => {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [currentTime, setCurrentTime] = useState('');
 
   useEffect(() => {
     fetchDashboardData();
+  }, []);
+
+  useEffect(() => {
+    const updateIndiaTime = () => {
+      const now = new Date();
+      const indiaTime = now.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+      const indiaDate = now.toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      });
+      setCurrentTime(`${indiaDate}, ${indiaTime}`);
+    };
+
+    updateIndiaTime();
+    const interval = setInterval(updateIndiaTime, 1000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const fetchDashboardData = async () => {
@@ -55,13 +81,22 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          {isAdmin ? 'Admin Dashboard' : 'Operator Dashboard'}
-        </h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Welcome back, {user.username}! Here's your business overview.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {isAdmin ? 'Admin Dashboard' : 'Operator Dashboard'}
+          </h1>
+          <p className="mt-1 text-sm text-gray-600">
+            Welcome back, {user.username}! Here's your business overview.
+          </p>
+        </div>
+        <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          <Calendar className="h-5 w-5 text-blue-600" />
+          <div className="text-right">
+            <p className="text-xs text-blue-600 font-medium">India Time (UTC+5:30)</p>
+            <p className="text-sm font-semibold text-gray-900">{currentTime}</p>
+          </div>
+        </div>
       </div>
 
       {/* Quick Stats */}

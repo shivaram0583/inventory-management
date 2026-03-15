@@ -31,7 +31,7 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { items, customer_name, payment_mode = 'cash' } = req.body;
+    const { items, customer_name, customer_mobile, customer_address, payment_mode = 'cash' } = req.body;
     const saleId = generateSaleId();
     
     // Start transaction-like operation
@@ -83,9 +83,9 @@ router.post('/', [
     // Create receipt
     const receiptNumber = generateReceiptNumber();
     const receiptResult = await runQuery(
-      `INSERT INTO receipts (receipt_number, sale_id, customer_name, payment_mode, total_amount)
-       VALUES (?, ?, ?, ?, ?)`,
-      [receiptNumber, saleId, customer_name, payment_mode, totalAmount]
+      `INSERT INTO receipts (receipt_number, sale_id, customer_name, customer_mobile, customer_address, payment_mode, total_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [receiptNumber, saleId, customer_name, customer_mobile || null, customer_address || null, payment_mode, totalAmount]
     );
 
     // Get the complete sale details
@@ -98,6 +98,24 @@ router.post('/', [
     );
 
     const receipt = await getRow('SELECT * FROM receipts WHERE id = ?', [receiptResult.id]);
+
+    await Promise.all(
+      saleItems.map((saleItem) =>
+        runQuery(
+          `INSERT INTO customer_sales (sale_id, receipt_id, customer_name, customer_mobile, customer_address, product_name, quantity, sale_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [
+            saleId,
+            receipt?.id || null,
+            customer_name || null,
+            customer_mobile || null,
+            customer_address || null,
+            saleItem.product.product_name,
+            saleItem.quantity
+          ]
+        )
+      )
+    );
 
     res.status(201).json({
       saleId,

@@ -91,6 +91,18 @@ router.post('/', [
     );
 
     const newProduct = await getRow('SELECT * FROM products WHERE id = ?', [result.id]);
+
+    // Record initial purchase if quantity > 0
+    if (parseFloat(quantity_available) > 0) {
+      const crypto = require('crypto');
+      const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
+      await runQuery(
+        `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, added_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [purchaseId, newProduct.id, quantity_available, purchase_price, quantity_available * purchase_price, supplier || null, req.user.id]
+      );
+    }
+
     res.status(201).json(newProduct);
   } catch (error) {
     console.error('Add product error:', error);
@@ -238,6 +250,16 @@ router.post('/:id/add-stock', [
     );
 
     const updatedProduct = await getRow('SELECT * FROM products WHERE id = ?', [productId]);
+
+    // Record purchase
+    const crypto = require('crypto');
+    const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
+    await runQuery(
+      `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, added_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [purchaseId, updatedProduct.id, quantity, updatedProduct.purchase_price, quantity * updatedProduct.purchase_price, updatedProduct.supplier || null, req.user.id]
+    );
+
     res.json({
       message: `Added ${quantity} ${updatedProduct.unit} to stock`,
       product: updatedProduct
