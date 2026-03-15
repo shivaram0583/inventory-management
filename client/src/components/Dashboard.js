@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fmtTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import { 
@@ -90,11 +91,13 @@ const Dashboard = () => {
             Welcome back, {user.username}! Here's your business overview.
           </p>
         </div>
-        <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
-          <Calendar className="h-5 w-5 text-blue-600" />
-          <div className="text-right">
-            <p className="text-xs text-blue-600 font-medium">India Time (UTC+5:30)</p>
-            <p className="text-sm font-semibold text-gray-900">{currentTime}</p>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+            <Calendar className="h-5 w-5 text-blue-600" />
+            <div className="text-right">
+              <p className="text-xs text-blue-600 font-medium">India Time (UTC+5:30)</p>
+              <p className="text-sm font-semibold text-gray-900">{currentTime}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -173,7 +176,7 @@ const Dashboard = () => {
                   <div className="text-right">
                     <p className="text-sm font-medium text-gray-900">₹{sale.total_amount.toLocaleString()}</p>
                     <p className="text-xs text-gray-500">
-                      {new Date(sale.sale_date).toLocaleTimeString()}
+                      {fmtTime(sale.sale_date)}
                     </p>
                   </div>
                 </div>

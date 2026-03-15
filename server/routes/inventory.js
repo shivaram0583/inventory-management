@@ -48,10 +48,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Add new product (admin only)
+// Add new product (admin and operator)
 router.post('/', [
   authenticateToken,
-  authorizeRole(['admin']),
+  authorizeRole(['admin', 'operator']),
   body('product_id').notEmpty().withMessage('Product ID is required'),
   body('category').isIn(['seeds', 'fertilizers']).withMessage('Category must be seeds or fertilizers'),
   body('product_name').notEmpty().withMessage('Product name is required'),
@@ -110,10 +110,10 @@ router.post('/', [
   }
 });
 
-// Update product (admin only)
+// Update product (admin and operator)
 router.put('/:id', [
   authenticateToken,
-  authorizeRole(['admin']),
+  authorizeRole(['admin', 'operator']),
   body('product_name').optional().notEmpty().withMessage('Product name cannot be empty'),
   body('category').optional().isIn(['seeds', 'fertilizers']).withMessage('Category must be seeds or fertilizers'),
   body('unit').optional().isIn(['kg', 'packet', 'bag']).withMessage('Unit must be kg, packet, or bag'),
@@ -223,10 +223,10 @@ router.delete('/:id', [
   }
 });
 
-// Add stock (admin only)
+// Add stock (admin and operator)
 router.post('/:id/add-stock', [
   authenticateToken,
-  authorizeRole(['admin']),
+  authorizeRole(['admin', 'operator']),
   body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive')
 ], async (req, res) => {
   try {

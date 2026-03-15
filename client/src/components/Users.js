@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
+import useSortableData from '../hooks/useSortableData';
+import SortableHeader from './shared/SortableHeader';
 
 const Users = () => {
   const { user } = useAuth();
@@ -20,6 +22,8 @@ const Users = () => {
   const [deleteConfirmModal, setDeleteConfirmModal] = useState({ open: false, user: null });
 
   const canManage = useMemo(() => user?.role === 'admin', [user]);
+  const { sortedItems: sortedUsers, sortConfig: usersSort, requestSort: sortUsers } = useSortableData(users);
+  const { sortedItems: sortedLogs, sortConfig: logsSort, requestSort: sortLogs } = useSortableData(loginLogs);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -212,14 +216,14 @@ const Users = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <SortableHeader label="Username" sortKey="username" sortConfig={usersSort} onSort={sortUsers} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
+                  <SortableHeader label="Role" sortKey="role" sortConfig={usersSort} onSort={sortUsers} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
+                  <SortableHeader label="Status" sortKey="is_active" sortConfig={usersSort} onSort={sortUsers} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {users.map((u) => (
+                {sortedUsers.map((u) => (
                   <tr key={u.id}>
                     <td className="px-4 py-3 text-sm text-gray-900">{u.username}</td>
                     <td className="px-4 py-3 text-sm text-gray-700 capitalize">{u.role}</td>
@@ -283,15 +287,15 @@ const Users = () => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Login Time</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                    <SortableHeader label="User" sortKey="username" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
+                    <SortableHeader label="Role" sortKey="role" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
+                    <SortableHeader label="Login Time" sortKey="logged_in_at" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
+                    <SortableHeader label="IP Address" sortKey="ip" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Agent</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {loginLogs.map((log) => (
+                  {sortedLogs.map((log) => (
                     <tr key={log.id}>
                       <td className="px-4 py-3 text-sm text-gray-900">{log.username}</td>
                       <td className="px-4 py-3 text-sm text-gray-700 capitalize">{log.role}</td>

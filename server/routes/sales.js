@@ -8,12 +8,12 @@ const router = express.Router();
 
 // Generate unique sale ID
 function generateSaleId() {
-  return 'SALE' + moment().format('YYYYMMDDHHmmss') + Math.random().toString(36).substr(2, 4).toUpperCase();
+  return 'SALE' + moment().utcOffset('+05:30').format('YYYYMMDDHHmmss') + Math.random().toString(36).substr(2, 4).toUpperCase();
 }
 
 // Generate unique receipt number
 function generateReceiptNumber() {
-  return 'R' + moment().format('YYYYMMDD') + Math.random().toString(36).substr(2, 6).toUpperCase();
+  return 'R' + moment().utcOffset('+05:30').format('YYYYMMDD') + Math.random().toString(36).substr(2, 6).toUpperCase();
 }
 
 // Create sale
@@ -145,12 +145,12 @@ router.get('/', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date) {
-      query += ' AND DATE(s.sale_date) >= ?';
+      query += " AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) >= ?";
       params.push(start_date);
     }
 
     if (end_date) {
-      query += ' AND DATE(s.sale_date) <= ?';
+      query += " AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) <= ?";
       params.push(end_date);
     }
 
@@ -217,12 +217,12 @@ router.get('/receipts/all', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date) {
-      query += ' AND DATE(r.receipt_date) >= ?';
+      query += " AND DATE(datetime(r.receipt_date, '+5 hours', '+30 minutes')) >= ?";
       params.push(start_date);
     }
 
     if (end_date) {
-      query += ' AND DATE(r.receipt_date) <= ?';
+      query += " AND DATE(datetime(r.receipt_date, '+5 hours', '+30 minutes')) <= ?";
       params.push(end_date);
     }
 

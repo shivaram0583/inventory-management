@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import SharedModal from './shared/Modal';
+import useSortableData from '../hooks/useSortableData';
+import SortableHeader from './shared/SortableHeader';
 import { 
   Package, 
   Plus, 
@@ -28,6 +30,7 @@ const Inventory = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [duplicateIdModal, setDuplicateIdModal] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState({ open: false, product: null });
+  const { sortedItems: sortedProducts, sortConfig: invSort, requestSort: sortInv } = useSortableData(filteredProducts);
   const [actionModal, setActionModal] = useState({ open: false, title: '', message: '', type: 'success' });
   const [formData, setFormData] = useState({
     product_id: '',
@@ -198,6 +201,7 @@ const Inventory = () => {
   };
 
   const isAdmin = user.role === 'admin';
+  const canEdit = user.role === 'admin' || user.role === 'operator';
 
   if (loading) {
     return (
@@ -209,17 +213,17 @@ const Inventory = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
           <p className="mt-1 text-sm text-gray-600">Manage your seeds and fertilizers inventory</p>
         </div>
-        {isAdmin && (
+        {canEdit && (
           <button
             onClick={() => setShowAddModal(true)}
-            className="btn-primary"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
           >
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="h-4 w-4" />
             Add Product
           </button>
         )}
@@ -233,7 +237,7 @@ const Inventory = () => {
 
       {/* Filters */}
       <div className="card">
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 items-center">
           <div className="flex-1">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -246,7 +250,7 @@ const Inventory = () => {
               />
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <select
               className="input-field"
               value={categoryFilter}
@@ -266,18 +270,18 @@ const Inventory = () => {
           <table className="table">
             <thead>
               <tr>
-                <th>Product ID</th>
-                <th>Name</th>
-                <th>Variety</th>
-                <th>Category</th>
-                <th>Stock</th>
-                <th>Unit Price</th>
-                <th>Supplier</th>
-                {isAdmin && <th>Actions</th>}
+                <SortableHeader label="Product ID" sortKey="product_id" sortConfig={invSort} onSort={sortInv} />
+                <SortableHeader label="Name" sortKey="product_name" sortConfig={invSort} onSort={sortInv} />
+                <SortableHeader label="Variety" sortKey="variety" sortConfig={invSort} onSort={sortInv} />
+                <SortableHeader label="Category" sortKey="category" sortConfig={invSort} onSort={sortInv} />
+                <SortableHeader label="Stock" sortKey="quantity_available" sortConfig={invSort} onSort={sortInv} />
+                <SortableHeader label="Unit Price" sortKey="selling_price" sortConfig={invSort} onSort={sortInv} />
+                <SortableHeader label="Supplier" sortKey="supplier" sortConfig={invSort} onSort={sortInv} />
+                {canEdit && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {filteredProducts.map((product) => (
+              {sortedProducts.map((product) => (
                 <tr key={product.id} className={product.quantity_available <= 10 ? 'bg-red-50' : ''}>
                   <td className="font-medium">{product.product_id}</td>
                   <td>{product.product_name}</td>
@@ -295,27 +299,32 @@ const Inventory = () => {
                   </td>
                   <td>₹{product.selling_price}/{product.unit}</td>
                   <td>{product.supplier || '-'}</td>
-                  {isAdmin && (
+                  {canEdit && (
                     <td>
                       <div className="flex space-x-2">
                         <button
                           onClick={() => openEditModal(product)}
                           className="text-blue-600 hover:text-blue-800"
+                          title="Edit product"
                         >
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => openAddStockModal(product)}
                           className="text-green-600 hover:text-green-800"
+                          title="Add stock"
                         >
                           <Plus className="h-4 w-4" />
                         </button>
-                        <button
-                          onClick={() => handleDeleteProduct(product)}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDeleteProduct(product)}
+                            className="text-red-600 hover:text-red-800"
+                            title="Delete product"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   )}

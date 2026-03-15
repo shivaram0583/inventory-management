@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fmtDate, fmtTime } from '../utils/dateUtils';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
 import axios from 'axios';
@@ -133,17 +134,13 @@ const Receipt = () => {
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-medium text-gray-600">Date:</span>
               <span className="text-sm text-gray-900">
-                {new Date(receipt.receipt_date).toLocaleDateString('en-IN', {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                })}
+                {fmtDate(receipt.receipt_date)}
               </span>
             </div>
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-medium text-gray-600">Time:</span>
               <span className="text-sm text-gray-900">
-                {new Date(receipt.receipt_date).toLocaleTimeString('en-IN')}
+                {fmtTime(receipt.receipt_date)}
               </span>
             </div>
             <div className="flex justify-between items-center">

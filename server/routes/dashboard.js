@@ -11,7 +11,7 @@ router.get('/admin', [
   authorizeRole(['admin'])
 ], async (req, res) => {
   try {
-    const today = moment().format('YYYY-MM-DD');
+    const today = moment().utcOffset('+05:30').format('YYYY-MM-DD');
     
     // Total stock available
     const totalStock = await getRow(
@@ -29,7 +29,7 @@ router.get('/admin', [
         SUM(quantity_sold) as items_sold,
         SUM(total_amount) as revenue
        FROM sales
-       WHERE DATE(sale_date) = ?`,
+       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?`,
       [today]
     );
 
@@ -54,12 +54,12 @@ router.get('/admin', [
     // Sales comparison (last 7 days)
     const weekComparison = await getAll(
       `SELECT 
-        DATE(sale_date) as date,
+        DATE(datetime(sale_date, '+5 hours', '+30 minutes')) as date,
         SUM(total_amount) as revenue,
         COUNT(DISTINCT sale_id) as transactions
        FROM sales
-       WHERE DATE(sale_date) >= date('now', '-7 days')
-       GROUP BY DATE(sale_date)
+       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) >= date(datetime('now', '+5 hours', '+30 minutes'), '-7 days')
+       GROUP BY DATE(datetime(sale_date, '+5 hours', '+30 minutes'))
        ORDER BY date DESC`
     );
 
@@ -71,7 +71,7 @@ router.get('/admin', [
         SUM(p.quantity_available) as total_stock,
         COALESCE(SUM(s.total_amount), 0) as revenue
        FROM products p
-       LEFT JOIN sales s ON p.id = s.product_id AND DATE(s.sale_date) = ?
+       LEFT JOIN sales s ON p.id = s.product_id AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) = ?
        GROUP BY p.category`,
       [today]
     );
@@ -113,7 +113,7 @@ router.get('/operator', [
   authorizeRole(['operator', 'admin'])
 ], async (req, res) => {
   try {
-    const today = moment().format('YYYY-MM-DD');
+    const today = moment().utcOffset('+05:30').format('YYYY-MM-DD');
     
     // Available inventory
     const inventory = await getAll(
@@ -131,7 +131,7 @@ router.get('/operator', [
         SUM(quantity_sold) as items_sold,
         SUM(total_amount) as revenue
        FROM sales
-       WHERE DATE(sale_date) = ? AND operator_id = ?`,
+       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ? AND operator_id = ?`,
       [today, req.user.id]
     );
 
@@ -157,7 +157,7 @@ router.get('/operator', [
         p.selling_price,
         COUNT(s.id) as sales_count
        FROM products p
-       LEFT JOIN sales s ON p.id = s.product_id AND DATE(s.sale_date) = ?
+       LEFT JOIN sales s ON p.id = s.product_id AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) = ?
        WHERE p.quantity_available > 0
        GROUP BY p.id, p.product_name, p.variety, p.quantity_available, p.unit, p.selling_price
        ORDER BY sales_count DESC, p.product_name
@@ -184,17 +184,17 @@ router.get('/operator', [
 // Quick stats widget
 router.get('/quick-stats', authenticateToken, async (req, res) => {
   try {
-    const today = moment().format('YYYY-MM-DD');
-    const thisMonth = moment().format('YYYY-MM');
+    const today = moment().utcOffset('+05:30').format('YYYY-MM-DD');
+    const thisMonth = moment().utcOffset('+05:30').format('YYYY-MM');
     
     const stats = await getRow(
       `SELECT 
         (SELECT COUNT(*) FROM products) as total_products,
         (SELECT SUM(quantity_available) FROM products) as total_stock,
-        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE DATE(sale_date) = ?) as today_transactions,
-        (SELECT SUM(total_amount) FROM sales WHERE DATE(sale_date) = ?) as today_revenue,
-        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE strftime('%Y-%m', sale_date) = ?) as month_transactions,
-        (SELECT SUM(total_amount) FROM sales WHERE strftime('%Y-%m', sale_date) = ?) as month_revenue`,
+        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as today_transactions,
+        (SELECT SUM(total_amount) FROM sales WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as today_revenue,
+        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE strftime('%Y-%m', datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as month_transactions,
+        (SELECT SUM(total_amount) FROM sales WHERE strftime('%Y-%m', datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as month_revenue`,
       [today, today, thisMonth, thisMonth]
     );
 

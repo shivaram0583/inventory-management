@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { getISTDateString, fmtDateTime } from '../utils/dateUtils';
 import SharedModal from './shared/Modal';
+import useSortableData from '../hooks/useSortableData';
+import SortableHeader from './shared/SortableHeader';
+import ReportDownloader from './ReportDownloader';
 import { 
   FileText, 
   Calendar, 
@@ -20,13 +24,20 @@ const Reports = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [activeTab, setActiveTab] = useState('daily');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getISTDateString());
+  const [startDate, setStartDate] = useState(getISTDateString());
+  const [endDate, setEndDate] = useState(getISTDateString());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleteModal, setDeleteModal] = useState({ open: false, id: null, label: '' });
+
+  const { sortedItems: sortedSales, sortConfig: salesSort, requestSort: sortSales } = useSortableData(data?.sales || []);
+  const { sortedItems: sortedCustSales, sortConfig: custSalesSort, requestSort: sortCustSales } = useSortableData(data?.customerSales || []);
+  const { sortedItems: sortedProducts, sortConfig: productsSort, requestSort: sortProducts } = useSortableData(data?.products || []);
+  const { sortedItems: sortedPurchases, sortConfig: purchasesSort, requestSort: sortPurchases } = useSortableData(data?.purchases || []);
+  const { sortedItems: sortedArchive, sortConfig: archiveSort, requestSort: sortArchive } = useSortableData(data?.records || []);
+  const { sortedItems: sortedTrend, sortConfig: trendSort, requestSort: sortTrend } = useSortableData(data?.trend || []);
 
   const formatCurrency = (value) => {
     const amount = Number(value);
@@ -169,15 +180,15 @@ const Reports = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Product</th>
-                  <th>Variety</th>
-                  <th>Quantity Sold</th>
-                  <th>Total Amount</th>
-                  <th>Transactions</th>
+                  <SortableHeader label="Product" sortKey="product_name" sortConfig={salesSort} onSort={sortSales} />
+                  <SortableHeader label="Variety" sortKey="variety" sortConfig={salesSort} onSort={sortSales} />
+                  <SortableHeader label="Quantity Sold" sortKey="total_quantity" sortConfig={salesSort} onSort={sortSales} />
+                  <SortableHeader label="Total Amount" sortKey="total_amount" sortConfig={salesSort} onSort={sortSales} />
+                  <SortableHeader label="Transactions" sortKey="transaction_count" sortConfig={salesSort} onSort={sortSales} />
                 </tr>
               </thead>
               <tbody>
-                {(data.sales || []).map((sale, index) => (
+                {sortedSales.map((sale, index) => (
                   <tr key={index}>
                     <td className="font-medium">{sale.product_name}</td>
                     <td>{sale.variety || '-'}</td>
@@ -206,30 +217,23 @@ const Reports = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Customer</th>
-                  <th>Mobile</th>
+                  <SortableHeader label="Customer" sortKey="customer_name" sortConfig={custSalesSort} onSort={sortCustSales} />
+                  <SortableHeader label="Mobile" sortKey="customer_mobile" sortConfig={custSalesSort} onSort={sortCustSales} />
                   <th>Address</th>
-                  <th>Item</th>
-                  <th>Quantity</th>
-                  <th>Time</th>
+                  <SortableHeader label="Item" sortKey="product_name" sortConfig={custSalesSort} onSort={sortCustSales} />
+                  <SortableHeader label="Quantity" sortKey="quantity" sortConfig={custSalesSort} onSort={sortCustSales} />
+                  <SortableHeader label="Time" sortKey="sale_date" sortConfig={custSalesSort} onSort={sortCustSales} />
                 </tr>
               </thead>
               <tbody>
-                {(data.customerSales || []).map((cs, idx) => (
+                {sortedCustSales.map((cs, idx) => (
                   <tr key={idx}>
                     <td className="font-medium">{cs.customer_name || '-'}</td>
                     <td>{cs.customer_mobile || '-'}</td>
                     <td>{cs.customer_address || '-'}</td>
                     <td>{cs.product_name}</td>
                     <td>{cs.quantity}</td>
-                    <td className="text-sm">
-                      {new Date(cs.sale_date).toLocaleTimeString('en-IN', {
-                        timeZone: 'Asia/Kolkata',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true
-                      })}
-                    </td>
+                    <td className="text-sm">{fmtDateTime(cs.sale_date)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -383,16 +387,16 @@ const Reports = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Product ID</th>
-                  <th>Name</th>
-                  <th>Variety</th>
-                  <th>Category</th>
-                  <th>Stock</th>
-                  <th>Value</th>
+                  <SortableHeader label="Product ID" sortKey="product_id" sortConfig={productsSort} onSort={sortProducts} />
+                  <SortableHeader label="Name" sortKey="product_name" sortConfig={productsSort} onSort={sortProducts} />
+                  <SortableHeader label="Variety" sortKey="variety" sortConfig={productsSort} onSort={sortProducts} />
+                  <SortableHeader label="Category" sortKey="category" sortConfig={productsSort} onSort={sortProducts} />
+                  <SortableHeader label="Stock" sortKey="quantity_available" sortConfig={productsSort} onSort={sortProducts} />
+                  <SortableHeader label="Value" sortKey="quantity_available" sortConfig={productsSort} onSort={sortProducts} />
                 </tr>
               </thead>
               <tbody>
-                {(data.products || []).map((product, index) => (
+                {sortedProducts.map((product, index) => (
                   <tr key={index} className={product.quantity_available <= 10 ? 'bg-red-50' : ''}>
                     <td className="font-medium">{product.product_id}</td>
                     <td>{product.product_name}</td>
@@ -471,14 +475,14 @@ const Reports = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Month</th>
-                  <th>Transactions</th>
-                  <th>Items Sold</th>
-                  <th>Revenue</th>
+                  <SortableHeader label="Month" sortKey="month" sortConfig={trendSort} onSort={sortTrend} />
+                  <SortableHeader label="Transactions" sortKey="transactions" sortConfig={trendSort} onSort={sortTrend} />
+                  <SortableHeader label="Items Sold" sortKey="items_sold" sortConfig={trendSort} onSort={sortTrend} />
+                  <SortableHeader label="Revenue" sortKey="revenue" sortConfig={trendSort} onSort={sortTrend} />
                 </tr>
               </thead>
               <tbody>
-                {(data.trend || []).map((month, index) => (
+                {sortedTrend.map((month, index) => (
                   <tr key={index}>
                     <td className="font-medium">{month.month}</td>
                     <td>{month.transactions}</td>
@@ -539,19 +543,19 @@ const Reports = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Purchase ID</th>
-                  <th>Product</th>
-                  <th>Category</th>
-                  <th>Quantity</th>
-                  <th>Price/Unit</th>
-                  <th>Total</th>
-                  <th>Supplier</th>
-                  <th>Date</th>
-                  <th>Added By</th>
+                  <SortableHeader label="Purchase ID" sortKey="purchase_id" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Product" sortKey="product_name" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Category" sortKey="category" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Quantity" sortKey="quantity" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Price/Unit" sortKey="price_per_unit" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Total" sortKey="total_amount" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Supplier" sortKey="supplier" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Date" sortKey="purchase_date" sortConfig={purchasesSort} onSort={sortPurchases} />
+                  <SortableHeader label="Added By" sortKey="added_by" sortConfig={purchasesSort} onSort={sortPurchases} />
                 </tr>
               </thead>
               <tbody>
-                {(data.purchases || []).map((purchase) => (
+                {sortedPurchases.map((purchase) => (
                   <tr key={purchase.id}>
                     <td className="font-medium text-xs">{purchase.purchase_id}</td>
                     <td>
@@ -565,17 +569,7 @@ const Reports = () => {
                     <td>₹{formatCurrency(purchase.price_per_unit)}</td>
                     <td>₹{formatCurrency(purchase.total_amount)}</td>
                     <td>{purchase.supplier || '-'}</td>
-                    <td className="text-sm">
-                      {new Date(purchase.purchase_date).toLocaleString('en-IN', {
-                        timeZone: 'Asia/Kolkata',
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true
-                      })}
-                    </td>
+                    <td className="text-sm">{fmtDateTime(purchase.purchase_date)}</td>
                     <td>{purchase.added_by || '-'}</td>
                   </tr>
                 ))}
@@ -607,18 +601,18 @@ const Reports = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Sale ID</th>
-                  <th>Customer</th>
-                  <th>Mobile</th>
+                  <SortableHeader label="Sale ID" sortKey="sale_id" sortConfig={archiveSort} onSort={sortArchive} />
+                  <SortableHeader label="Customer" sortKey="customer_name" sortConfig={archiveSort} onSort={sortArchive} />
+                  <SortableHeader label="Mobile" sortKey="customer_mobile" sortConfig={archiveSort} onSort={sortArchive} />
                   <th>Address</th>
-                  <th>Item</th>
-                  <th>Quantity</th>
-                  <th>Date</th>
+                  <SortableHeader label="Item" sortKey="product_name" sortConfig={archiveSort} onSort={sortArchive} />
+                  <SortableHeader label="Quantity" sortKey="quantity" sortConfig={archiveSort} onSort={sortArchive} />
+                  <SortableHeader label="Date" sortKey="sale_date" sortConfig={archiveSort} onSort={sortArchive} />
                   {isAdmin && <th>Action</th>}
                 </tr>
               </thead>
               <tbody>
-                {records.map((r) => (
+                {sortedArchive.map((r) => (
                   <tr key={r.id}>
                     <td className="text-xs font-mono">{r.sale_id}</td>
                     <td className="font-medium">{r.customer_name || '-'}</td>
@@ -626,17 +620,7 @@ const Reports = () => {
                     <td>{r.customer_address || '-'}</td>
                     <td>{r.product_name}</td>
                     <td>{r.quantity}</td>
-                    <td className="text-sm">
-                      {new Date(r.sale_date).toLocaleString('en-IN', {
-                        timeZone: 'Asia/Kolkata',
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true
-                      })}
-                    </td>
+                    <td className="text-sm">{fmtDateTime(r.sale_date)}</td>
                     {isAdmin && (
                       <td>
                         <button
@@ -684,11 +668,16 @@ const Reports = () => {
     }
   };
 
+  const tabHasFilters = ['daily', 'range', 'performance', 'purchases', 'customerSales'].includes(activeTab);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
-        <p className="mt-1 text-sm text-gray-600">View detailed reports and business insights</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
+          <p className="mt-1 text-sm text-gray-600">View detailed reports and business insights</p>
+        </div>
+        {isAdmin && <ReportDownloader />}
       </div>
 
       {/* Tabs */}
@@ -720,6 +709,7 @@ const Reports = () => {
       </div>
 
       {/* Filters */}
+      {tabHasFilters && (
       <div className="card">
         <div className="flex flex-wrap gap-4 items-end">
           {activeTab === 'daily' && (
@@ -758,6 +748,7 @@ const Reports = () => {
           )}
         </div>
       </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-md p-4">
