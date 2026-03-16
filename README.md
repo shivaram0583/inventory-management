@@ -1,226 +1,766 @@
-# Inventory Management System
+﻿# Shri Lakshmi Vigneswara Traders — Inventory Management System
 
-A comprehensive inventory management system for Shri Lakshmi Vigneswara Traders, a business dealing in seeds and fertilizers.
+> **Business Contact:** +91 70369 53734 · dvvshivaram@gmail.com
+> **Developed by:** dvvshivaram © 2026
 
-## Features
+A full-stack web application for managing inventory, sales, purchases, receipts,
+and business analytics for an agricultural inputs trading business (seeds & fertilizers).
 
-### Core Functionality
-- **Inventory Management**: Add, edit, delete products and manage stock levels
-- **Sales Management**: Process sales with automatic stock deduction
-- **Receipt Generation**: Generate printable receipts for all transactions
-- **Reporting & Analytics**: Daily sales reports, inventory status, and performance analytics
-- **Role-based Access**: Admin and Operator roles with appropriate permissions
+---
 
-### User Roles
-- **Business Owner (Admin)**: Full control over inventory, users, and reports
-- **Shop In-Charge (Operator)**: Manage daily sales and view inventory
+## Table of Contents
 
-### Key Features
-- Real-time stock monitoring with low stock alerts
-- Date-based sales tracking and filtering
-- Product search and categorization (Seeds/Fertilizers)
-- Comprehensive reporting with multiple views
-- Modern, responsive UI built with React and Tailwind CSS
+1. [Tech Stack](#tech-stack)
+2. [Project Structure](#project-structure)
+3. [High-Level Design (HLD)](#high-level-design-hld)
+4. [Low-Level Design (LLD)](#low-level-design-lld)
+5. [API Reference](#api-reference)
+6. [Setup & Installation](#setup--installation)
+7. [Environment Variables](#environment-variables)
+8. [Default Credentials](#default-credentials)
+9. [Feature Guide](#feature-guide)
+10. [Deployment](#deployment)
+
+---
 
 ## Tech Stack
 
-### Backend
-- **Node.js** with Express.js
-- **SQLite** database
-- **JWT** authentication
-- **bcryptjs** for password hashing
+### Backend (`server/`)
 
-### Frontend
-- **React 18** with React Router
-- **Tailwind CSS** for styling
-- **Lucide React** for icons
-- **Axios** for API calls
-- **React-to-print** for receipt printing
+| Dependency | Version | Purpose |
+|---|---|---|
+| Node.js + Express | ^4.18.2 | HTTP server & routing |
+| SQLite3 | ^5.1.6 | Embedded relational database |
+| jsonwebtoken | ^9.0.2 | JWT token generation & verification |
+| bcryptjs | ^2.4.3 | Password hashing (salt rounds: 10) |
+| express-validator | ^7.0.1 | Request body validation |
+| moment | ^2.29.4 | Date/time formatting (IST UTC+5:30) |
+| dotenv | ^16.3.1 | Environment variable loading |
+| cors | ^2.8.5 | Cross-origin request handling |
+| nodemon | ^3.0.1 | Dev auto-restart |
 
-## Installation
+### Frontend (`client/`)
 
-### Prerequisites
-- Node.js (v14 or higher)
-- npm or yarn
+| Dependency | Version | Purpose |
+|---|---|---|
+| React | ^18.2.0 | UI framework |
+| React Router DOM | ^6.8.1 | Client-side routing |
+| Axios | ^1.3.4 | HTTP client (proxy → localhost:5000) |
+| Tailwind CSS | ^3.2.7 | Utility-first styling |
+| Lucide React | ^0.263.1 | Icon library |
+| Recharts | ^3.8.0 | Charts & data visualisation |
+| react-to-print | ^2.14.7 | Browser print for receipts |
 
-### Setup Instructions
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd inventory-management-system
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm run install-deps
-   ```
-   Or install manually:
-   ```bash
-   npm install
-   cd server && npm install
-   cd ../client && npm install
-   ```
-
-3. **Environment Setup**
-   - Navigate to `server/` directory
-   - Create `.env` file (already provided with default values)
-   - Update `JWT_SECRET` with a secure secret key for production
-
-4. **Start the application**
-   ```bash
-   npm run dev
-   ```
-   This will start both the backend server (port 5000) and frontend development server (port 3000)
-
-## Default Credentials
-
-### Admin User
-- **Username**: admin
-- **Password**: admin123
-
-### Operator User
-- **Username**: operator
-- **Password**: operator123
-
-## Usage
-
-### For Admin Users
-1. **Dashboard**: View overall business metrics, low stock alerts, and recent activity
-2. **Inventory Management**: Add new products, update stock levels, manage suppliers
-3. **Sales**: View all sales transactions and generate reports
-4. **Reports**: Access comprehensive business analytics and reports
-5. **User Management**: Create and manage operator accounts
-
-### For Operator Users
-1. **Dashboard**: View available inventory and today's sales summary
-2. **Sales**: Process customer sales with intuitive cart interface
-3. **Reports**: View daily sales and basic inventory status
+---
 
 ## Project Structure
 
 ```
-inventory-management-system/
-├── server/                 # Backend Node.js application
-│   ├── database/          # Database setup and schemas
-│   ├── middleware/        # Authentication middleware
-│   ├── routes/           # API routes
-│   ├── index.js          # Main server file
-│   └── package.json      # Backend dependencies
-├── client/               # React frontend application
-│   ├── public/           # Static files
-│   ├── src/              # React source code
-│   │   ├── components/   # React components
-│   │   └── contexts/     # React contexts
-│   ├── package.json      # Frontend dependencies
-│   └── tailwind.config.js
-└── README.md            # This file
+inventory-management/
+├── client/
+│   └── src/
+│       ├── App.js                   # Route definitions & ProtectedRoute / AdminRoute guards
+│       ├── index.css                # Global Tailwind styles & animations
+│       ├── contexts/AuthContext.js  # JWT auth context + axios header injection
+│       ├── hooks/useSortableData.js # Reusable multi-column table sort hook
+│       ├── utils/
+│       │   ├── dateUtils.js         # UTC→IST display formatters + getISTDateString()
+│       │   └── csvExport.js         # CSV download utility
+│       └── components/
+│           ├── Login.js             # Login page
+│           ├── Layout.js            # Sidebar nav + copyright footer
+│           ├── Dashboard.js         # Role-specific KPI dashboard
+│           ├── Inventory.js         # Product CRUD + stock management
+│           ├── Sales.js             # POS / cart-based sales screen
+│           ├── Purchases.js         # Purchase recording + history + category mgmt
+│           ├── Receipt.js           # Printable receipt view
+│           ├── Reports.js           # Analytics tabs + Recharts charts
+│           ├── ReportDownloader.js  # CSV export for all report types
+│           ├── Users.js             # User management (admin only)
+│           └── shared/
+│               ├── Modal.js         # Reusable confirm/alert modal
+│               └── SortableHeader.js# Sortable table column header
+│
+└── server/
+    ├── index.js                     # CORS, body parser, route mounts, static serve
+    ├── .env                         # Secret env vars (not committed)
+    ├── Dockerfile
+    ├── middleware/auth.js           # JWT verify + 5-min idle session enforcement
+    ├── database/db.js               # SQLite init, CREATE TABLE, schema migrations
+    └── routes/
+        ├── auth.js                  # /api/auth
+        ├── inventory.js             # /api/inventory
+        ├── sales.js                 # /api/sales
+        ├── purchases.js             # /api/purchases
+        ├── reports.js               # /api/reports
+        └── dashboard.js             # /api/dashboard
 ```
 
-## API Endpoints
+---
 
-### Authentication
-- `POST /api/auth/login` - User login
-- `GET /api/auth/me` - Get current user
-- `POST /api/auth/users` - Create user (admin only)
-- `GET /api/auth/users` - Get all users (admin only)
+## High-Level Design (HLD)
 
-### Inventory
-- `GET /api/inventory` - Get all products
-- `GET /api/inventory/:id` - Get single product
-- `POST /api/inventory` - Add product (admin only)
-- `PUT /api/inventory/:id` - Update product (admin only)
-- `DELETE /api/inventory/:id` - Delete product (admin only)
-- `POST /api/inventory/:id/add-stock` - Add stock (admin only)
+### System Architecture
 
-### Sales
-- `POST /api/sales` - Create sale
-- `GET /api/sales` - Get sales (with date filtering)
-- `GET /api/sales/:saleId` - Get sale details
-- `GET /api/sales/receipts/all` - Get all receipts
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        Browser (Client)                           │
+│  React 18 SPA · React Router v6 · Tailwind CSS · Recharts        │
+│                                                                   │
+│  Dashboard  Inventory  Sales  Purchases  Reports  Users  Receipt  │
+│                    AuthContext (JWT)                              │
+│                    Axios (dev proxy → :5000)                      │
+└─────────────────────────────┬────────────────────────────────────┘
+                              │  HTTP / REST  JSON
+                              │  Authorization: Bearer <JWT>
+┌─────────────────────────────▼────────────────────────────────────┐
+│              Express.js API Server  (port 5000)                   │
+│                                                                   │
+│   CORS MW    authenticateToken (JWT + session)    authorizeRole   │
+│   express-validator (body validation on all mutating endpoints)   │
+│                                                                   │
+│  /api/auth  /api/inventory  /api/sales  /api/purchases            │
+│  /api/reports               /api/dashboard                        │
+└─────────────────────────────┬────────────────────────────────────┘
+                              │  sqlite3 driver
+┌─────────────────────────────▼────────────────────────────────────┐
+│              SQLite Database  (inventory.db)                      │
+│  users · products · sales · receipts · purchases                  │
+│  customer_sales · product_categories · sessions · login_logs      │
+└────────────────────────────────────────────────────────────────────┘
+```
 
-### Reports
-- `GET /api/reports/daily-sales` - Daily sales report
-- `GET /api/reports/sales-range` - Sales for date range
-- `GET /api/reports/inventory-status` - Inventory status
-- `GET /api/reports/product-performance` - Product performance
-- `GET /api/reports/monthly-trend` - Monthly sales trend
+### Key Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| **SQLite** | Zero-config embedded DB for single-node small-business deployment |
+| **UTC storage for all timestamps** | `CURRENT_TIMESTAMP` is UTC; frontend `dateUtils.js` converts to IST for display |
+| **Session + JWT dual auth** | JWT carries identity; DB `sessions` table enables 5-min idle timeout and instant logout |
+| **Two roles only** | `admin` (full access) and `operator` (no user management, no deletes) |
+| **Dynamic categories** | `product_categories` table — owner adds/removes categories at runtime without code changes |
+| **Monorepo** | Client + server share one git repo; root scripts run both concurrently |
+
+### Data Flow — Making a Sale
+
+```
+Operator fills cart → POST /api/sales
+  ├─ Validate stock availability per item
+  ├─ INSERT INTO sales (one row per line item, shared sale_id)
+  ├─ UPDATE products.quantity_available  (deduct sold qty)
+  ├─ INSERT INTO receipts  (customer info + unique receipt_number)
+  ├─ INSERT INTO customer_sales  (archival denormalised snapshot)
+  └─ Return { saleId, receiptNumber, items, receipt }
+         ↓
+Frontend navigates to /receipt/:saleId
+  ├─ GET /api/sales/:saleId  → line items + receipt row
+  ├─ Render printable receipt with business details
+  └─ PUT /api/sales/receipts/:id/print  (mark printed)
+```
+
+### Data Flow — Recording a Purchase
+
+```
+Purchases tab → select product (or create new inline)
+  └─ Fill qty, price/unit, supplier, date
+  └─ "Review & Confirm" → confirmation popup (no API call yet)
+  └─ Operator confirms → POST /api/purchases
+       ├─ Convert user's IST date → UTC for storage
+       ├─ INSERT INTO purchases
+       └─ UPDATE products SET quantity_available += qty,
+                               purchase_price = new_price
+```
+
+### Data Flow — Edit Purchase
+
+```
+Purchase History table → Edit (pencil icon) → pre-filled modal
+  → PUT /api/purchases/:id
+       ├─ qty_diff = new_qty - old_qty
+       ├─ UPDATE products.quantity_available += qty_diff
+       ├─ UPDATE products.purchase_price = new_price
+       └─ UPDATE purchases row
+```
+
+---
+
+## Low-Level Design (LLD)
+
+### Database Schema
+
+#### `users`
+| Column | Type | Constraints |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| username | TEXT | UNIQUE NOT NULL |
+| password | TEXT | bcrypt hash, NOT NULL |
+| role | TEXT | CHECK IN ('admin','operator') |
+| is_active | INTEGER | DEFAULT 1, CHECK IN (0,1) |
+| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+
+#### `product_categories`
+| Column | Type | Constraints |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| name | TEXT | UNIQUE NOT NULL (lowercase) |
+| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP |
+
+> Seeded with `seeds` and `fertilizers` on first run. New categories added from Purchases → Manage Categories.
+
+#### `products`
+| Column | Type | Constraints |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| product_id | TEXT | UNIQUE NOT NULL (user code e.g. PROD001) |
+| category | TEXT | Validated against product_categories.name |
+| product_name | TEXT | NOT NULL |
+| variety | TEXT | nullable |
+| quantity_available | REAL | DEFAULT 0 |
+| unit | TEXT | CHECK IN ('kg','packet','bag','liters') |
+| purchase_price | REAL | DEFAULT 0 |
+| selling_price | REAL | DEFAULT 0 |
+| supplier | TEXT | nullable |
+| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+| updated_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+
+#### `sales`
+| Column | Type | Constraints |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| sale_id | TEXT | UNIQUE — `SALE{IST-YYYYMMDDHHmmss}{4rand}` |
+| product_id | INTEGER | FK → products.id |
+| quantity_sold | REAL | NOT NULL |
+| price_per_unit | REAL | NOT NULL |
+| total_amount | REAL | NOT NULL |
+| sale_date | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+| operator_id | INTEGER | FK → users.id |
+
+> **One row per line item.** Multiple rows share the same `sale_id` for a multi-product transaction.
+
+#### `receipts`
+| Column | Type | Constraints |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| receipt_number | TEXT | UNIQUE — `R-{YYYYMMDD}-{customerName15}-{2rand}` |
+| sale_id | INTEGER | FK → sales.id |
+| customer_name | TEXT | nullable |
+| customer_mobile | TEXT | nullable |
+| customer_address | TEXT | nullable |
+| payment_mode | TEXT | DEFAULT 'cash' — (cash / card / upi) |
+| total_amount | REAL | NOT NULL |
+| receipt_date | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+| printed | BOOLEAN | DEFAULT FALSE |
+
+#### `purchases`
+| Column | Type | Constraints |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| purchase_id | TEXT | UNIQUE — `PUR{IST-YYYYMMDDHHmmss}{4hexChars}` |
+| product_id | INTEGER | FK → products.id |
+| quantity | REAL | NOT NULL |
+| price_per_unit | REAL | NOT NULL |
+| total_amount | REAL | NOT NULL |
+| supplier | TEXT | nullable |
+| purchase_date | DATETIME | UTC — converted from user's IST date selection on write |
+| added_by | INTEGER | FK → users.id |
+| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+
+#### `customer_sales`
+Archival denormalised snapshot; survives product edits/deletes.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| sale_id | TEXT | Reference to sale |
+| receipt_id | INTEGER | Reference to receipt |
+| customer_name / mobile / address | TEXT | Snapshots at time of sale |
+| product_name | TEXT | Snapshot |
+| quantity | REAL | Snapshot |
+| sale_date | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+
+#### `sessions`
+| Column | Type | Purpose |
+|---|---|---|
+| id | TEXT | PK (UUID v4) |
+| user_id | INTEGER | FK → users.id |
+| last_activity | DATETIME | Updated on every authenticated request |
+
+> Session expires when `last_activity` is more than **300 seconds** (5 min) ago — enforced in `auth.js` on every request.
+
+#### `login_logs`
+| Column | Type | Purpose |
+|---|---|---|
+| id | INTEGER | PK AUTOINCREMENT |
+| user_id / username / role | — | Snapshots |
+| ip | TEXT | Client IP (handles X-Forwarded-For) |
+| user_agent | TEXT | Browser user-agent string |
+| logged_in_at | DATETIME | Stored as IST string for audit readability |
+
+---
+
+### Backend Architecture
+
+#### Route mount order (`server/index.js`)
+```
+Express app
+  cors({ origin:'*', methods:['GET','POST','PUT','DELETE'] })
+  express.json()
+  /api/auth        → routes/auth.js
+  /api/inventory   → routes/inventory.js
+  /api/sales       → routes/sales.js
+  /api/purchases   → routes/purchases.js
+  /api/reports     → routes/reports.js
+  /api/dashboard   → routes/dashboard.js
+  /* (production)  → serve React build via express.static
+```
+
+#### Auth Middleware (`middleware/auth.js`)
+```
+authenticateToken(req, res, next):
+  1. Extract Bearer <token> from Authorization header  →  401 if absent
+  2. jwt.verify(token, JWT_SECRET)  →  { userId, username, role, sessionId }
+  3. SELECT session WHERE id = sessionId
+     ├─ not found           →  401 "Session expired"
+     └─ idle_seconds > 300  →  DELETE session  →  401 "Session expired"
+  4. UPDATE sessions SET last_activity = CURRENT_TIMESTAMP
+  5. SELECT user WHERE id = userId; check is_active  →  403 if disabled
+  6. req.user = user; req.sessionId = sessionId; next()
+
+authorizeRole(allowedRoles)(req, res, next):
+  └─ req.user.role not in allowedRoles  →  403 "Insufficient permissions"
+```
+
+#### ID / Number Generation
+
+| Entity | Format | Example |
+|---|---|---|
+| Sale ID | `SALE` + IST YYYYMMDDHHmmss + 4 random alphanumeric | `SALE20260316231000XK2A` |
+| Receipt Number | `R-` + YYYYMMDD + `-` + sanitised customer name (≤15 chars, a-z0-9) + `-` + 2 random chars | `R-20260316-rameshkumar-4K` |
+| Purchase ID | `PUR` + IST YYYYMMDDHHmmss + 4 random hex uppercase | `PUR20260316231000AB3F` |
+
+#### Timestamp Strategy
+
+| Source | Stored as | How displayed |
+|---|---|---|
+| SQLite `CURRENT_TIMESTAMP` (sales, receipts, sessions, etc.) | UTC `YYYY-MM-DD HH:MM:SS` | `dateUtils.toDate()` appends `Z` → parses as UTC → `toLocaleString` in IST |
+| User-picked purchase date (`YYYY-MM-DD` IST) | UTC: `moment.utc(date + 'T00:00:00+05:30')` | Displays correctly as the chosen IST date |
+| Login log `logged_in_at` | IST string (intentional) | Displayed as-is |
+
+---
+
+### Frontend Architecture
+
+#### Route Guard Pattern
+```
+<ProtectedRoute>   Redirects to /login if no token in localStorage
+<AdminRoute>       Redirects to /    if user.role !== 'admin'
+
+/              →  Dashboard    (ProtectedRoute)
+/inventory     →  Inventory    (ProtectedRoute)
+/sales         →  Sales        (ProtectedRoute)
+/purchases     →  Purchases    (ProtectedRoute)
+/reports       →  Reports      (ProtectedRoute)
+/users         →  Users        (AdminRoute)
+/receipt/:id   →  Receipt      (ProtectedRoute)
+/login         →  Login        (public)
+```
+
+#### `AuthContext` (`contexts/AuthContext.js`)
+- Stores `{ user, token }` in React state + `localStorage`
+- On login: sets `axios.defaults.headers.common['Authorization'] = 'Bearer ' + token`
+- Exposes `login(token, user)` and `logout()` consumed by all components
+
+#### `useSortableData` Hook
+Accepts array → returns `{ sortedItems, sortConfig, requestSort }`.
+Each `requestSort(key)` call cycles: `asc → desc → none → asc`. Used by every table.
+
+#### `dateUtils.js`
+```
+toDate(str)          Appends 'Z' to treat stored UTC string correctly → Date object
+fmtDateTime(str)     "16 Mar 2026, 11:10 PM"  (IST, en-IN locale)
+fmtDate(str)         "16 March 2026"
+fmtTime(str)         "11:10 PM"
+getISTDateString()   "2026-03-16"  (today in IST, for date-picker defaults)
+```
+
+#### Key Component Data Flows
+```
+Sales.js
+  GET /api/inventory          → product list for cart
+  POST /api/sales             → { saleId, receiptNumber }
+  navigate('/receipt/' + saleId)
+
+Receipt.js
+  GET /api/sales/:saleId      → line items + receipt
+  react-to-print              → window.print()  (documentTitle = receipt_number → used as PDF filename)
+
+Reports.js
+  activeTab state → calls different /api/reports/* endpoint
+  Recharts visuals:
+    AreaChart  — monthly revenue trend
+    BarChart   — monthly transactions + items sold
+    PieChart   — product revenue share
+    BarChart   — top/least selling products
+  <ReportDownloader> → CSV via csvExport.js
+
+Purchases.js  (3 tabs)
+  Tab 1 "Record Purchase"
+    Product card grid (filterable) + "New Product" button
+    New Product modal → POST /api/inventory → auto-selects created product
+    Confirmation popup → POST /api/purchases
+  Tab 2 "Purchase History"
+    Sortable table + Edit pencil → PUT /api/purchases/:id
+    Edit modal shows live stock-adjustment diff (new qty − old qty)
+  Tab 3 "Manage Categories"
+    POST /api/purchases/categories
+    DELETE /api/purchases/categories/:id
+```
+
+---
+
+### Authentication & Session Flow
+
+```
+1. POST /api/auth/login  { username, password }
+   ├─ bcrypt.compare(password, stored_hash)
+   ├─ INSERT INTO sessions (id = UUIDv4, user_id)
+   ├─ INSERT INTO login_logs (IST timestamp, IP, user-agent)
+   └─ jwt.sign({ userId, username, role, sessionId }, JWT_SECRET, { expiresIn: '24h' })
+      → Response: { token, user: { id, username, role } }
+
+2. Client stores token in localStorage
+   └─ axios default header: Authorization: Bearer <token>
+
+3. Every protected request:
+   └─ auth.js: verify JWT + session idle check + UPDATE last_activity
+
+4. POST /api/auth/logout
+   └─ DELETE FROM sessions WHERE id = sessionId
+   └─ Client: clear localStorage → navigate /login
+
+5. Auto-expiry:
+   └─ idle_seconds > 300 → DELETE session → 401
+   └─ Axios interceptor on client catches 401 → logout() → /login
+```
+
+---
+
+## API Reference
+
+> All endpoints except `POST /api/auth/login` require:
+> `Authorization: Bearer <JWT_TOKEN>`
+
+### Auth — `/api/auth`
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| POST | `/login` | Public | Login; returns JWT + user object |
+| POST | `/logout` | Any | Invalidate current session |
+| GET | `/me` | Any | Current user info |
+| POST | `/users` | admin | Create user (username≥3, password≥6) |
+| GET | `/users` | admin | List all users |
+| PUT | `/users/:id/status` | admin | Enable / disable user |
+| DELETE | `/users/:id` | admin | Delete user (cannot delete self) |
+| GET | `/login-logs` | admin | Last 10 login audit entries |
+
+**Login:**
+```json
+// POST /api/auth/login
+// Request
+{ "username": "admin", "password": "admin123" }
+
+// Response 200
+{ "token": "<jwt>", "user": { "id": 1, "username": "admin", "role": "admin" } }
+```
+
+---
+
+### Inventory — `/api/inventory`
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/` | Any | List products — `?category=seeds&search=tomato` |
+| GET | `/:id` | Any | Single product |
+| POST | `/` | admin, operator | Create product |
+| PUT | `/:id` | admin, operator | Update fields (partial) |
+| DELETE | `/:id` | admin | Delete (blocked if has sales records) |
+| POST | `/:id/add-stock` | admin, operator | Add qty to existing stock |
+| GET | `/alerts/low-stock` | Any | Products where `quantity_available <= 10` |
+
+**Create product:**
+```json
+// POST /api/inventory
+{
+  "product_id": "PROD001",
+  "category": "seeds",
+  "product_name": "Tomato Seeds",
+  "variety": "Hybrid F1",
+  "quantity_available": 100,
+  "unit": "packet",
+  "purchase_price": 120.00,
+  "selling_price": 150.00,
+  "supplier": "ABC Agro Pvt Ltd"
+}
+// Response 201: full product object
+```
+
+**Add stock:**
+```json
+// POST /api/inventory/:id/add-stock
+{ "quantity": 50 }
+// Response: { "message": "Added 50 packet to stock", "product": { ... } }
+```
+
+---
+
+### Sales — `/api/sales`
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| POST | `/` | Any | Create sale (multi-item checkout) |
+| GET | `/` | Any | List sales — `?start_date=&end_date=&product_id=` |
+| GET | `/receipts/all` | Any | List receipts — `?start_date=&end_date=` |
+| GET | `/:saleId` | Any | Sale details + receipt |
+| PUT | `/receipts/:id/print` | Any | Mark receipt as printed |
+
+**Create sale:**
+```json
+// POST /api/sales
+{
+  "items": [
+    { "product_id": 1, "quantity": 5 },
+    { "product_id": 3, "quantity": 2 }
+  ],
+  "customer_name": "Ramesh Kumar",
+  "customer_mobile": "9876543210",
+  "customer_address": "12 MG Road, Hyderabad",
+  "payment_mode": "cash"
+}
+```
+
+**Response 201:**
+```json
+{
+  "saleId": "SALE20260316231000AB12",
+  "receiptNumber": "R-20260316-rameshkumar-4K",
+  "totalAmount": 1050.00,
+  "items": [
+    { "product_name": "Tomato Seeds", "quantity_sold": 5, "price_per_unit": 150, "total_amount": 750 }
+  ],
+  "receipt": { "id": 1, "receipt_number": "R-20260316-rameshkumar-4K", "payment_mode": "cash", "printed": false }
+}
+```
+
+---
+
+### Purchases — `/api/purchases`
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/categories` | Any | List all product categories |
+| POST | `/categories` | admin, operator | Add category — `{ "name": "pesticides" }` |
+| DELETE | `/categories/:id` | admin | Delete category (blocked if products use it) |
+| GET | `/` | Any | List purchases — `?start_date=&end_date=&product_id=` |
+| POST | `/` | admin, operator | Record purchase (updates stock + price) |
+| PUT | `/:id` | admin, operator | Edit purchase (adjusts stock by qty diff) |
+
+**Record purchase:**
+```json
+// POST /api/purchases
+{
+  "product_id": 1,
+  "quantity": 50,
+  "price_per_unit": 110.00,
+  "supplier": "ABC Agro Pvt Ltd",
+  "purchase_date": "2026-03-16"
+}
+// Response 201: full purchase row with product + user info
+```
+
+**Edit purchase:**
+```json
+// PUT /api/purchases/:id
+{
+  "quantity": 60,
+  "price_per_unit": 115.00,
+  "supplier": "XYZ Seeds Co",
+  "purchase_date": "2026-03-17"
+}
+// Stock adjusts by (60 - old_qty). Can be negative to correct over-entries.
+```
+
+---
+
+### Reports — `/api/reports`
+
+| Method | Path | Query Params | Description |
+|---|---|---|---|
+| GET | `/daily-sales` | `?date=YYYY-MM-DD` | Product-wise sales for one date |
+| GET | `/sales-range` | `?start_date=&end_date=` | Sales grouped by day |
+| GET | `/inventory-status` | `?category=seeds` | Full product snapshot + stats |
+| GET | `/product-performance` | `?start_date=&end_date=&limit=10` | Top + least selling |
+| GET | `/monthly-trend` | `?months=12` | Revenue/transactions by month |
+| GET | `/purchases` | `?start_date=&end_date=` | Purchase history + cost summary |
+| GET | `/customer-sales` | `?start_date=&end_date=` | Customer-level archive |
+| DELETE | `/customer-sales/:id` | — | Delete archive record (admin) |
+
+---
+
+### Dashboard — `/api/dashboard`
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/admin` | admin | Total stock, today sales, low-stock list, 7-day chart, category breakdown |
+| GET | `/operator` | admin, operator | Available inventory, operator's own today sales, popular items |
+| GET | `/quick-stats` | Any | KPIs: total products, stock, today/month revenue + transactions |
+
+---
+
+## Setup & Installation
+
+### Prerequisites
+- Node.js ≥ 16, npm ≥ 8
+
+```bash
+# 1. Clone
+git clone <repository-url>
+cd inventory-management
+
+# 2. Install all dependencies
+npm install
+npm install --prefix server
+npm install --prefix client
+
+# 3. Review / edit environment (server/.env already provided with safe defaults)
+#    Change JWT_SECRET before any production use.
+
+# 4. Start in development mode (server :5000 + client :3000 concurrently)
+npm run dev
+
+# 5. Production build + serve
+npm run build --prefix client   # builds React SPA → client/build/
+cd server && node index.js      # Express serves API + static React build
+```
+
+> The SQLite database is created automatically on first server start.
+> Default admin + operator accounts and seed categories are inserted automatically.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `5000` | Express server listen port |
+| `JWT_SECRET` | `your-secret-key` | **Must change in production** — signs all JWTs |
+| `SQLITE_DB_PATH` | `./database/inventory.db` | Absolute or relative path to SQLite file |
+
+---
+
+## Default Credentials
+
+| Role | Username | Password |
+|---|---|---|
+| Admin (Business Owner) | `admin` | `admin123` |
+| Operator (Shop In-Charge) | `operator` | `operator123` |
+
+> **Change these immediately after first login.** Admin can update passwords from the Users tab.
+
+---
+
+## Feature Guide
 
 ### Dashboard
-- `GET /api/dashboard/admin` - Admin dashboard data
-- `GET /api/dashboard/operator` - Operator dashboard data
-- `GET /api/dashboard/quick-stats` - Quick statistics
+- **Admin**: total stock quantity + value, today's revenue + transactions, low-stock alerts (≤10 units), last 7-day daily revenue bar chart, category-level performance
+- **Operator**: available product list (top 20), own today's sales summary, most-sold products today
 
-## Database Schema
+### Inventory
+- Add / edit / delete products with dynamically managed categories
+- Units supported: `kg`, `packet`, `bag`, `liters`
+- Low-stock items highlighted in red (≤10 units)
+- "Add Stock" on each product row logs an automatic purchase record
 
-### Tables
-- **users**: User authentication and roles
-- **products**: Product inventory and details
-- **sales**: Sales transactions
-- **receipts**: Receipt information
+### Sales (POS)
+- Cart interface: search → click to add → adjust quantity → remove
+- Customer details capture: name, mobile, address (all optional)
+- Payment modes: Cash / Card / UPI
+- Real-time stock validation — sale blocked if insufficient stock
+- Unique receipt generated: `R-YYYYMMDD-customername-XX`
+- Receipt number used as the **default PDF filename** when saving via browser print
 
-## Features in Detail
+### Purchases
 
-### Inventory Management
-- Product categorization (Seeds/Fertilizers)
-- Stock quantity tracking with multiple units (kg, packet, bag)
-- Purchase and selling price management
-- Supplier information
-- Low stock alerts (≤10 units)
+| Tab | What it does |
+|---|---|
+| **Record Purchase** | Select existing product from card grid or create a new product inline. Fill qty, price/unit, supplier, date. Confirmation popup shows total cost and stock impact before submitting. |
+| **Purchase History** | Sortable table of all past purchases. Each row has an Edit (pencil) button that opens a pre-filled modal with a live stock-adjustment indicator (+/- diff from current qty). |
+| **Manage Categories** | Add or delete categories used across Inventory and Purchases. Deletion blocked if any product uses the category. |
 
-### Sales Processing
-- Real-time stock validation
-- Cart-based sales interface
-- Customer information capture
-- Multiple payment modes (Cash, Card, UPI)
-- Automatic receipt generation
+### Receipts
+- A4-formatted printable receipt: business name, address, contact (+91 70369 53734, dvvshivaram@gmail.com)
+- Itemised line items, unit prices, subtotals, payment mode, receipt number
+- Print status tracked per receipt (`printed` flag)
 
-### Reporting
-- Daily sales summaries
-- Date range reports
-- Inventory status with valuation
-- Product performance analysis
-- Monthly trend analysis
+### Reports
 
-### Security
-- JWT-based authentication
-- Role-based access control
-- Password hashing with bcrypt
-- Input validation and sanitization
+| Tab | Charts | CSV Export |
+|---|---|---|
+| Daily Sales | — | Yes |
+| Sales Range | — | Yes |
+| Inventory Status | — | Yes |
+| Product Performance | Bar chart (top/least), Pie chart (revenue share) | Yes |
+| Monthly Trend | Area chart (revenue), Bar chart (transactions + items) | Yes |
+| Purchases | — | Yes |
+| Customer Sales | — | Yes |
 
-## Development
+### Users (Admin only)
+- Create operator accounts with role assignment
+- Enable / disable accounts (disabled users are blocked at login)
+- Delete users (self-delete protected)
+- Login audit log: last 10 entries with IP address and browser info
 
-### Adding New Features
-1. Backend: Add routes in `server/routes/`
-2. Frontend: Create components in `client/src/components/`
-3. Database: Update schemas in `server/database/db.js`
+---
 
-### Testing
-- Test with default credentials
-- Verify stock updates on sales
-- Check report generation
-- Test role-based permissions
+## Deployment
 
-## Production Deployment
+### Railway / Render
+- `railway.toml` and `render.yaml` are included
+- Set `JWT_SECRET` and `SQLITE_DB_PATH` as platform environment variables
+- Start command: `cd server && node index.js`
 
-### Environment Variables
-```env
-PORT=5000
-JWT_SECRET=your_secure_jwt_secret_here
-DB_PATH=./database/inventory.db
+### Netlify (frontend-only)
+- `netlify.toml` included with `_redirects` for SPA routing
+- Point `REACT_APP_API_URL` to your hosted backend if deployed separately
+
+### Docker
+```dockerfile
+# server/Dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --production
+COPY . .
+EXPOSE 5000
+CMD ["node", "index.js"]
 ```
 
-### Security Considerations
-- Change default passwords
-- Use strong JWT secret
-- Implement HTTPS in production
-- Regular database backups
-- Input validation on all endpoints
+---
 
-## Support
+## Security Notes
 
-For issues and feature requests, please contact the development team.
+| Area | Implementation |
+|---|---|
+| Password hashing | bcrypt, 10 salt rounds |
+| Token expiry | JWT 24h; session idle timeout 5 min (server-enforced) |
+| Input validation | express-validator on all POST/PUT endpoints |
+| Role enforcement | `authorizeRole` middleware on every sensitive route |
+| Category validation | Against `product_categories` table (not hardcoded) |
+| Self-protection | Admin cannot disable or delete their own account |
+| Stock protection | Sales blocked server-side if stock is insufficient |
 
-## License
+---
 
-This project is licensed under the MIT License.
+## Copyright
+
+© 2026 Shri Lakshmi Vigneswara Traders.
+Developed by dvvshivaram · dvvshivaram@gmail.com · +91 70369 53734

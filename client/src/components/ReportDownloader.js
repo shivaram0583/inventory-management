@@ -92,7 +92,12 @@ const ReportDownloader = () => {
         const res = await axios.get('/api/reports/sales-range', {
           params: { start_date: startDate, end_date: endDate }
         });
-        rows = res.data?.sales || [];
+        rows = (res.data?.sales || []).flatMap(day =>
+          (day.items || []).map(item => ({
+            ...item,
+            sale_date: day.date
+          }))
+        );
       } else if (reportType === 'purchases') {
         const res = await axios.get('/api/reports/purchases', {
           params: { start_date: startDate, end_date: endDate }

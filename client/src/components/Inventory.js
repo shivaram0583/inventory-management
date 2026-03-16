@@ -1,25 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import SharedModal from './shared/Modal';
 import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
-import { 
-  Package, 
-  Plus, 
-  Search, 
-  Edit, 
-  Trash2, 
+import {
+  Plus,
+  Search,
+  Edit,
+  Trash2,
   AlertTriangle,
-  Filter,
-  X,
-  Save
+  X
 } from 'lucide-react';
 
 const Inventory = () => {
   const { user } = useAuth();
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -51,11 +49,8 @@ const Inventory = () => {
 
   useEffect(() => {
     fetchProducts();
+    axios.get('/api/purchases/categories').then(r => setCategories(r.data || [])).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    filterProducts();
-  }, [products, searchTerm, categoryFilter]);
 
   const fetchProducts = async () => {
     try {
@@ -69,7 +64,7 @@ const Inventory = () => {
     }
   };
 
-  const filterProducts = () => {
+  const filterProducts = useCallback(() => {
     let filtered = products;
 
     if (searchTerm) {
@@ -85,7 +80,11 @@ const Inventory = () => {
     }
 
     setFilteredProducts(filtered);
-  };
+  }, [products, searchTerm, categoryFilter]);
+
+  useEffect(() => {
+    filterProducts();
+  }, [filterProducts]);
 
   const handleAddProduct = async (e) => {
     e.preventDefault();
@@ -165,7 +164,7 @@ const Inventory = () => {
   const resetForm = () => {
     setFormData({
       product_id: '',
-      category: 'seeds',
+      category: categories[0]?.name || 'seeds',
       product_name: '',
       variety: '',
       quantity_available: '',
@@ -212,16 +211,21 @@ const Inventory = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header banner */}
+      <div className="rounded-2xl px-7 py-5 flex items-center justify-between shadow-lg overflow-hidden relative"
+           style={{background:'linear-gradient(135deg,#0c4a6e 0%,#0369a1 45%,#0891b2 100%)'}}>
+        <div className="absolute inset-0 opacity-10 pointer-events-none"
+             style={{backgroundImage:'radial-gradient(circle at 80% 50%,#7dd3fc,transparent 60%)'}} />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Inventory Management</h1>
-          <p className="mt-1 text-sm text-gray-600">Manage your seeds and fertilizers inventory</p>
+          <h1 className="text-2xl font-extrabold text-white tracking-tight">✦ Inventory Management</h1>
+          <p className="mt-0.5 text-sm text-sky-200">Manage your seeds and fertilizers inventory</p>
         </div>
         {canEdit && (
           <button
             onClick={() => setShowAddModal(true)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-semibold rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-xl hover:shadow-2xl active:scale-95 transition-all duration-200 border border-white/20"
+            style={{background:'linear-gradient(135deg,rgba(255,255,255,0.2),rgba(255,255,255,0.1))',backdropFilter:'blur(8px)'}}
           >
             <Plus className="h-4 w-4" />
             Add Product
@@ -230,17 +234,16 @@ const Inventory = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-700">{error}</p>
-        </div>
+        <div className="rounded-xl border border-red-200 px-4 py-3 text-red-700 text-sm"
+             style={{background:'linear-gradient(90deg,#fff5f5,#fef2f2)'}}>⚠ {error}</div>
       )}
 
       {/* Filters */}
-      <div className="card">
+      <div className="card !py-4">
         <div className="flex flex-col sm:flex-row gap-4 items-center">
           <div className="flex-1">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search products..."
@@ -257,8 +260,9 @@ const Inventory = () => {
               onChange={(e) => setCategoryFilter(e.target.value)}
             >
               <option value="all">All Categories</option>
-              <option value="seeds">Seeds</option>
-              <option value="fertilizers">Fertilizers</option>
+              {categories.map(c => (
+                <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -363,8 +367,9 @@ const Inventory = () => {
                   value={formData.category}
                   onChange={(e) => setFormData({...formData, category: e.target.value})}
                 >
-                  <option value="seeds">Seeds</option>
-                  <option value="fertilizers">Fertilizers</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -410,6 +415,7 @@ const Inventory = () => {
                   <option value="kg">kg</option>
                   <option value="packet">packet</option>
                   <option value="bag">bag</option>
+                  <option value="liters">liters</option>
                 </select>
               </div>
             </div>
@@ -486,8 +492,9 @@ const Inventory = () => {
                   value={formData.category}
                   onChange={(e) => setFormData({...formData, category: e.target.value})}
                 >
-                  <option value="seeds">Seeds</option>
-                  <option value="fertilizers">Fertilizers</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -523,6 +530,7 @@ const Inventory = () => {
                   <option value="kg">kg</option>
                   <option value="packet">packet</option>
                   <option value="bag">bag</option>
+                  <option value="liters">liters</option>
                 </select>
               </div>
             </div>

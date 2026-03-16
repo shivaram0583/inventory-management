@@ -11,9 +11,15 @@ function generateSaleId() {
   return 'SALE' + moment().utcOffset('+05:30').format('YYYYMMDDHHmmss') + Math.random().toString(36).substr(2, 4).toUpperCase();
 }
 
-// Generate unique receipt number
-function generateReceiptNumber() {
-  return 'R' + moment().utcOffset('+05:30').format('YYYYMMDD') + Math.random().toString(36).substr(2, 6).toUpperCase();
+// Generate unique receipt number: R-YYYYMMDD-customername-XX
+function generateReceiptNumber(customerName) {
+  const date = moment().utcOffset('+05:30').format('YYYYMMDD');
+  const sanitized = (customerName || 'customer')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .substring(0, 15) || 'customer';
+  const rand = Math.random().toString(36).substr(2, 2).toUpperCase();
+  return `R-${date}-${sanitized}-${rand}`;
 }
 
 // Create sale
@@ -81,7 +87,7 @@ router.post('/', [
     }
 
     // Create receipt
-    const receiptNumber = generateReceiptNumber();
+    const receiptNumber = generateReceiptNumber(customer_name);
     const receiptResult = await runQuery(
       `INSERT INTO receipts (receipt_number, sale_id, customer_name, customer_mobile, customer_address, payment_mode, total_amount)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,

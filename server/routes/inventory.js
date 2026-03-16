@@ -53,9 +53,8 @@ router.post('/', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   body('product_id').notEmpty().withMessage('Product ID is required'),
-  body('category').isIn(['seeds', 'fertilizers']).withMessage('Category must be seeds or fertilizers'),
   body('product_name').notEmpty().withMessage('Product name is required'),
-  body('unit').isIn(['kg', 'packet', 'bag']).withMessage('Unit must be kg, packet, or bag'),
+  body('unit').isIn(['kg', 'packet', 'bag', 'liters']).withMessage('Unit must be kg, packet, bag, or liters'),
   body('quantity_available').isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
   body('purchase_price').isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
   body('selling_price').isFloat({ min: 0 }).withMessage('Selling price must be non-negative')
@@ -77,6 +76,12 @@ router.post('/', [
       selling_price,
       supplier
     } = req.body;
+
+    // Validate category against product_categories table
+    const validCategory = await getRow('SELECT id FROM product_categories WHERE name = ?', [category]);
+    if (!validCategory) {
+      return res.status(400).json({ message: `Invalid category: ${category}` });
+    }
 
     // Check if product_id already exists
     const existingProduct = await getRow('SELECT id FROM products WHERE product_id = ?', [product_id]);
@@ -115,8 +120,7 @@ router.put('/:id', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   body('product_name').optional().notEmpty().withMessage('Product name cannot be empty'),
-  body('category').optional().isIn(['seeds', 'fertilizers']).withMessage('Category must be seeds or fertilizers'),
-  body('unit').optional().isIn(['kg', 'packet', 'bag']).withMessage('Unit must be kg, packet, or bag'),
+  body('unit').optional().isIn(['kg', 'packet', 'bag', 'liters']).withMessage('Unit must be kg, packet, bag, or liters'),
   body('quantity_available').optional().isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
   body('purchase_price').optional().isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
   body('selling_price').optional().isFloat({ min: 0 }).withMessage('Selling price must be non-negative')

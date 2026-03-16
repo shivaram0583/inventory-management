@@ -1,14 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
-import { Link } from 'react-router-dom';
 import SharedModal from './shared/Modal';
 import { 
   ShoppingCart, 
   Plus, 
   Search, 
   X, 
-  Receipt,
   Package,
   IndianRupee,
   User,
@@ -18,7 +15,6 @@ import {
 } from 'lucide-react';
 
 const Sales = () => {
-  const { user } = useAuth();
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -176,74 +172,83 @@ const Sales = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Sales Management</h1>
-        <p className="mt-1 text-sm text-gray-600">Process sales and generate receipts</p>
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header banner */}
+      <div className="rounded-2xl px-7 py-5 flex items-center justify-between shadow-lg overflow-hidden relative"
+           style={{background:'linear-gradient(135deg,#064e3b 0%,#065f46 40%,#047857 100%)'}}>
+        <div className="absolute inset-0 opacity-10 pointer-events-none"
+             style={{backgroundImage:'radial-gradient(circle at 80% 50%,#6ee7b7,transparent 60%)'}} />
+        <div>
+          <h1 className="text-2xl font-extrabold text-white tracking-tight">✦ Sales Management</h1>
+          <p className="mt-0.5 text-sm text-emerald-200">Process sales and generate receipts</p>
+        </div>
+        <div className="h-12 w-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center">
+          <ShoppingCart className="h-6 w-6 text-white" />
+        </div>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-700">{error}</p>
-        </div>
+        <div className="rounded-xl border border-red-200 px-4 py-3 text-red-700 text-sm animate-fade-in"
+             style={{background:'linear-gradient(90deg,#fff5f5,#fef2f2)'}}>⚠ {error}</div>
       )}
-
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Product Selection */}
         <div className="lg:col-span-2">
           <div className="card">
-            <div className="mb-4">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="h-6 w-6 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                <Package className="h-3.5 w-3.5 text-white" />
+              </span>
+              <h2 className="text-base font-bold text-gray-800">Products</h2>
+            </div>
+            <div className="mb-4 mt-3">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search products..."
-                  className="input-field pl-10"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input type="text" placeholder="Search products..."
+                  className="input-field pl-10" value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)} />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
               {filteredProducts.map((product) => (
-                <div key={product.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                  <div className="flex justify-between items-start mb-2">
+                <div key={product.id}
+                     className="rounded-xl p-4 border border-gray-100 hover:border-indigo-200 hover:shadow-md transition-all duration-200 cursor-pointer group"
+                     style={{background:'linear-gradient(135deg,#f8faff,#f3f0ff)'}}>
+                  <div className="flex justify-between items-start mb-3">
                     <div>
-                      <h3 className="font-medium text-gray-900">{product.product_name}</h3>
-                      {product.variety && (
-                        <p className="text-sm text-gray-500">{product.variety}</p>
-                      )}
-                      <p className="text-xs text-gray-400 capitalize">{product.category}</p>
+                      <h3 className="font-semibold text-gray-900 text-sm group-hover:text-indigo-700 transition-colors">{product.product_name}</h3>
+                      {product.variety && <p className="text-xs text-gray-500">{product.variety}</p>}
+                      <span className="inline-block mt-0.5 text-xs px-2 py-0.5 rounded-full font-medium capitalize"
+                            style={{background:'linear-gradient(90deg,#ede9fe,#e0e7ff)',color:'#6d28d9'}}>
+                        {product.category}
+                      </span>
                     </div>
-                    <span className={`text-sm font-medium ${
-                      product.quantity_available <= 10 ? 'text-red-600' : 'text-green-600'
+                    <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
+                      product.quantity_available <= 10
+                        ? 'bg-red-100 text-red-600'
+                        : 'bg-emerald-100 text-emerald-700'
                     }`}>
                       {product.quantity_available} {product.unit}
                     </span>
                   </div>
-                  
                   <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-blue-600">
-                      ₹{product.selling_price}/{product.unit}
-                    </span>
-                    <button
-                      onClick={() => addToCart(product)}
-                      className="btn-primary text-sm py-1 px-3"
-                      disabled={product.quantity_available <= 0}
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add
+                    <span className="text-base font-extrabold text-indigo-600">₹{product.selling_price}<span className="text-xs font-normal text-gray-400">/{product.unit}</span></span>
+                    <button onClick={() => addToCart(product)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white shadow-sm hover:shadow-md active:scale-95 transition-all duration-150"
+                      style={{background:'linear-gradient(135deg,#10b981,#059669)'}}
+                      disabled={product.quantity_available <= 0}>
+                      <Plus className="h-3 w-3" /> Add
                     </button>
                   </div>
                 </div>
               ))}
             </div>
-
             {filteredProducts.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                No products available
+              <div className="text-center py-10 text-gray-400">
+                <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No products available</p>
               </div>
             )}
           </div>
@@ -251,120 +256,85 @@ const Sales = () => {
 
         {/* Cart */}
         <div className="lg:col-span-1">
-          <div className="card">
-            <h2 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-              <ShoppingCart className="h-5 w-5 mr-2" />
-              Cart ({cart.length})
-            </h2>
+          <div className="card !p-0 overflow-hidden">
+            {/* Cart header */}
+            <div className="px-5 py-4 flex items-center gap-2 border-b border-gray-100"
+                 style={{background:'linear-gradient(90deg,#f8faff,#f3f0ff)'}}>
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm">
+                <ShoppingCart className="h-4 w-4 text-white" />
+              </span>
+              <h2 className="text-base font-bold text-gray-800">Cart</h2>
+              {cart.length > 0 && (
+                <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full text-white"
+                      style={{background:'linear-gradient(135deg,#6366f1,#8b5cf6)'}}>{cart.length}</span>
+              )}
+            </div>
 
+            <div className="p-5">
             {cart.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <ShoppingCart className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                <p>Cart is empty</p>
+              <div className="text-center py-10 text-gray-400">
+                <ShoppingCart className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                <p className="text-sm">Cart is empty</p>
+                <p className="text-xs mt-1">Add products to get started</p>
               </div>
             ) : (
               <>
-                <div className="space-y-3 max-h-64 overflow-y-auto mb-4">
+                <div className="space-y-2.5 max-h-56 overflow-y-auto mb-4 pr-0.5">
                   {cart.map((item) => (
-                    <div key={item.product_id} className="border border-gray-200 rounded-lg p-3">
+                    <div key={item.product_id} className="rounded-xl p-3 border border-indigo-100/60"
+                         style={{background:'linear-gradient(135deg,#fafbff,#f5f3ff)'}}>
                       <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1">
-                          <h4 className="font-medium text-gray-900 text-sm">{item.product_name}</h4>
-                          {item.variety && (
-                            <p className="text-xs text-gray-500">{item.variety}</p>
-                          )}
-                          <p className="text-sm text-blue-600 font-medium">
-                            ₹{item.price_per_unit}/{item.unit}
-                          </p>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-gray-900 text-xs truncate">{item.product_name}</h4>
+                          {item.variety && <p className="text-xs text-gray-400">{item.variety}</p>}
+                          <p className="text-xs font-bold text-indigo-600 mt-0.5">₹{item.price_per_unit}/{item.unit}</p>
                         </div>
-                        <button
-                          onClick={() => removeFromCart(item.product_id)}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          <X className="h-4 w-4" />
+                        <button onClick={() => removeFromCart(item.product_id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors ml-2">
+                          <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
-                      
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => updateCartItemQuantity(item.product_id, item.quantity - 1)}
-                            className="w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
-                          >
-                            -
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => updateCartItemQuantity(item.product_id, item.quantity - 1)}
+                            className="w-6 h-6 rounded-lg text-xs font-bold text-indigo-600 hover:text-white transition-all duration-150 flex items-center justify-center"
+                            style={{background:'linear-gradient(135deg,#ede9fe,#e0e7ff)'}}>
+                            −
                           </button>
-                          <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
-                          <button
-                            onClick={() => updateCartItemQuantity(item.product_id, item.quantity + 1)}
-                            className="w-6 h-6 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
-                          >
+                          <span className="w-7 text-center text-xs font-bold text-gray-800">{item.quantity}</span>
+                          <button onClick={() => updateCartItemQuantity(item.product_id, item.quantity + 1)}
+                            className="w-6 h-6 rounded-lg text-xs font-bold text-white transition-all duration-150 flex items-center justify-center"
+                            style={{background:'linear-gradient(135deg,#6366f1,#8b5cf6)'}}>
                             +
                           </button>
                         </div>
-                        <span className="text-sm font-medium text-gray-900">
-                          ₹{(item.quantity * item.price_per_unit).toFixed(2)}
-                        </span>
+                        <span className="text-xs font-bold text-gray-700">₹{(item.quantity * item.price_per_unit).toFixed(2)}</span>
                       </div>
                     </div>
                   ))}
                 </div>
 
                 {/* Customer Info */}
-                <div className="space-y-3 mb-4">
+                <div className="space-y-2.5 mb-4">
+                  <p className="text-xs font-semibold text-indigo-500 uppercase tracking-wider">Customer Details</p>
+                  {[{icon:User, label:'Customer Name', type:'text', val:customerName, set:setCustomerName, ph:'Enter customer name'},
+                    {icon:Phone, label:'Mobile Number', type:'tel', val:customerMobile, set:setCustomerMobile, ph:'Enter mobile number'},
+                    {icon:IndianRupee, label:'Address', type:'text', val:customerAddress, set:setCustomerAddress, ph:'Enter address'}]
+                    .map(({icon:Icon, label, type, val, set, ph}) => (
+                    <div key={label}>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                        <Icon className="h-3 w-3" />{label}
+                      </label>
+                      <input type={type} className="input-field !py-1.5 !text-xs" placeholder={ph}
+                        value={val} onChange={(e) => set(e.target.value)} required />
+                    </div>
+                  ))}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <User className="h-4 w-4 inline mr-1" />
-                      Customer Name
+                    <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                      <CreditCard className="h-3 w-3" />Payment Mode
                     </label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="Enter customer name"
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <Phone className="h-4 w-4 inline mr-1" />
-                      Mobile Number
-                    </label>
-                    <input
-                      type="tel"
-                      className="input-field"
-                      placeholder="Enter mobile number"
-                      value={customerMobile}
-                      onChange={(e) => setCustomerMobile(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Address
-                    </label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="Enter address"
-                      value={customerAddress}
-                      onChange={(e) => setCustomerAddress(e.target.value)}
-                      required
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <CreditCard className="h-4 w-4 inline mr-1" />
-                      Payment Mode
-                    </label>
-                    <select
-                      className="input-field"
-                      value={paymentMode}
-                      onChange={(e) => setPaymentMode(e.target.value)}
-                    >
+                    <select className="input-field !py-1.5 !text-xs" value={paymentMode}
+                      onChange={(e) => setPaymentMode(e.target.value)}>
                       <option value="cash">Cash</option>
                       <option value="card">Card</option>
                       <option value="upi">UPI</option>
@@ -372,25 +342,21 @@ const Sales = () => {
                   </div>
                 </div>
 
-                {/* Total */}
-                <div className="border-t border-gray-200 pt-4">
-                  <div className="flex justify-between items-center mb-4">
-                    <span className="text-lg font-medium text-gray-900">Total:</span>
-                    <span className="text-2xl font-bold text-blue-600">
-                      ₹{calculateTotal().toFixed(2)}
-                    </span>
+                {/* Total + CTA */}
+                <div className="rounded-xl px-4 py-3 mb-3" style={{background:'linear-gradient(135deg,#f0fdf4,#ecfdf5)'}}>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Amount</span>
+                    <span className="text-xl font-extrabold text-emerald-700">₹{calculateTotal().toFixed(2)}</span>
                   </div>
-                  
-                  <button
-                    onClick={handleSale}
-                    disabled={loading || cart.length === 0}
-                    className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loading ? 'Processing...' : 'Complete Sale'}
-                  </button>
                 </div>
+                <button onClick={handleSale} disabled={loading || cart.length === 0}
+                  className="w-full py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{background:'linear-gradient(135deg,#10b981,#059669)'}}>
+                  {loading ? 'Processing...' : '✓ Complete Sale'}
+                </button>
               </>
             )}
+            </div>
           </div>
         </div>
       </div>
