@@ -8,16 +8,17 @@ const SortableHeader = ({ label, sortKey, sortConfig, onSort, className = '' }) 
 
   return (
     <th
-      className={`cursor-pointer select-none hover:bg-gray-100 transition-colors ${className}`}
+      className={`cursor-pointer select-none transition-all duration-150 ${className}`}
+      style={isSorted ? {background:'linear-gradient(90deg,#eef2ff,#f5f3ff)'} : {}}
       onClick={() => onSort(sortKey)}
     >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <span className="text-gray-400">
+      <span className="inline-flex items-center gap-1 group">
+        <span className={isSorted ? 'text-indigo-700' : ''}>{label}</span>
+        <span className={`transition-transform duration-150 ${isSorted ? 'text-indigo-500' : 'text-gray-300 group-hover:text-indigo-300'}`}>
           {isAsc ? (
-            <ChevronUp className="h-3 w-3 text-blue-500" />
+            <ChevronUp className="h-3 w-3" />
           ) : isDesc ? (
-            <ChevronDown className="h-3 w-3 text-blue-500" />
+            <ChevronDown className="h-3 w-3" />
           ) : (
             <ChevronsUpDown className="h-3 w-3" />
           )}

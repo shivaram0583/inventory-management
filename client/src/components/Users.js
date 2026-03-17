@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
@@ -9,7 +9,6 @@ const Users = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
   const [loginLogs, setLoginLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -25,7 +24,7 @@ const Users = () => {
   const { sortedItems: sortedUsers, sortConfig: usersSort, requestSort: sortUsers } = useSortableData(users);
   const { sortedItems: sortedLogs, sortConfig: logsSort, requestSort: sortLogs } = useSortableData(loginLogs);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     setActionError('');
     try {
@@ -36,13 +35,13 @@ const Users = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [fetchUsers]);
 
-  const fetchLoginLogs = async () => {
+  const fetchLoginLogs = useCallback(async () => {
     if (!canManage) return;
     setLogsLoading(true);
     try {
@@ -53,11 +52,11 @@ const Users = () => {
     } finally {
       setLogsLoading(false);
     }
-  };
+  }, [canManage]);
 
   useEffect(() => {
     if (canManage) fetchLoginLogs();
-  }, [canManage]);
+  }, [canManage, fetchLoginLogs]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -121,140 +120,136 @@ const Users = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Users</h1>
-        <p className="text-sm text-gray-600 mt-1">Admin can create users, disable/enable access, and delete users.</p>
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header banner */}
+      <div className="rounded-2xl px-7 py-5 flex items-center justify-between shadow-lg overflow-hidden relative"
+           style={{background:'linear-gradient(135deg,#1e1b4b 0%,#7c3aed 60%,#a21caf 100%)'}}>
+        <div className="absolute inset-0 opacity-10 pointer-events-none"
+             style={{backgroundImage:'radial-gradient(circle at 80% 50%,#f0abfc,transparent 60%)'}} />
+        <div>
+          <h1 className="text-2xl font-extrabold text-white tracking-tight">✦ User Management</h1>
+          <p className="mt-0.5 text-sm text-purple-200">Create accounts, manage access and view login history</p>
+        </div>
+        <div className="h-12 w-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center">
+          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+        </div>
       </div>
 
       {actionError && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
-          {actionError}
-        </div>
+        <div className="rounded-xl border border-red-200 px-4 py-3 text-red-700 text-sm animate-fade-in"
+             style={{background:'linear-gradient(90deg,#fff5f5,#fef2f2)'}}>⚠ {actionError}</div>
       )}
-
       {success && (
-        <div className="p-3 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm">
-          {success}
-        </div>
+        <div className="rounded-xl border border-emerald-200 px-4 py-3 text-emerald-700 text-sm animate-fade-in"
+             style={{background:'linear-gradient(90deg,#f0fdf4,#ecfdf5)'}}>✓ {success}</div>
       )}
 
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-lg font-medium text-gray-900 mb-4">Create User</h2>
-
+      {/* Create User */}
+      <div className="card">
+        <h2 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm">
+            <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+          </span>
+          Create New User
+        </h2>
         <form className="grid grid-cols-1 md:grid-cols-3 gap-4" onSubmit={handleCreate}>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-            <input
-              type="text"
-              required
-              value={newUsername}
-              onChange={(e) => setNewUsername(e.target.value)}
-              className="input-field"
-              placeholder="username"
-              disabled={!canManage || creating}
-            />
+            <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Username</label>
+            <input type="text" required value={newUsername} onChange={(e) => setNewUsername(e.target.value)}
+              className="input-field" placeholder="username" disabled={!canManage || creating} />
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input
-              type="password"
-              required
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="input-field"
-              placeholder="password"
-              disabled={!canManage || creating}
-            />
+            <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Password</label>
+            <input type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+              className="input-field" placeholder="password" disabled={!canManage || creating} />
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-            <select
-              value={newRole}
-              onChange={(e) => setNewRole(e.target.value)}
-              className="input-field"
-              disabled={!canManage || creating}
-            >
-              <option value="operator">operator</option>
-              <option value="admin">admin</option>
+            <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Role</label>
+            <select value={newRole} onChange={(e) => setNewRole(e.target.value)}
+              className="input-field" disabled={!canManage || creating}>
+              <option value="operator">Operator</option>
+              <option value="admin">Admin</option>
             </select>
           </div>
-
           <div className="md:col-span-3">
-            <button
-              type="submit"
-              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!canManage || creating}
-            >
-              {creating ? 'Creating...' : 'Create User'}
+            <button type="submit" className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!canManage || creating}>
+              {creating ? 'Creating...' : '+ Create User'}
             </button>
           </div>
         </form>
       </div>
 
-      <div className="bg-white shadow rounded-lg p-6">
+      {/* All Users */}
+      <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-medium text-gray-900">All Users</h2>
-          <button
-            type="button"
-            onClick={fetchUsers}
-            className="px-3 py-2 text-sm rounded-md border border-gray-300 hover:bg-gray-50"
-            disabled={loading}
-          >
-            Refresh
+          <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
+            <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm">
+              <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+            </span>
+            All Users
+          </h2>
+          <button type="button" onClick={fetchUsers} className="btn-secondary text-xs py-1.5 px-3" disabled={loading}>
+            ↻ Refresh
           </button>
         </div>
 
         {loading ? (
-          <div className="text-sm text-gray-600">Loading...</div>
+          <div className="flex items-center gap-2 text-sm text-indigo-400 py-4">
+            <div className="h-4 w-4 rounded-full border-2 border-t-indigo-500 border-indigo-100 animate-spin"></div>Loading...
+          </div>
         ) : users.length === 0 ? (
-          <div className="text-sm text-gray-600">No users found.</div>
+          <div className="text-sm text-gray-400 py-4">No users found.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <SortableHeader label="Username" sortKey="username" sortConfig={usersSort} onSort={sortUsers} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
-                  <SortableHeader label="Role" sortKey="role" sortConfig={usersSort} onSort={sortUsers} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
-                  <SortableHeader label="Status" sortKey="is_active" sortConfig={usersSort} onSort={sortUsers} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+          <div className="table-container">
+            <table className="table">
+              <thead><tr>
+                <SortableHeader label="Username" sortKey="username" sortConfig={usersSort} onSort={sortUsers} />
+                <SortableHeader label="Role" sortKey="role" sortConfig={usersSort} onSort={sortUsers} />
+                <SortableHeader label="Status" sortKey="is_active" sortConfig={usersSort} onSort={sortUsers} />
+                <th className="text-right">Actions</th>
+              </tr></thead>
+              <tbody>
                 {sortedUsers.map((u) => (
                   <tr key={u.id}>
-                    <td className="px-4 py-3 text-sm text-gray-900">{u.username}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700 capitalize">{u.role}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <span
-                        className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                          u.is_active === 1 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
+                    <td className="font-semibold text-gray-800">{u.username}</td>
+                    <td>
+                      <span className="inline-block px-2.5 py-0.5 rounded-lg text-xs font-semibold capitalize"
+                            style={u.role === 'admin'
+                              ? {background:'linear-gradient(90deg,#ede9fe,#e0e7ff)',color:'#6d28d9'}
+                              : {background:'linear-gradient(90deg,#f0f9ff,#e0f2fe)',color:'#0369a1'}}>
+                        {u.role}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        u.is_active === 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${
+                          u.is_active === 1 ? 'bg-emerald-500' : 'bg-gray-400'
+                        }`}></span>
                         {u.is_active === 1 ? 'Active' : 'Disabled'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-right space-x-2">
-                      <button
-                        type="button"
-                        className="px-3 py-2 text-xs rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => handleToggleStatus(u)}
-                        disabled={!canManage || u.id === user?.id}
-                        title={u.id === user?.id ? 'You cannot change your own status' : ''}
-                      >
-                        {u.is_active === 1 ? 'Disable' : 'Enable'}
-                      </button>
-                      <button
-                        type="button"
-                        className="px-3 py-2 text-xs rounded-md border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => handleDelete(u)}
-                        disabled={!canManage || u.id === user?.id}
-                        title={u.id === user?.id ? 'You cannot delete your own account' : ''}
-                      >
-                        Delete
-                      </button>
+                    <td className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button type="button"
+                          className={`px-3 py-1 text-xs rounded-lg font-medium border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed ${
+                            u.is_active === 1
+                              ? 'border-orange-200 text-orange-600 hover:bg-orange-50'
+                              : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                          }`}
+                          onClick={() => handleToggleStatus(u)}
+                          disabled={!canManage || u.id === user?.id}>
+                          {u.is_active === 1 ? 'Disable' : 'Enable'}
+                        </button>
+                        <button type="button"
+                          className="px-3 py-1 text-xs rounded-lg font-medium border border-red-200 text-red-600 hover:bg-red-50 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+                          onClick={() => handleDelete(u)}
+                          disabled={!canManage || u.id === user?.id}>
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -264,55 +259,51 @@ const Users = () => {
         )}
       </div>
 
+      {/* Login History */}
       {canManage && (
-        <div className="bg-white shadow rounded-lg p-6">
+        <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-gray-900">Login History</h2>
-            <button
-              type="button"
-              onClick={fetchLoginLogs}
-              className="px-3 py-2 text-sm rounded-md border border-gray-300 hover:bg-gray-50"
-              disabled={logsLoading}
-            >
-              Refresh
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center shadow-sm">
+                <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </span>
+              Login History
+            </h2>
+            <button type="button" onClick={fetchLoginLogs} className="btn-secondary text-xs py-1.5 px-3" disabled={logsLoading}>
+              ↻ Refresh
             </button>
           </div>
-
           {logsLoading ? (
-            <div className="text-sm text-gray-600">Loading login logs...</div>
+            <div className="flex items-center gap-2 text-sm text-indigo-400 py-4">
+              <div className="h-4 w-4 rounded-full border-2 border-t-indigo-500 border-indigo-100 animate-spin"></div>Loading...
+            </div>
           ) : loginLogs.length === 0 ? (
-            <div className="text-sm text-gray-600">No login history found.</div>
+            <div className="text-sm text-gray-400 py-4">No login history found.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <SortableHeader label="User" sortKey="username" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
-                    <SortableHeader label="Role" sortKey="role" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
-                    <SortableHeader label="Login Time" sortKey="logged_in_at" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
-                    <SortableHeader label="IP Address" sortKey="ip" sortConfig={logsSort} onSort={sortLogs} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" />
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Agent</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+            <div className="table-container">
+              <table className="table">
+                <thead><tr>
+                  <SortableHeader label="User" sortKey="username" sortConfig={logsSort} onSort={sortLogs} />
+                  <SortableHeader label="Role" sortKey="role" sortConfig={logsSort} onSort={sortLogs} />
+                  <SortableHeader label="Login Time" sortKey="logged_in_at" sortConfig={logsSort} onSort={sortLogs} />
+                  <SortableHeader label="IP Address" sortKey="ip" sortConfig={logsSort} onSort={sortLogs} />
+                  <th>User Agent</th>
+                </tr></thead>
+                <tbody>
                   {sortedLogs.map((log) => (
                     <tr key={log.id}>
-                      <td className="px-4 py-3 text-sm text-gray-900">{log.username}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 capitalize">{log.role}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">
-                        {new Date(log.logged_in_at).toLocaleString('en-IN', {
-                          timeZone: 'Asia/Kolkata',
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                          hour12: true
-                        })}
+                      <td className="font-semibold text-gray-800">{log.username}</td>
+                      <td>
+                        <span className="inline-block px-2 py-0.5 rounded-lg text-xs font-semibold capitalize"
+                              style={log.role === 'admin'
+                                ? {background:'linear-gradient(90deg,#ede9fe,#e0e7ff)',color:'#6d28d9'}
+                                : {background:'linear-gradient(90deg,#f0f9ff,#e0f2fe)',color:'#0369a1'}}>
+                          {log.role}
+                        </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{log.ip}</td>
-                      <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate" title={log.user_agent}>{log.user_agent}</td>
+                      <td className="text-gray-600">{new Date(log.logged_in_at).toLocaleString('en-IN', {timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})}</td>
+                      <td className="font-mono text-xs text-gray-500">{log.ip}</td>
+                      <td className="text-xs text-gray-400 max-w-xs truncate" title={log.user_agent}>{log.user_agent}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -70,7 +70,7 @@ function initializeDatabase() {
     product_name TEXT NOT NULL,
     variety TEXT,
     quantity_available REAL NOT NULL DEFAULT 0,
-    unit TEXT NOT NULL CHECK (unit IN ('kg', 'packet', 'bag')),
+    unit TEXT NOT NULL CHECK (unit IN ('kg', 'packet', 'bag', 'liters')),
     purchase_price REAL NOT NULL DEFAULT 0,
     selling_price REAL NOT NULL DEFAULT 0,
     supplier TEXT,
@@ -162,6 +162,76 @@ function initializeDatabase() {
       console.error('Error creating customer_sales table:', err.message);
     } else {
       console.log('Customer sales table created successfully');
+    }
+  });
+
+  // Create product_categories table for dynamic categories
+  db.run(`CREATE TABLE IF NOT EXISTS product_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, (err) => {
+    if (!err) {
+      db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('seeds')`);
+      db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('fertilizers')`);
+    }
+  });
+
+  // Migrate products table: remove hardcoded category CHECK constraint if present
+  db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'", (err, row) => {
+    if (err || !row) return;
+    if (row.sql && row.sql.includes("CHECK (category IN")) {
+      db.serialize(() => {
+        db.run(`CREATE TABLE IF NOT EXISTS products_v2 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          product_id TEXT UNIQUE NOT NULL,
+          category TEXT NOT NULL,
+          product_name TEXT NOT NULL,
+          variety TEXT,
+          quantity_available REAL NOT NULL DEFAULT 0,
+          unit TEXT NOT NULL CHECK (unit IN ('kg', 'packet', 'bag', 'liters')),
+          purchase_price REAL NOT NULL DEFAULT 0,
+          selling_price REAL NOT NULL DEFAULT 0,
+          supplier TEXT,
+          date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        `);
+        db.run(`INSERT OR IGNORE INTO products_v2 SELECT * FROM products`);
+        db.run(`DROP TABLE products`);
+        db.run(`ALTER TABLE products_v2 RENAME TO products`, (e) => {
+          if (!e) console.log('Migrated products table: removed hardcoded category constraint');
+        });
+      });
+    }
+  });
+
+  // Migrate products table: add 'liters' to unit CHECK constraint if missing
+  db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'", (err, row) => {
+    if (err || !row) return;
+    if (row.sql && !row.sql.includes('liters')) {
+      db.serialize(() => {
+        db.run(`CREATE TABLE IF NOT EXISTS products_v3 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          product_id TEXT UNIQUE NOT NULL,
+          category TEXT NOT NULL,
+          product_name TEXT NOT NULL,
+          variety TEXT,
+          quantity_available REAL NOT NULL DEFAULT 0,
+          unit TEXT NOT NULL CHECK (unit IN ('kg', 'packet', 'bag', 'liters')),
+          purchase_price REAL NOT NULL DEFAULT 0,
+          selling_price REAL NOT NULL DEFAULT 0,
+          supplier TEXT,
+          date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+        db.run(`INSERT OR IGNORE INTO products_v3 SELECT * FROM products`);
+        db.run(`DROP TABLE products`);
+        db.run(`ALTER TABLE products_v3 RENAME TO products`, (e) => {
+          if (!e) console.log('Migrated products table: added liters to unit options');
+        });
+      });
     }
   });
 

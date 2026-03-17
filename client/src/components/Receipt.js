@@ -1,19 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { fmtDate, fmtTime } from '../utils/dateUtils';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
 import axios from 'axios';
-import { 
-  Receipt as ReceiptIcon, 
-  ArrowLeft, 
-  Printer, 
+import {
+  ArrowLeft,
+  Printer,
   Store,
   Phone,
   Mail,
-  Calendar,
   User,
-  CreditCard,
-  IndianRupee
+  CreditCard
 } from 'lucide-react';
 
 const Receipt = () => {
@@ -24,11 +21,7 @@ const Receipt = () => {
   const [error, setError] = useState('');
   const receiptRef = React.useRef();
 
-  useEffect(() => {
-    fetchSaleData();
-  }, [saleId]);
-
-  const fetchSaleData = async () => {
+  const fetchSaleData = useCallback(async () => {
     try {
       const response = await axios.get(`/api/sales/${saleId}`);
       setSaleData(response.data);
@@ -38,10 +31,15 @@ const Receipt = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [saleId]);
+
+  useEffect(() => {
+    fetchSaleData();
+  }, [fetchSaleData]);
 
   const handlePrint = useReactToPrint({
     content: () => receiptRef.current,
+    documentTitle: saleData?.receipt?.receipt_number,
     onAfterPrint: async () => {
       // Mark receipt as printed
       try {
@@ -116,11 +114,11 @@ const Receipt = () => {
             <div className="mt-2 text-xs text-gray-500">
               <p className="flex items-center justify-center">
                 <Phone className="h-3 w-3 mr-1" />
-                +91 98765 43210
+                +91 7036953734
               </p>
               <p className="flex items-center justify-center">
                 <Mail className="h-3 w-3 mr-1" />
-                info@slvtraders.com
+                dvvshivaram@gmail.com
               </p>
             </div>
           </div>

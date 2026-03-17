@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  BarChart, Bar, AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, PieChart, Pie, Cell
+} from 'recharts';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import { getISTDateString, fmtDateTime } from '../utils/dateUtils';
@@ -7,12 +12,10 @@ import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
 import ReportDownloader from './ReportDownloader';
 import { 
-  FileText, 
   Calendar, 
   TrendingUp, 
   Package, 
   IndianRupee,
-  Download,
   BarChart3,
   ShoppingCart,
   Truck,
@@ -57,11 +60,7 @@ const Reports = () => {
     }
   };
 
-  useEffect(() => {
-    fetchReportData();
-  }, [activeTab, selectedDate, startDate, endDate]);
-
-  const fetchReportData = async () => {
+  const fetchReportData = useCallback(async () => {
     setLoading(true);
     setError('');
     
@@ -133,7 +132,11 @@ const Reports = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, selectedDate, startDate, endDate]);
+
+  useEffect(() => {
+    fetchReportData();
+  }, [fetchReportData]);
 
   const renderDailyReport = () => {
     if (!data) return null;
@@ -419,41 +422,131 @@ const Reports = () => {
   const renderPerformanceReport = () => {
     if (!data) return null;
 
+    const topChartData = (data.topProducts || []).map(p => ({
+      name: p.product_name.length > 12 ? p.product_name.slice(0, 12) + '…' : p.product_name,
+      revenue: Number(p.total_revenue),
+      sold: Number(p.total_sold)
+    }));
+
+    const leastChartData = (data.leastSelling || []).map(p => ({
+      name: p.product_name.length > 12 ? p.product_name.slice(0, 12) + '…' : p.product_name,
+      revenue: Number(p.total_revenue),
+      sold: Number(p.total_sold)
+    }));
+
+    const PIE_COLORS = ['#6366f1','#8b5cf6','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899'];
+    const pieData = (data.topProducts || []).map((p, i) => ({
+      name: p.product_name,
+      value: Number(p.total_revenue)
+    }));
+
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Top Products */}
+        {/* Revenue Pie Chart */}
+        {pieData.length > 0 && (
           <div className="card">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Top Performing Products</h3>
-            <div className="space-y-3">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-5 w-5 rounded bg-gradient-to-br from-indigo-500 to-violet-600 inline-flex items-center justify-center">
+                <TrendingUp className="h-3 w-3 text-white" />
+              </span>
+              Revenue Share — Top Products
+            </h3>
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90}
+                    paddingAngle={3} dataKey="value"
+                    label={({ name, percent }) => `${name.slice(0,10)} ${(percent*100).toFixed(0)}%`}
+                    labelLine={false}>
+                    {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')}`, 'Revenue']} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex flex-wrap gap-2 md:max-w-xs">
+                {pieData.map((d, i) => (
+                  <span key={i} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium"
+                        style={{background:`${PIE_COLORS[i % PIE_COLORS.length]}22`,color:PIE_COLORS[i % PIE_COLORS.length]}}>
+                    <span className="w-2 h-2 rounded-full inline-block" style={{background:PIE_COLORS[i % PIE_COLORS.length]}} />
+                    {d.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Top Products Chart + List */}
+          <div className="card space-y-4">
+            <h3 className="text-base font-bold text-gray-800">Top Performing Products</h3>
+            {topChartData.length > 0 && (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={topChartData} margin={{top:4,right:8,left:8,bottom:4}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="name" tick={{fontSize:11}} />
+                  <YAxis tick={{fontSize:11}} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar dataKey="revenue" radius={[6,6,0,0]}
+                    fill="url(#topGrad)" />
+                  <defs>
+                    <linearGradient id="topGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366f1" />
+                      <stop offset="100%" stopColor="#8b5cf6" />
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+            <div className="space-y-2">
               {(data.topProducts || []).map((product, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={index} className="flex items-center justify-between px-3 py-2 rounded-xl"
+                     style={{background:'linear-gradient(90deg,#f5f3ff,#eef2ff)'}}>
                   <div>
-                    <p className="font-medium text-gray-900">{product.product_name}</p>
-                    <p className="text-sm text-gray-500">{product.variety}</p>
+                    <p className="font-medium text-gray-900 text-sm">{product.product_name}</p>
+                    {product.variety && <p className="text-xs text-gray-400">{product.variety}</p>}
                   </div>
                   <div className="text-right">
-                    <p className="font-medium text-gray-900">₹{formatCurrency(product.total_revenue)}</p>
-                    <p className="text-sm text-gray-500">{product.total_sold} {product.unit}</p>
+                    <p className="font-semibold text-indigo-700 text-sm">₹{formatCurrency(product.total_revenue)}</p>
+                    <p className="text-xs text-gray-400">{product.total_sold} {product.unit}</p>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Least Selling Products */}
-          <div className="card">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Least Selling Products</h3>
-            <div className="space-y-3">
+          {/* Least Selling Chart + List */}
+          <div className="card space-y-4">
+            <h3 className="text-base font-bold text-gray-800">Least Selling Products</h3>
+            {leastChartData.length > 0 && (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={leastChartData} margin={{top:4,right:8,left:8,bottom:4}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="name" tick={{fontSize:11}} />
+                  <YAxis tick={{fontSize:11}} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar dataKey="revenue" radius={[6,6,0,0]}
+                    fill="url(#leastGrad)" />
+                  <defs>
+                    <linearGradient id="leastGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f59e0b" />
+                      <stop offset="100%" stopColor="#ef4444" />
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+            <div className="space-y-2">
               {(data.leastSelling || []).map((product, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={index} className="flex items-center justify-between px-3 py-2 rounded-xl"
+                     style={{background:'linear-gradient(90deg,#fffbeb,#fff7ed)'}}>
                   <div>
-                    <p className="font-medium text-gray-900">{product.product_name}</p>
-                    <p className="text-sm text-gray-500">{product.variety}</p>
+                    <p className="font-medium text-gray-900 text-sm">{product.product_name}</p>
+                    {product.variety && <p className="text-xs text-gray-400">{product.variety}</p>}
                   </div>
                   <div className="text-right">
-                    <p className="font-medium text-gray-900">₹{formatCurrency(product.total_revenue)}</p>
-                    <p className="text-sm text-gray-500">{product.total_sold} {product.unit}</p>
+                    <p className="font-semibold text-amber-600 text-sm">₹{formatCurrency(product.total_revenue)}</p>
+                    <p className="text-xs text-gray-400">{product.total_sold} {product.unit}</p>
                   </div>
                 </div>
               ))}
@@ -467,10 +560,74 @@ const Reports = () => {
   const renderTrendReport = () => {
     if (!data) return null;
 
+    const trendChartData = (data.trend || []).map(m => ({
+      month: m.month,
+      revenue: Number(m.revenue),
+      transactions: Number(m.transactions),
+      items: Number(m.items_sold)
+    }));
+
     return (
       <div className="space-y-6">
+        {/* Revenue Area Chart */}
+        {trendChartData.length > 0 && (
+          <div className="card">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-5 w-5 rounded bg-gradient-to-br from-blue-500 to-indigo-600 inline-flex items-center justify-center">
+                <BarChart3 className="h-3 w-3 text-white" />
+              </span>
+              Monthly Revenue Trend
+            </h3>
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={trendChartData} margin={{top:8,right:16,left:8,bottom:8}}>
+                <defs>
+                  <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="month" tick={{fontSize:11}} />
+                <YAxis tick={{fontSize:11}} tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} />
+                <Tooltip
+                  formatter={(v, name) => name === 'revenue'
+                    ? [`₹${Number(v).toLocaleString('en-IN')}`, 'Revenue']
+                    : [v, name === 'transactions' ? 'Transactions' : 'Items Sold']}
+                />
+                <Legend />
+                <Area type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2.5}
+                  fill="url(#revGrad)" dot={{r:4,fill:'#6366f1'}} activeDot={{r:6}} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Transactions + Items Bar Chart */}
+        {trendChartData.length > 0 && (
+          <div className="card">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-5 w-5 rounded bg-gradient-to-br from-emerald-500 to-teal-600 inline-flex items-center justify-center">
+                <TrendingUp className="h-3 w-3 text-white" />
+              </span>
+              Transactions & Items Sold per Month
+            </h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={trendChartData} margin={{top:4,right:16,left:8,bottom:4}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="month" tick={{fontSize:11}} />
+                <YAxis tick={{fontSize:11}} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="transactions" name="Transactions" fill="#3b82f6" radius={[4,4,0,0]} />
+                <Bar dataKey="items" name="Items Sold" fill="#10b981" radius={[4,4,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Data Table */}
         <div className="card">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Monthly Sales Trend</h3>
+          <h3 className="text-base font-bold text-gray-800 mb-4">Monthly Data Table</h3>
           <div className="table-container">
             <table className="table">
               <thead>
@@ -492,6 +649,9 @@ const Reports = () => {
                 ))}
               </tbody>
             </table>
+            {(data.trend || []).length === 0 && (
+              <div className="text-center py-8 text-gray-400">No trend data available</div>
+            )}
           </div>
         </div>
       </div>
@@ -671,37 +831,42 @@ const Reports = () => {
   const tabHasFilters = ['daily', 'range', 'performance', 'purchases', 'customerSales'].includes(activeTab);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header banner */}
+      <div className="rounded-2xl px-7 py-5 flex items-center justify-between shadow-lg overflow-hidden relative"
+           style={{background:'linear-gradient(135deg,#0f172a 0%,#1e40af 50%,#7c3aed 100%)'}}>
+        <div className="absolute inset-0 opacity-10 pointer-events-none"
+             style={{backgroundImage:'radial-gradient(circle at 75% 50%,#a78bfa,transparent 60%)'}} />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
-          <p className="mt-1 text-sm text-gray-600">View detailed reports and business insights</p>
+          <h1 className="text-2xl font-extrabold text-white tracking-tight">✦ Reports & Analytics</h1>
+          <p className="mt-0.5 text-sm text-indigo-200">Detailed business insights and performance data</p>
         </div>
         {isAdmin && <ReportDownloader />}
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
+      <div className="card !p-2">
+        <nav className="flex flex-wrap gap-1">
           {[
             { id: 'daily', label: 'Daily Sales', icon: Calendar },
-            { id: 'inventory', label: 'Inventory Status', icon: Package },
+            { id: 'inventory', label: 'Inventory', icon: Package },
             { id: 'purchases', label: 'Purchases', icon: Truck },
             { id: 'range', label: 'Date Range', icon: Calendar },
-            { id: 'performance', label: 'Product Performance', icon: TrendingUp },
+            { id: 'performance', label: 'Performance', icon: TrendingUp },
             { id: 'trend', label: 'Monthly Trend', icon: BarChart3 },
             { id: 'customerSales', label: 'Sales Archive', icon: Users }
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm ${
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                 activeTab === tab.id
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'text-white shadow-md'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
               }`}
+              style={activeTab === tab.id ? {background:'linear-gradient(135deg,#3b82f6,#6366f1)',boxShadow:'0 2px 8px rgba(99,102,241,0.35)'} : {}}
             >
-              <tab.icon className="h-4 w-4 mr-2" />
+              <tab.icon className="h-3.5 w-3.5" />
               {tab.label}
             </button>
           ))}
@@ -710,55 +875,47 @@ const Reports = () => {
 
       {/* Filters */}
       {tabHasFilters && (
-      <div className="card">
-        <div className="flex flex-wrap gap-4 items-end">
-          {activeTab === 'daily' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-              <input
-                type="date"
-                className="input-field"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-              />
-            </div>
-          )}
-          
-          {(activeTab === 'range' || activeTab === 'performance' || activeTab === 'purchases' || activeTab === 'customerSales') && (
-            <>
+        <div className="card !py-4">
+          <div className="flex flex-wrap gap-4 items-end">
+            {activeTab === 'daily' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
+                <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Date</label>
+                <input type="date" className="input-field" value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)} />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-              </div>
-            </>
-          )}
+            )}
+            {(activeTab === 'range' || activeTab === 'performance' || activeTab === 'purchases' || activeTab === 'customerSales') && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">From</label>
+                  <input type="date" className="input-field" value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">To</label>
+                  <input type="date" className="input-field" value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)} />
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-700">{error}</p>
+        <div className="rounded-xl border border-red-200 px-4 py-3 text-red-700 text-sm"
+             style={{background:'linear-gradient(90deg,#fff5f5,#fef2f2)'}}>
+          {error}
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="flex flex-col items-center justify-center h-64 gap-3">
+          <div className="relative h-12 w-12">
+            <div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div>
+            <div className="absolute inset-0 rounded-full border-4 border-t-indigo-500 animate-spin"></div>
+          </div>
+          <p className="text-sm text-indigo-400 font-medium">Loading report...</p>
         </div>
       ) : (
         renderContent()

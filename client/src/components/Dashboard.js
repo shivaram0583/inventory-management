@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { fmtTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   IndianRupee,
   BarChart3,
-  Users,
   Calendar
 } from 'lucide-react';
 
@@ -20,9 +19,22 @@ const Dashboard = () => {
   const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState('');
 
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      const endpoint = user.role === 'admin' ? '/api/dashboard/admin' : '/api/dashboard/operator';
+      const response = await axios.get(endpoint);
+      setDashboardData(response.data);
+    } catch (error) {
+      setError('Failed to load dashboard data');
+      console.error('Dashboard error:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user.role]);
+
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+  }, [fetchDashboardData]);
 
   useEffect(() => {
     const updateIndiaTime = () => {
@@ -49,19 +61,6 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const fetchDashboardData = async () => {
-    try {
-      const endpoint = user.role === 'admin' ? '/api/dashboard/admin' : '/api/dashboard/operator';
-      const response = await axios.get(endpoint);
-      setDashboardData(response.data);
-    } catch (error) {
-      setError('Failed to load dashboard data');
-      console.error('Dashboard error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -81,23 +80,25 @@ const Dashboard = () => {
   const isAdmin = user.role === 'admin';
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header banner */}
+      <div className="rounded-2xl px-7 py-5 flex items-center justify-between shadow-lg overflow-hidden relative"
+           style={{background:'linear-gradient(135deg,#1e1b4b 0%,#4338ca 50%,#6d28d9 100%)'}}>
+        <div className="absolute inset-0 opacity-10 pointer-events-none"
+             style={{backgroundImage:'radial-gradient(circle at 80% 50%,#a78bfa 0%,transparent 60%)'}} />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {isAdmin ? 'Admin Dashboard' : 'Operator Dashboard'}
+          <h1 className="text-2xl font-extrabold text-white tracking-tight">
+            {isAdmin ? '✦ Admin Dashboard' : '✦ Operator Dashboard'}
           </h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Welcome back, {user.username}! Here's your business overview.
+          <p className="mt-0.5 text-sm text-indigo-200">
+            Welcome back, <span className="font-semibold text-white">{user.username}</span>! Here's your business overview.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
-            <Calendar className="h-5 w-5 text-blue-600" />
-            <div className="text-right">
-              <p className="text-xs text-blue-600 font-medium">India Time (UTC+5:30)</p>
-              <p className="text-sm font-semibold text-gray-900">{currentTime}</p>
-            </div>
+        <div className="flex items-center gap-2 bg-white/10 border border-white/20 rounded-xl px-4 py-2.5 backdrop-blur-sm">
+          <Calendar className="h-5 w-5 text-indigo-200" />
+          <div className="text-right">
+            <p className="text-xs text-indigo-300 font-medium">India Time (IST)</p>
+            <p className="text-sm font-bold text-white">{currentTime}</p>
           </div>
         </div>
       </div>
@@ -164,20 +165,24 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Sales */}
         {dashboardData.recent_activity?.sales && (
-          <div className="card">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Recent Sales</h3>
-            <div className="space-y-3">
+          <div className="card animate-fade-in-up stagger-1">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm">
+                <ShoppingCart className="h-4 w-4 text-white" />
+              </span>
+              Recent Sales
+            </h3>
+            <div className="space-y-2">
               {dashboardData.recent_activity.sales.map((sale, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={index} className="flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 hover:shadow-sm cursor-default"
+                     style={{background:'linear-gradient(90deg,#f8faff,#f3f0ff)'}}>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{sale.product_name}</p>
-                    <p className="text-xs text-gray-500">{sale.sale_id}</p>
+                    <p className="text-sm font-semibold text-gray-800">{sale.product_name}</p>
+                    <p className="text-xs text-indigo-400 font-mono">{sale.sale_id}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-medium text-gray-900">₹{sale.total_amount.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500">
-                      {fmtTime(sale.sale_date)}
-                    </p>
+                    <p className="text-sm font-bold text-indigo-700">₹{sale.total_amount.toLocaleString()}</p>
+                    <p className="text-xs text-gray-400">{fmtTime(sale.sale_date)}</p>
                   </div>
                 </div>
               ))}
@@ -185,23 +190,26 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Low Stock Alerts (Admin only) */}
+        {/* Low Stock Alerts (Admin) */}
         {isAdmin && dashboardData.alerts?.low_stock_items?.length > 0 && (
-          <div className="card">
-            <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-              <AlertTriangle className="h-5 w-5 text-red-500 mr-2" />
+          <div className="card animate-fade-in-up stagger-2">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-sm">
+                <AlertTriangle className="h-4 w-4 text-white" />
+              </span>
               Low Stock Alerts
             </h3>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {dashboardData.alerts.low_stock_items.map((item, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                <div key={index} className="flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 hover:shadow-sm cursor-default"
+                     style={{background:'linear-gradient(90deg,#fff5f5,#fef2f2)'}}>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{item.product_name}</p>
-                    {item.variety && <p className="text-xs text-gray-500">{item.variety}</p>}
+                    <p className="text-sm font-semibold text-gray-800">{item.product_name}</p>
+                    {item.variety && <p className="text-xs text-gray-400">{item.variety}</p>}
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-medium text-red-600">{item.quantity_available} {item.unit}</p>
-                    <p className="text-xs text-gray-500">Low stock</p>
+                    <p className="text-sm font-bold text-red-600">{item.quantity_available} {item.unit}</p>
+                    <p className="text-xs text-red-400">⚠ Low stock</p>
                   </div>
                 </div>
               ))}
@@ -209,20 +217,26 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Popular Items (Operator only) */}
+        {/* Popular Items (Operator) */}
         {!isAdmin && dashboardData.popular_items && (
-          <div className="card">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Popular Items</h3>
-            <div className="space-y-3">
+          <div className="card animate-fade-in-up stagger-2">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm">
+                <TrendingUp className="h-4 w-4 text-white" />
+              </span>
+              Popular Items
+            </h3>
+            <div className="space-y-2">
               {dashboardData.popular_items.slice(0, 5).map((item, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={index} className="flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 hover:shadow-sm cursor-default"
+                     style={{background:'linear-gradient(90deg,#faf5ff,#f3f0ff)'}}>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{item.product_name}</p>
-                    {item.variety && <p className="text-xs text-gray-500">{item.variety}</p>}
+                    <p className="text-sm font-semibold text-gray-800">{item.product_name}</p>
+                    {item.variety && <p className="text-xs text-gray-400">{item.variety}</p>}
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-medium text-gray-900">₹{item.selling_price}/{item.unit}</p>
-                    <p className="text-xs text-gray-500">{item.quantity_available} {item.unit} available</p>
+                    <p className="text-sm font-bold text-violet-700">₹{item.selling_price}/{item.unit}</p>
+                    <p className="text-xs text-gray-400">{item.quantity_available} {item.unit} left</p>
                   </div>
                 </div>
               ))}
@@ -230,20 +244,26 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Category Performance (Admin only) */}
+        {/* Category Performance (Admin) */}
         {isAdmin && dashboardData.analytics?.category_performance && (
-          <div className="card">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Category Performance</h3>
-            <div className="space-y-3">
+          <div className="card animate-fade-in-up stagger-3">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-sm">
+                <BarChart3 className="h-4 w-4 text-white" />
+              </span>
+              Category Performance
+            </h3>
+            <div className="space-y-2">
               {dashboardData.analytics.category_performance.map((category, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={index} className="flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 hover:shadow-sm cursor-default"
+                     style={{background:'linear-gradient(90deg,#f0fdf4,#ecfdf5)'}}>
                   <div>
-                    <p className="text-sm font-medium text-gray-900 capitalize">{category.category}</p>
-                    <p className="text-xs text-gray-500">{category.product_count} products</p>
+                    <p className="text-sm font-semibold text-gray-800 capitalize">{category.category}</p>
+                    <p className="text-xs text-gray-400">{category.product_count} products</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-medium text-gray-900">₹{category.revenue.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500">Today's revenue</p>
+                    <p className="text-sm font-bold text-emerald-700">₹{category.revenue.toLocaleString()}</p>
+                    <p className="text-xs text-gray-400">Today's revenue</p>
                   </div>
                 </div>
               ))}
@@ -256,31 +276,40 @@ const Dashboard = () => {
 };
 
 const StatCard = ({ title, value, icon: Icon, color }) => {
-  const colorClasses = {
-    blue: 'border-blue-500 bg-blue-50',
-    green: 'border-green-500 bg-green-50',
-    purple: 'border-purple-500 bg-purple-50',
-    orange: 'border-orange-500 bg-orange-50',
-    red: 'border-red-500 bg-red-50'
+  const gradients = {
+    blue:   'linear-gradient(135deg,#3b82f6,#6366f1)',
+    green:  'linear-gradient(135deg,#10b981,#059669)',
+    purple: 'linear-gradient(135deg,#8b5cf6,#7c3aed)',
+    orange: 'linear-gradient(135deg,#f59e0b,#ea580c)',
+    red:    'linear-gradient(135deg,#ef4444,#dc2626)',
   };
-
-  const iconColors = {
-    blue: 'text-blue-500',
-    green: 'text-green-500',
-    purple: 'text-purple-500',
-    orange: 'text-orange-500',
-    red: 'text-red-500'
+  const glows = {
+    blue:   'rgba(99,102,241,0.25)',
+    green:  'rgba(16,185,129,0.25)',
+    purple: 'rgba(139,92,246,0.25)',
+    orange: 'rgba(245,158,11,0.25)',
+    red:    'rgba(239,68,68,0.25)',
+  };
+  const bgs = {
+    blue:   'linear-gradient(135deg,#eff6ff,#eef2ff)',
+    green:  'linear-gradient(135deg,#f0fdf4,#ecfdf5)',
+    purple: 'linear-gradient(135deg,#faf5ff,#f3e8ff)',
+    orange: 'linear-gradient(135deg,#fffbeb,#fff7ed)',
+    red:    'linear-gradient(135deg,#fff5f5,#fef2f2)',
   };
 
   return (
-    <div className={`stat-card ${colorClasses[color]}`}>
-      <div className="flex items-center">
-        <div className="flex-shrink-0">
-          <Icon className={`h-6 w-6 ${iconColors[color]}`} />
+    <div className="stat-card animate-fade-in-up" style={{background: bgs[color]}}>
+      <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-10 pointer-events-none -translate-y-8 translate-x-8"
+           style={{background: gradients[color]}} />
+      <div className="flex items-center gap-4">
+        <div className="h-12 w-12 rounded-2xl flex items-center justify-center shadow-lg flex-shrink-0"
+             style={{background: gradients[color], boxShadow: `0 4px 14px ${glows[color]}`}}>
+          <Icon className="h-6 w-6 text-white" />
         </div>
-        <div className="ml-4">
-          <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
+          <p className="text-2xl font-extrabold text-gray-900 leading-tight">{value}</p>
         </div>
       </div>
     </div>
