@@ -334,6 +334,7 @@ authorizeRole(allowedRoles)(req, res, next):
 
 | Entity | Format | Example |
 |---|---|---|
+| Product ID | Auto: first 4 chars of category uppercased + 3-digit sequence | `SEED001`, `FERT003`, `PEST002` |
 | Sale ID | `SALE` + IST YYYYMMDDHHmmss + 4 random alphanumeric | `SALE20260316231000XK2A` |
 | Receipt Number | `R-` + YYYYMMDD + `-` + sanitised customer name (≤15 chars, a-z0-9) + `-` + 2 random chars | `R-20260316-rameshkumar-4K` |
 | Purchase ID | `PUR` + IST YYYYMMDDHHmmss + 4 random hex uppercase | `PUR20260316231000AB3F` |
@@ -479,9 +480,10 @@ Purchases.js  (3 tabs)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
-| GET | `/` | Any | List products — `?category=seeds&search=tomato` |
-| GET | `/:id` | Any | Single product |
-| POST | `/` | admin, operator | Create product |
+| GET | `/` | Any | All products — `?category=&search=` |
+| GET | `/next-id` | Any | Next auto-generated product ID — `?category=seeds` → `{ nextId: "SEED005" }` |
+| GET | `/:id` | Any | Single product by DB id |
+| POST | `/` | admin, operator | Create product (`product_id` optional — auto-generated from category if omitted) |
 | PUT | `/:id` | admin, operator | Update fields (partial) |
 | DELETE | `/:id` | admin | Delete (blocked if has sales records) |
 | POST | `/:id/add-stock` | admin, operator | Add qty to existing stock |
@@ -491,7 +493,6 @@ Purchases.js  (3 tabs)
 ```json
 // POST /api/inventory
 {
-  "product_id": "PROD001",
   "category": "seeds",
   "product_name": "Tomato Seeds",
   "variety": "Hybrid F1",
@@ -676,12 +677,14 @@ cd server && node index.js      # Express serves API + static React build
 
 ### Inventory
 - Add / edit / delete products with dynamically managed categories
+- **Auto-generated Product IDs** based on category: `SEED001`, `FERT001`, `PEST001`, etc.
 - Units supported: `kg`, `packet`, `bag`, `liters`
 - Low-stock items highlighted in red (≤10 units)
 - "Add Stock" on each product row logs an automatic purchase record
 
 ### Sales (POS)
-- Cart interface: search → click to add → adjust quantity → remove
+- **Multi-item cart**: add multiple products, adjust quantities, then checkout all at once
+- **Editable quantity**: type a number directly or use +/− buttons (ideal for large quantities like 20 bags)
 - Customer details capture: name, mobile, address (all optional)
 - Payment modes: Cash / Card / UPI
 - Real-time stock validation — sale blocked if insufficient stock

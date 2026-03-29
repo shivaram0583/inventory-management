@@ -21,8 +21,8 @@ const Users = () => {
   const [deleteConfirmModal, setDeleteConfirmModal] = useState({ open: false, user: null });
 
   const canManage = useMemo(() => user?.role === 'admin', [user]);
-  const { sortedItems: sortedUsers, sortConfig: usersSort, requestSort: sortUsers } = useSortableData(users);
-  const { sortedItems: sortedLogs, sortConfig: logsSort, requestSort: sortLogs } = useSortableData(loginLogs);
+  const { sortedItems: sortedUsers, sortConfig: usersSort, requestSort: sortUsers } = useSortableData(users, { key: 'id', direction: 'desc' });
+  const { sortedItems: sortedLogs, sortConfig: logsSort, requestSort: sortLogs } = useSortableData(loginLogs, { key: 'logged_in_at', direction: 'desc' });
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);

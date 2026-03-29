@@ -297,13 +297,24 @@ const Sales = () => {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1">
                           <button onClick={() => updateCartItemQuantity(item.product_id, item.quantity - 1)}
-                            className="w-6 h-6 rounded-lg text-xs font-bold text-indigo-600 hover:text-white transition-all duration-150 flex items-center justify-center"
+                            className="w-7 h-7 rounded-lg text-sm font-bold text-indigo-600 hover:text-white hover:bg-indigo-500 transition-all duration-150 flex items-center justify-center"
                             style={{background:'linear-gradient(135deg,#ede9fe,#e0e7ff)'}}>
                             −
                           </button>
-                          <span className="w-7 text-center text-xs font-bold text-gray-800">{item.quantity}</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max={item.max_quantity}
+                            step="any"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              if (!isNaN(val) && val > 0) updateCartItemQuantity(item.product_id, val);
+                            }}
+                            className="w-16 text-center text-xs font-bold text-gray-800 border border-indigo-200 rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
+                          />
                           <button onClick={() => updateCartItemQuantity(item.product_id, item.quantity + 1)}
-                            className="w-6 h-6 rounded-lg text-xs font-bold text-white transition-all duration-150 flex items-center justify-center"
+                            className="w-7 h-7 rounded-lg text-sm font-bold text-white transition-all duration-150 flex items-center justify-center"
                             style={{background:'linear-gradient(135deg,#6366f1,#8b5cf6)'}}>
                             +
                           </button>

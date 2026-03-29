@@ -35,12 +35,12 @@ const Reports = () => {
   const [error, setError] = useState('');
   const [deleteModal, setDeleteModal] = useState({ open: false, id: null, label: '' });
 
-  const { sortedItems: sortedSales, sortConfig: salesSort, requestSort: sortSales } = useSortableData(data?.sales || []);
-  const { sortedItems: sortedCustSales, sortConfig: custSalesSort, requestSort: sortCustSales } = useSortableData(data?.customerSales || []);
+  const { sortedItems: sortedSales, sortConfig: salesSort, requestSort: sortSales } = useSortableData(data?.sales || [], { key: 'total_amount', direction: 'desc' });
+  const { sortedItems: sortedCustSales, sortConfig: custSalesSort, requestSort: sortCustSales } = useSortableData(data?.customerSales || [], { key: 'sale_date', direction: 'desc' });
   const { sortedItems: sortedProducts, sortConfig: productsSort, requestSort: sortProducts } = useSortableData(data?.products || []);
-  const { sortedItems: sortedPurchases, sortConfig: purchasesSort, requestSort: sortPurchases } = useSortableData(data?.purchases || []);
-  const { sortedItems: sortedArchive, sortConfig: archiveSort, requestSort: sortArchive } = useSortableData(data?.records || []);
-  const { sortedItems: sortedTrend, sortConfig: trendSort, requestSort: sortTrend } = useSortableData(data?.trend || []);
+  const { sortedItems: sortedPurchases, sortConfig: purchasesSort, requestSort: sortPurchases } = useSortableData(data?.purchases || [], { key: 'purchase_date', direction: 'desc' });
+  const { sortedItems: sortedArchive, sortConfig: archiveSort, requestSort: sortArchive } = useSortableData(data?.records || [], { key: 'sale_date', direction: 'desc' });
+  const { sortedItems: sortedTrend, sortConfig: trendSort, requestSort: sortTrend } = useSortableData(data?.trend || [], { key: 'month', direction: 'desc' });
 
   const formatCurrency = (value) => {
     const amount = Number(value);
@@ -114,6 +114,12 @@ const Reports = () => {
           break;
         case 'customerSales':
           url = '/api/reports/customer-sales';
+          if (startDate && endDate) {
+            params = { start_date: startDate, end_date: endDate };
+          }
+          break;
+        case 'suppliers':
+          url = '/api/reports/suppliers';
           if (startDate && endDate) {
             params = { start_date: startDate, end_date: endDate };
           }
@@ -807,6 +813,130 @@ const Reports = () => {
     );
   };
 
+  const renderSuppliersReport = () => {
+    if (!data) return null;
+    const suppliersList = data.suppliers || [];
+    const details = data.details || [];
+
+    return (
+      <div className="space-y-6">
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="stat-card border-teal-500 bg-teal-50">
+            <div className="flex items-center">
+              <Users className="h-6 w-6 text-teal-500" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Suppliers</p>
+                <p className="text-2xl font-bold text-gray-900">{data.summary?.total_suppliers || 0}</p>
+              </div>
+            </div>
+          </div>
+          <div className="stat-card border-blue-500 bg-blue-50">
+            <div className="flex items-center">
+              <Truck className="h-6 w-6 text-blue-500" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Purchases</p>
+                <p className="text-2xl font-bold text-gray-900">{data.summary?.total_purchases || 0}</p>
+              </div>
+            </div>
+          </div>
+          <div className="stat-card border-purple-500 bg-purple-50">
+            <div className="flex items-center">
+              <IndianRupee className="h-6 w-6 text-purple-500" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Cost</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(data.summary?.total_cost)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Supplier Summary Table */}
+        <div className="card">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            <Truck className="h-5 w-5 inline mr-2" />
+            Supplier Summary
+          </h3>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Supplier</th>
+                  <th>Products Supplied</th>
+                  <th>Total Purchases</th>
+                  <th>Total Quantity</th>
+                  <th>Total Spent</th>
+                  <th>First Purchase</th>
+                  <th>Last Purchase</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suppliersList.map((sup, idx) => (
+                  <tr key={idx}>
+                    <td className="font-medium">{sup.supplier}</td>
+                    <td>{sup.products_supplied}</td>
+                    <td>{sup.total_purchases}</td>
+                    <td>{Number(sup.total_quantity || 0).toFixed(1)}</td>
+                    <td className="font-medium">₹{formatCurrency(sup.total_spent)}</td>
+                    <td className="text-sm">{fmtDateTime(sup.first_purchase)}</td>
+                    <td className="text-sm">{fmtDateTime(sup.last_purchase)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {suppliersList.length === 0 && (
+              <div className="text-center py-8 text-gray-500">No supplier data available</div>
+            )}
+          </div>
+        </div>
+
+        {/* Detailed Supplier-Product Breakdown */}
+        <div className="card">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">
+            <Package className="h-5 w-5 inline mr-2" />
+            Items Supplied — Detailed Breakdown
+          </h3>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Supplier</th>
+                  <th>Product ID</th>
+                  <th>Product</th>
+                  <th>Category</th>
+                  <th>Total Qty</th>
+                  <th>Total Spent</th>
+                  <th>Purchases</th>
+                  <th>Last Purchase</th>
+                </tr>
+              </thead>
+              <tbody>
+                {details.map((d, idx) => (
+                  <tr key={idx}>
+                    <td className="font-medium">{d.supplier}</td>
+                    <td className="font-mono text-xs">{d.product_code}</td>
+                    <td>
+                      <p className="font-medium">{d.product_name}</p>
+                      {d.variety && <p className="text-xs text-gray-500">{d.variety}</p>}
+                    </td>
+                    <td className="capitalize">{d.category}</td>
+                    <td>{d.total_quantity} {d.unit}</td>
+                    <td className="font-medium">₹{formatCurrency(d.total_spent)}</td>
+                    <td>{d.purchase_count}</td>
+                    <td className="text-sm">{fmtDateTime(d.last_purchase)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {details.length === 0 && (
+              <div className="text-center py-8 text-gray-500">No detail data available</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'daily':
@@ -823,12 +953,14 @@ const Reports = () => {
         return renderTrendReport();
       case 'customerSales':
         return renderCustomerSalesArchive();
+      case 'suppliers':
+        return renderSuppliersReport();
       default:
         return null;
     }
   };
 
-  const tabHasFilters = ['daily', 'range', 'performance', 'purchases', 'customerSales'].includes(activeTab);
+  const tabHasFilters = ['daily', 'range', 'performance', 'purchases', 'customerSales', 'suppliers'].includes(activeTab);
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -854,7 +986,8 @@ const Reports = () => {
             { id: 'range', label: 'Date Range', icon: Calendar },
             { id: 'performance', label: 'Performance', icon: TrendingUp },
             { id: 'trend', label: 'Monthly Trend', icon: BarChart3 },
-            { id: 'customerSales', label: 'Sales Archive', icon: Users }
+            { id: 'customerSales', label: 'Sales Archive', icon: Users },
+            { id: 'suppliers', label: 'Suppliers', icon: Truck }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -884,7 +1017,7 @@ const Reports = () => {
                   onChange={(e) => setSelectedDate(e.target.value)} />
               </div>
             )}
-            {(activeTab === 'range' || activeTab === 'performance' || activeTab === 'purchases' || activeTab === 'customerSales') && (
+            {(activeTab === 'range' || activeTab === 'performance' || activeTab === 'purchases' || activeTab === 'customerSales' || activeTab === 'suppliers') && (
               <>
                 <div>
                   <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">From</label>

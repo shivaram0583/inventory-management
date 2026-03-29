@@ -10,6 +10,8 @@ const REPORT_TYPES = [
   { id: 'sales-range', label: 'Sales by Date Range', needsRange: true },
   { id: 'purchases', label: 'Purchases by Date Range', needsRange: true },
   { id: 'customer-sales', label: 'Customer Sales by Date Range', needsRange: true },
+  { id: 'suppliers', label: 'Supplier Report', needsRange: true },
+  { id: 'supplier-details', label: 'Supplier Items Breakdown', needsRange: true },
 ];
 
 const COLUMNS = {
@@ -63,6 +65,27 @@ const COLUMNS = {
     { key: 'quantity', label: 'Qty' },
     { key: 'sale_date_fmt', label: 'Sale Date (IST)' },
   ],
+  suppliers: [
+    { key: 'supplier', label: 'Supplier' },
+    { key: 'products_supplied', label: 'Products Supplied' },
+    { key: 'total_purchases', label: 'Total Purchases' },
+    { key: 'total_quantity', label: 'Total Quantity' },
+    { key: 'total_spent', label: 'Total Spent (₹)' },
+    { key: 'first_purchase_fmt', label: 'First Purchase (IST)' },
+    { key: 'last_purchase_fmt', label: 'Last Purchase (IST)' },
+  ],
+  'supplier-details': [
+    { key: 'supplier', label: 'Supplier' },
+    { key: 'product_code', label: 'Product ID' },
+    { key: 'product_name', label: 'Product' },
+    { key: 'variety', label: 'Variety' },
+    { key: 'category', label: 'Category' },
+    { key: 'unit', label: 'Unit' },
+    { key: 'total_quantity', label: 'Total Qty' },
+    { key: 'total_spent', label: 'Total Spent (₹)' },
+    { key: 'purchase_count', label: 'Purchases' },
+    { key: 'last_purchase_fmt', label: 'Last Purchase (IST)' },
+  ],
 };
 
 const ReportDownloader = () => {
@@ -113,6 +136,23 @@ const ReportDownloader = () => {
         rows = (res.data?.records || []).map(r => ({
           ...r,
           sale_date_fmt: fmtDateTime(r.sale_date),
+        }));
+      } else if (reportType === 'suppliers') {
+        const res = await axios.get('/api/reports/suppliers', {
+          params: { start_date: startDate, end_date: endDate }
+        });
+        rows = (res.data?.suppliers || []).map(s => ({
+          ...s,
+          first_purchase_fmt: fmtDateTime(s.first_purchase),
+          last_purchase_fmt: fmtDateTime(s.last_purchase),
+        }));
+      } else if (reportType === 'supplier-details') {
+        const res = await axios.get('/api/reports/suppliers', {
+          params: { start_date: startDate, end_date: endDate }
+        });
+        rows = (res.data?.details || []).map(d => ({
+          ...d,
+          last_purchase_fmt: fmtDateTime(d.last_purchase),
         }));
       }
 
