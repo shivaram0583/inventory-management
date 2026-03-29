@@ -28,7 +28,7 @@ const Inventory = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [duplicateIdModal, setDuplicateIdModal] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState({ open: false, product: null });
-  const { sortedItems: sortedProducts, sortConfig: invSort, requestSort: sortInv } = useSortableData(filteredProducts);
+  const { sortedItems: sortedProducts, sortConfig: invSort, requestSort: sortInv } = useSortableData(filteredProducts, { key: 'created_at', direction: 'desc' });
   const [actionModal, setActionModal] = useState({ open: false, title: '', message: '', type: 'success' });
   const [formData, setFormData] = useState({
     product_id: '',
@@ -38,8 +38,7 @@ const Inventory = () => {
     quantity_available: '',
     unit: 'kg',
     purchase_price: '',
-    selling_price: '',
-    supplier: ''
+    selling_price: ''
   });
 
   const closeActionModal = () => setActionModal((prev) => ({ ...prev, open: false }));
@@ -161,6 +160,15 @@ const Inventory = () => {
     }
   };
 
+  const fetchNextId = async (category) => {
+    try {
+      const res = await axios.get(`/api/inventory/next-id?category=${category}`);
+      setFormData(f => ({...f, product_id: res.data.nextId}));
+    } catch (err) {
+      console.error('Failed to fetch next ID:', err);
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       product_id: '',
@@ -171,7 +179,6 @@ const Inventory = () => {
       unit: 'kg',
       purchase_price: '',
       selling_price: '',
-      supplier: '',
       addStock: ''
     });
     setSelectedProduct(null);
@@ -187,8 +194,7 @@ const Inventory = () => {
       quantity_available: product.quantity_available,
       unit: product.unit,
       purchase_price: product.purchase_price,
-      selling_price: product.selling_price,
-      supplier: product.supplier || ''
+      selling_price: product.selling_price
     });
     setShowEditModal(true);
   };
@@ -223,7 +229,7 @@ const Inventory = () => {
         </div>
         {canEdit && (
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => { resetForm(); const cat = categories[0]?.name || 'seeds'; setFormData(f => ({...f, category: cat})); fetchNextId(cat); setShowAddModal(true); }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-xl hover:shadow-2xl active:scale-95 transition-all duration-200 border border-white/20"
             style={{background:'linear-gradient(135deg,rgba(255,255,255,0.2),rgba(255,255,255,0.1))',backdropFilter:'blur(8px)'}}
           >
@@ -280,7 +286,6 @@ const Inventory = () => {
                 <SortableHeader label="Category" sortKey="category" sortConfig={invSort} onSort={sortInv} />
                 <SortableHeader label="Stock" sortKey="quantity_available" sortConfig={invSort} onSort={sortInv} />
                 <SortableHeader label="Unit Price" sortKey="selling_price" sortConfig={invSort} onSort={sortInv} />
-                <SortableHeader label="Supplier" sortKey="supplier" sortConfig={invSort} onSort={sortInv} />
                 {canEdit && <th>Actions</th>}
               </tr>
             </thead>
@@ -302,7 +307,6 @@ const Inventory = () => {
                     </div>
                   </td>
                   <td>₹{product.selling_price}/{product.unit}</td>
-                  <td>{product.supplier || '-'}</td>
                   {canEdit && (
                     <td>
                       <div className="flex space-x-2">
@@ -350,13 +354,13 @@ const Inventory = () => {
           <form onSubmit={handleAddProduct} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Product ID</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Product ID <span className="text-xs text-gray-400">(auto)</span></label>
                 <input
                   type="text"
-                  required
-                  className="input-field"
+                  readOnly
+                  className="input-field bg-gray-50 text-gray-500 cursor-not-allowed"
                   value={formData.product_id}
-                  onChange={(e) => setFormData({...formData, product_id: e.target.value})}
+                  placeholder="Auto-generated..."
                 />
               </div>
               <div>
@@ -365,7 +369,7 @@ const Inventory = () => {
                   required
                   className="input-field"
                   value={formData.category}
-                  onChange={(e) => setFormData({...formData, category: e.target.value})}
+                  onChange={(e) => { const cat = e.target.value; setFormData(f => ({...f, category: cat})); fetchNextId(cat); }}
                 >
                   {categories.map(c => (
                     <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
@@ -443,19 +447,10 @@ const Inventory = () => {
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
-              <input
-                type="text"
-                className="input-field"
-                value={formData.supplier}
-                onChange={(e) => setFormData({...formData, supplier: e.target.value})}
-              />
-            </div>
             <div className="flex justify-end space-x-3 pt-4">
               <button
                 type="button"
-                onClick={() => setShowAddModal(false)}
+                onClick={() => { setShowAddModal(false); resetForm(); }}
                 className="btn-secondary"
               >
                 Cancel
@@ -475,13 +470,12 @@ const Inventory = () => {
             {/* Same form fields as Add Product but pre-filled */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Product Name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Product ID</label>
                 <input
                   type="text"
-                  required
-                  className="input-field"
-                  value={formData.product_name}
-                  onChange={(e) => setFormData({...formData, product_name: e.target.value})}
+                  readOnly
+                  className="input-field bg-gray-50 text-gray-500 cursor-not-allowed"
+                  value={formData.product_id}
                 />
               </div>
               <div>
@@ -490,13 +484,23 @@ const Inventory = () => {
                   required
                   className="input-field"
                   value={formData.category}
-                  onChange={(e) => setFormData({...formData, category: e.target.value})}
+                  onChange={(e) => setFormData(f => ({...f, category: e.target.value}))}
                 >
                   {categories.map(c => (
                     <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
                   ))}
                 </select>
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Product Name</label>
+              <input
+                type="text"
+                required
+                className="input-field"
+                value={formData.product_name}
+                onChange={(e) => setFormData({...formData, product_name: e.target.value})}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Variety</label>
@@ -557,15 +561,6 @@ const Inventory = () => {
                   onChange={(e) => setFormData({...formData, selling_price: e.target.value})}
                 />
               </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
-              <input
-                type="text"
-                className="input-field"
-                value={formData.supplier}
-                onChange={(e) => setFormData({...formData, supplier: e.target.value})}
-              />
             </div>
             <div className="flex justify-end space-x-3 pt-4">
               <button

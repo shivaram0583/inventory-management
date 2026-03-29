@@ -238,4 +238,122 @@ router.put('/:id', [
   }
 });
 
+// GET list of all unique suppliers with summary stats
+router.get('/suppliers', authenticateToken, async (req, res) => {
+  try {
+    const suppliers = await getAll(`
+      SELECT
+        pu.supplier,
+        COUNT(pu.id) AS total_purchases,
+        SUM(pu.quantity) AS total_quantity,
+        SUM(pu.total_amount) AS total_spent,
+        COUNT(DISTINCT pu.product_id) AS products_supplied,
+        MAX(pu.purchase_date) AS last_purchase_date
+      FROM purchases pu
+      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
+      GROUP BY pu.supplier
+      ORDER BY total_spent DESC
+    `);
+    res.json(suppliers);
+  } catch (error) {
+    console.error('Get suppliers error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET supplier detail — products supplied + purchase history
+router.get('/suppliers/:name', authenticateToken, async (req, res) => {
+  try {
+    const supplierName = decodeURIComponent(req.params.name);
+    const { start_date, end_date } = req.query;
+
+    let dateFilter = '';
+    const params = [supplierName];
+
+    if (start_date && end_date) {
+      dateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      params.push(start_date, end_date);
+    }
+
+    // Products supplied by this supplier
+    const products = await getAll(`
+      SELECT
+        p.product_id AS product_code,
+        p.product_name,
+        p.variety,
+        p.category,
+        p.unit,
+        SUM(pu.quantity) AS total_quantity,
+        SUM(pu.total_amount) AS total_spent,
+        COUNT(pu.id) AS purchase_count,
+        MAX(pu.purchase_date) AS last_purchase_date
+      FROM purchases pu
+      JOIN products p ON pu.product_id = p.id
+      WHERE pu.supplier = ? ${dateFilter}
+      GROUP BY p.id, p.product_id, p.product_name, p.variety, p.category, p.unit
+      ORDER BY total_spent DESC
+    `, params);
+
+    // Full purchase history for this supplier
+    const historyParams = [supplierName];
+    let historyDateFilter = '';
+    if (start_date && end_date) {
+      historyDateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      historyParams.push(start_date, end_date);
+    }
+
+    const history = await getAll(`
+      SELECT
+        pu.id,
+        pu.purchase_id,
+        p.product_id AS product_code,
+        p.product_name,
+        p.variety,
+        p.category,
+        p.unit,
+        pu.quantity,
+        pu.price_per_unit,
+        pu.total_amount,
+        pu.purchase_date,
+        u.username AS added_by
+      FROM purchases pu
+      JOIN products p ON pu.product_id = p.id
+      LEFT JOIN users u ON pu.added_by = u.id
+      WHERE pu.supplier = ? ${historyDateFilter}
+      ORDER BY pu.purchase_date DESC
+    `, historyParams);
+
+    // Summary
+    const summaryParams = [supplierName];
+    let summaryDateFilter = '';
+    if (start_date && end_date) {
+      summaryDateFilter = "AND DATE(datetime(purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      summaryParams.push(start_date, end_date);
+    }
+
+    const summary = await getRow(`
+      SELECT
+        COUNT(*) AS total_purchases,
+        SUM(quantity) AS total_items,
+        SUM(total_amount) AS total_cost
+      FROM purchases
+      WHERE supplier = ? ${summaryDateFilter}
+    `, summaryParams);
+
+    res.json({
+      supplier: supplierName,
+      summary: {
+        total_purchases: summary?.total_purchases || 0,
+        total_items: summary?.total_items || 0,
+        total_cost: summary?.total_cost || 0
+      },
+      products,
+      history
+    });
+  } catch (error) {
+    console.error('Get supplier detail error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;

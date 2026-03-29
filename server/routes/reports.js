@@ -335,6 +335,101 @@ router.get('/purchases', authenticateToken, async (req, res) => {
   }
 });
 
+// Supplier report — all suppliers with items supplied, with optional date range
+router.get('/suppliers', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date, supplier } = req.query;
+    let dateFilter = '';
+    const params = [];
+
+    if (start_date && end_date) {
+      dateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      params.push(start_date, end_date);
+    }
+
+    let supplierFilter = '';
+    if (supplier) {
+      supplierFilter = 'AND pu.supplier = ?';
+      params.push(supplier);
+    }
+
+    // Summary per supplier
+    const suppliers = await getAll(`
+      SELECT
+        pu.supplier,
+        COUNT(pu.id) AS total_purchases,
+        SUM(pu.quantity) AS total_quantity,
+        SUM(pu.total_amount) AS total_spent,
+        COUNT(DISTINCT pu.product_id) AS products_supplied,
+        MIN(pu.purchase_date) AS first_purchase,
+        MAX(pu.purchase_date) AS last_purchase
+      FROM purchases pu
+      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
+        ${dateFilter} ${supplierFilter}
+      GROUP BY pu.supplier
+      ORDER BY total_spent DESC
+    `, params);
+
+    // Detail rows per supplier-product
+    const detailParams = [];
+    let detailDateFilter = '';
+    let detailSupplierFilter = '';
+    if (start_date && end_date) {
+      detailDateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      detailParams.push(start_date, end_date);
+    }
+    if (supplier) {
+      detailSupplierFilter = 'AND pu.supplier = ?';
+      detailParams.push(supplier);
+    }
+
+    const details = await getAll(`
+      SELECT
+        pu.supplier,
+        p.product_id AS product_code,
+        p.product_name,
+        p.variety,
+        p.category,
+        p.unit,
+        SUM(pu.quantity) AS total_quantity,
+        SUM(pu.total_amount) AS total_spent,
+        COUNT(pu.id) AS purchase_count,
+        MAX(pu.purchase_date) AS last_purchase
+      FROM purchases pu
+      JOIN products p ON pu.product_id = p.id
+      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
+        ${detailDateFilter} ${detailSupplierFilter}
+      GROUP BY pu.supplier, p.id, p.product_id, p.product_name, p.variety, p.category, p.unit
+      ORDER BY pu.supplier, total_spent DESC
+    `, detailParams);
+
+    const overallSummary = await getRow(`
+      SELECT
+        COUNT(DISTINCT supplier) AS total_suppliers,
+        COUNT(*) AS total_purchases,
+        SUM(total_amount) AS total_cost
+      FROM purchases
+      WHERE supplier IS NOT NULL AND supplier != ''
+        ${start_date && end_date ? "AND DATE(datetime(purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?" : ''}
+        ${supplier ? 'AND supplier = ?' : ''}
+    `, [...(start_date && end_date ? [start_date, end_date] : []), ...(supplier ? [supplier] : [])]);
+
+    res.json({
+      suppliers,
+      details,
+      summary: {
+        total_suppliers: overallSummary?.total_suppliers || 0,
+        total_purchases: overallSummary?.total_purchases || 0,
+        total_cost: overallSummary?.total_cost || 0
+      },
+      range: { start_date, end_date }
+    });
+  } catch (error) {
+    console.error('Supplier report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Customer sales archive
 router.get('/customer-sales', authenticateToken, async (req, res) => {
   try {

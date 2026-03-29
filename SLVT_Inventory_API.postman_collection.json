@@ -326,6 +326,37 @@
       "name": "Inventory",
       "item": [
         {
+          "name": "Get Next Product ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/inventory/next-id?category=seeds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "inventory",
+                "next-id"
+              ],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "seeds"
+                }
+              ]
+            },
+            "description": "Returns the next auto-generated product ID for the given category. Examples: seeds -> SEED001, fertilizers -> FERT001, pesticides -> PEST001. The number increments based on existing products with matching prefix."
+          },
+          "response": []
+        },
+        {
           "name": "List All Products",
           "request": {
             "method": "GET",
@@ -504,10 +535,10 @@
                 "inventory"
               ]
             },
-            "description": "\n\nValid units: kg, packet, bag, liters",
+            "description": "\n\nValid units: kg, packet, bag, liters\n\nproduct_id is now auto-generated from the category (e.g. SEED005, FERT003). You can still pass it explicitly if needed.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"PROD001\",\n  \"category\": \"seeds\",\n  \"product_name\": \"Tomato Seeds\",\n  \"variety\": \"Hybrid F1\",\n  \"quantity_available\": 100,\n  \"unit\": \"packet\",\n  \"purchase_price\": 120,\n  \"selling_price\": 150,\n  \"supplier\": \"ABC Agro Pvt Ltd\"\n}",
+              "raw": "{\n  \"category\": \"seeds\",\n  \"product_name\": \"Tomato Seeds\",\n  \"variety\": \"Hybrid F1\",\n  \"quantity_available\": 100,\n  \"unit\": \"packet\",\n  \"purchase_price\": 120,\n  \"selling_price\": 150,\n  \"supplier\": \"ABC Agro Pvt Ltd\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -541,10 +572,10 @@
                 "inventory"
               ]
             },
-            "description": "\n\nValid units: kg, packet, bag, liters",
+            "description": "\n\nValid units: kg, packet, bag, liters\n\nproduct_id is now auto-generated from the category (e.g. SEED005, FERT003). You can still pass it explicitly if needed.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"FERT001\",\n  \"category\": \"fertilizers\",\n  \"product_name\": \"NPK Fertilizer\",\n  \"variety\": \"19-19-19\",\n  \"quantity_available\": 500,\n  \"unit\": \"kg\",\n  \"purchase_price\": 55,\n  \"selling_price\": 70,\n  \"supplier\": \"Green Fields Agro\"\n}",
+              "raw": "{\n  \"category\": \"fertilizers\",\n  \"product_name\": \"NPK Fertilizer\",\n  \"variety\": \"19-19-19\",\n  \"quantity_available\": 500,\n  \"unit\": \"kg\",\n  \"purchase_price\": 55,\n  \"selling_price\": 70,\n  \"supplier\": \"Green Fields Agro\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -580,14 +611,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"PEST001\",\n  \"category\": \"fertilizers\",\n  \"product_name\": \"Liquid Nitrogen Solution\",\n  \"variety\": \"Grade A\",\n  \"quantity_available\": 200,\n  \"unit\": \"liters\",\n  \"purchase_price\": 45,\n  \"selling_price\": 60,\n  \"supplier\": \"AgriChem Pvt Ltd\"\n}",
+              "raw": "{\n  \"category\": \"fertilizers\",\n  \"product_name\": \"Liquid Nitrogen Solution\",\n  \"variety\": \"Grade A\",\n  \"quantity_available\": 200,\n  \"unit\": \"liters\",\n  \"purchase_price\": 45,\n  \"selling_price\": 60,\n  \"supplier\": \"AgriChem Pvt Ltd\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Create a product with unit = liters (new unit added alongside kg, packet, bag)."
+            "description": "Create a product with unit = liters (new unit added alongside kg, packet, bag).\n\nproduct_id is now auto-generated from the category (e.g. SEED005, FERT003). You can still pass it explicitly if needed."
           },
           "response": []
         },

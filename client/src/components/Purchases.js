@@ -15,7 +15,10 @@ import {
   Trash2,
   X,
   Edit,
-  CheckCircle
+  CheckCircle,
+  Users,
+  ChevronRight,
+  ArrowLeft
 } from 'lucide-react';
 
 const Purchases = () => {
@@ -59,21 +62,68 @@ const Purchases = () => {
     product_id: '', category: '', product_name: '', variety: '',
     quantity_available: '0', unit: 'kg', purchase_price: '', selling_price: '', supplier: ''
   });
+
+  const fetchNextProductId = async (category) => {
+    if (!category) return;
+    try {
+      const res = await axios.get(`/api/inventory/next-id?category=${category}`);
+      setNewProductForm(f => ({...f, product_id: res.data.nextId}));
+    } catch (err) {
+      console.error('Failed to fetch next ID:', err);
+    }
+  };
   const [newProductSubmitting, setNewProductSubmitting] = useState(false);
 
-  const { sortedItems: sortedPurchases, sortConfig, requestSort } = useSortableData(purchases);
+  // Supplier state
+  const [suppliers, setSuppliers] = useState([]);
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
+  const [supplierDetail, setSupplierDetail] = useState(null);
+  const [supplierLoading, setSupplierLoading] = useState(false);
+
+  // Search states for sub-tabs
+  const [historySearch, setHistorySearch] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [categorySearch, setCategorySearch] = useState('');
+
+  // Filtered purchase history
+  const filteredPurchases = purchases.filter(p => {
+    if (!historySearch) return true;
+    const q = historySearch.toLowerCase();
+    return (p.product_name || '').toLowerCase().includes(q)
+      || (p.variety || '').toLowerCase().includes(q)
+      || (p.purchase_id || '').toLowerCase().includes(q)
+      || (p.supplier || '').toLowerCase().includes(q)
+      || (p.category || '').toLowerCase().includes(q)
+      || (p.added_by_name || '').toLowerCase().includes(q);
+  });
+
+  // Filtered suppliers
+  const filteredSuppliers = suppliers.filter(s => {
+    if (!supplierSearch) return true;
+    return (s.supplier || '').toLowerCase().includes(supplierSearch.toLowerCase());
+  });
+
+  // Filtered categories
+  const filteredCategories = categories.filter(c => {
+    if (!categorySearch) return true;
+    return (c.name || '').toLowerCase().includes(categorySearch.toLowerCase());
+  });
+
+  const { sortedItems: sortedPurchases, sortConfig, requestSort } = useSortableData(filteredPurchases, { key: 'purchase_date', direction: 'desc' });
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [purRes, prodRes, catRes] = await Promise.all([
+      const [purRes, prodRes, catRes, supRes] = await Promise.all([
         axios.get('/api/purchases'),
         axios.get('/api/inventory'),
-        axios.get('/api/purchases/categories')
+        axios.get('/api/purchases/categories'),
+        axios.get('/api/purchases/suppliers')
       ]);
       setPurchases(purRes.data || []);
       setProducts(prodRes.data || []);
       setCategories(catRes.data || []);
+      setSuppliers(supRes.data || []);
     } catch (e) {
       setError('Failed to load data');
     } finally {
@@ -203,6 +253,7 @@ const Purchases = () => {
         product_id: '', category: '', product_name: '', variety: '',
         quantity_available: '0', unit: 'kg', purchase_price: '', selling_price: '', supplier: ''
       });
+      // Refresh next IDs for future use
       await fetchAll();
       // Auto-select the newly created product
       if (res.data?.id) {
@@ -249,6 +300,19 @@ const Purchases = () => {
     }
   };
 
+  const fetchSupplierDetail = async (supplierName) => {
+    setSupplierLoading(true);
+    try {
+      const res = await axios.get(`/api/purchases/suppliers/${encodeURIComponent(supplierName)}`);
+      setSupplierDetail(res.data);
+      setSelectedSupplier(supplierName);
+    } catch (e) {
+      setError('Failed to load supplier details');
+    } finally {
+      setSupplierLoading(false);
+    }
+  };
+
   const selectedProduct = products.find(p => String(p.id) === String(formProductId));
 
   return (
@@ -273,6 +337,7 @@ const Purchases = () => {
           {[
             { id: 'record', label: 'Record Purchase', icon: Truck },
             { id: 'history', label: 'Purchase History', icon: Package },
+            { id: 'suppliers', label: 'Suppliers', icon: Users },
             { id: 'categories', label: 'Manage Categories', icon: Tag }
           ].map(tab => (
             <button
@@ -453,7 +518,15 @@ const Purchases = () => {
       {/* Purchase History Tab */}
       {activeTab === 'history' && (
         <div className="card">
-          <h3 className="text-base font-bold text-gray-800 mb-4">Purchase History</h3>
+          <div className="flex items-center gap-4 mb-4">
+            <h3 className="text-base font-bold text-gray-800">Purchase History</h3>
+            <div className="relative flex-1 max-w-xs ml-auto">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input type="text" placeholder="Search purchases..."
+                className="input-field pl-10 !text-sm" value={historySearch}
+                onChange={e => setHistorySearch(e.target.value)} />
+            </div>
+          </div>
           {loading ? (
             <div className="flex justify-center py-10">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
@@ -515,6 +588,184 @@ const Purchases = () => {
         </div>
       )}
 
+      {/* Suppliers Tab */}
+      {activeTab === 'suppliers' && (
+        <div className="space-y-6">
+          {!selectedSupplier ? (
+            <>
+              <div className="card">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="h-6 w-6 rounded-lg bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center">
+                    <Users className="h-3.5 w-3.5 text-white" />
+                  </span>
+                  <h2 className="text-base font-bold text-gray-800">All Suppliers</h2>
+                  <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full text-white"
+                        style={{background:'linear-gradient(135deg,#14b8a6,#059669)'}}>{filteredSuppliers.length}</span>
+                </div>
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input type="text" placeholder="Search suppliers..."
+                    className="input-field pl-10 !text-sm" value={supplierSearch}
+                    onChange={e => setSupplierSearch(e.target.value)} />
+                </div>
+                {filteredSuppliers.length === 0 ? (
+                  <div className="text-center py-10 text-gray-400">
+                    <Users className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                    <p className="text-sm">No suppliers found. Record purchases with supplier names to see them here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredSuppliers.map((sup, idx) => (
+                      <div key={idx}
+                           onClick={() => fetchSupplierDetail(sup.supplier)}
+                           className="rounded-xl p-4 border border-gray-100 cursor-pointer hover:border-teal-300 hover:shadow-md transition-all duration-200"
+                           style={{background:'linear-gradient(135deg,#f0fdfa,#f0fdf4)'}}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-bold text-gray-900">{sup.supplier}</p>
+                            <div className="flex gap-4 mt-1 text-xs text-gray-500">
+                              <span><strong>{sup.products_supplied}</strong> products</span>
+                              <span><strong>{sup.total_purchases}</strong> purchases</span>
+                              <span>Last: {sup.last_purchase_date ? fmtDateTime(sup.last_purchase_date) : '—'}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-teal-700">₹{Number(sup.total_spent || 0).toLocaleString('en-IN', {minimumFractionDigits:2})}</p>
+                              <p className="text-xs text-gray-400">{sup.total_quantity} units</p>
+                            </div>
+                            <ChevronRight className="h-4 w-4 text-gray-300" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => { setSelectedSupplier(null); setSupplierDetail(null); }}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-teal-600 hover:text-teal-800 transition-colors">
+                <ArrowLeft className="h-4 w-4" /> Back to all suppliers
+              </button>
+
+              {supplierLoading ? (
+                <div className="flex flex-col items-center justify-center h-40 gap-3">
+                  <div className="relative h-10 w-10">
+                    <div className="absolute inset-0 rounded-full border-4 border-teal-100"></div>
+                    <div className="absolute inset-0 rounded-full border-4 border-t-teal-500 animate-spin"></div>
+                  </div>
+                  <p className="text-sm text-teal-400 font-medium">Loading supplier details...</p>
+                </div>
+              ) : supplierDetail ? (
+                <div className="space-y-6">
+                  {/* Supplier Header */}
+                  <div className="card">
+                    <h2 className="text-lg font-bold text-gray-900 mb-3">{supplierDetail.supplier}</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="rounded-xl p-4" style={{background:'linear-gradient(135deg,#f0fdfa,#ecfdf5)'}}>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Purchases</p>
+                        <p className="text-2xl font-extrabold text-teal-700">{supplierDetail.summary?.total_purchases || 0}</p>
+                      </div>
+                      <div className="rounded-xl p-4" style={{background:'linear-gradient(135deg,#eff6ff,#eef2ff)'}}>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Items</p>
+                        <p className="text-2xl font-extrabold text-blue-700">{Number(supplierDetail.summary?.total_items || 0).toFixed(1)}</p>
+                      </div>
+                      <div className="rounded-xl p-4" style={{background:'linear-gradient(135deg,#faf5ff,#f5f3ff)'}}>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Cost</p>
+                        <p className="text-2xl font-extrabold text-purple-700">₹{Number(supplierDetail.summary?.total_cost || 0).toLocaleString('en-IN', {minimumFractionDigits:2})}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Products Supplied */}
+                  <div className="card">
+                    <h3 className="text-base font-bold text-gray-800 mb-4">Products Supplied</h3>
+                    <div className="table-container">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Product ID</th>
+                            <th>Product</th>
+                            <th>Category</th>
+                            <th>Total Qty</th>
+                            <th>Total Spent</th>
+                            <th>Purchases</th>
+                            <th>Last Purchase</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(supplierDetail.products || []).map((p, idx) => (
+                            <tr key={idx}>
+                              <td className="font-mono text-xs">{p.product_code}</td>
+                              <td>
+                                <p className="font-medium">{p.product_name}</p>
+                                {p.variety && <p className="text-xs text-gray-400">{p.variety}</p>}
+                              </td>
+                              <td className="capitalize">{p.category}</td>
+                              <td>{p.total_quantity} {p.unit}</td>
+                              <td className="font-medium">₹{Number(p.total_spent || 0).toLocaleString('en-IN')}</td>
+                              <td>{p.purchase_count}</td>
+                              <td className="text-sm">{fmtDateTime(p.last_purchase_date)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {(supplierDetail.products || []).length === 0 && (
+                        <div className="text-center py-6 text-gray-400 text-sm">No products found</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Purchase History */}
+                  <div className="card">
+                    <h3 className="text-base font-bold text-gray-800 mb-4">Purchase History</h3>
+                    <div className="table-container">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Purchase ID</th>
+                            <th>Product</th>
+                            <th>Category</th>
+                            <th>Qty</th>
+                            <th>Price/Unit</th>
+                            <th>Total</th>
+                            <th>Date</th>
+                            <th>Added By</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(supplierDetail.history || []).map((h, idx) => (
+                            <tr key={idx}>
+                              <td className="font-mono text-xs">{h.purchase_id}</td>
+                              <td>
+                                <p className="font-medium">{h.product_name}</p>
+                                {h.variety && <p className="text-xs text-gray-400">{h.variety}</p>}
+                              </td>
+                              <td className="capitalize">{h.category}</td>
+                              <td>{h.quantity} {h.unit}</td>
+                              <td>₹{Number(h.price_per_unit).toLocaleString('en-IN')}</td>
+                              <td className="font-medium">₹{Number(h.total_amount).toLocaleString('en-IN')}</td>
+                              <td className="text-sm">{fmtDateTime(h.purchase_date)}</td>
+                              <td>{h.added_by || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {(supplierDetail.history || []).length === 0 && (
+                        <div className="text-center py-6 text-gray-400 text-sm">No purchase history</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Manage Categories Tab */}
       {activeTab === 'categories' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -550,10 +801,16 @@ const Purchases = () => {
               </span>
               <h3 className="text-base font-bold text-gray-800">Current Categories</h3>
               <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full text-white"
-                    style={{background:'linear-gradient(135deg,#6366f1,#8b5cf6)'}}>{categories.length}</span>
+                    style={{background:'linear-gradient(135deg,#6366f1,#8b5cf6)'}}>{filteredCategories.length}</span>
+            </div>
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input type="text" placeholder="Search categories..."
+                className="input-field pl-10 !text-sm" value={categorySearch}
+                onChange={e => setCategorySearch(e.target.value)} />
             </div>
             <div className="space-y-2">
-              {categories.map(cat => (
+              {filteredCategories.map(cat => (
                 <div key={cat.id}
                      className="flex items-center justify-between rounded-xl px-4 py-2.5 border border-indigo-100/60"
                      style={{background:'linear-gradient(135deg,#fafbff,#f5f3ff)'}}>
@@ -798,17 +1055,16 @@ const Purchases = () => {
               <div className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Product ID *</label>
-                    <input type="text" required className="input-field !text-sm"
-                      placeholder="e.g. PROD001"
-                      value={newProductForm.product_id}
-                      onChange={e => setNewProductForm(f => ({...f, product_id: e.target.value}))} />
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Product ID <span className="text-gray-400">(auto)</span></label>
+                    <input type="text" readOnly className="input-field !text-sm bg-gray-50 text-gray-500 cursor-not-allowed"
+                      placeholder="Select category first..."
+                      value={newProductForm.product_id} />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Category *</label>
                     <select required className="input-field !text-sm"
                       value={newProductForm.category}
-                      onChange={e => setNewProductForm(f => ({...f, category: e.target.value}))}>
+                      onChange={e => { const cat = e.target.value; setNewProductForm(f => ({...f, category: cat})); fetchNextProductId(cat); }}>
                       <option value="">-- Select --</option>
                       {categories.map(c => (
                         <option key={c.id} value={c.name}>{c.name.charAt(0).toUpperCase()+c.name.slice(1)}</option>

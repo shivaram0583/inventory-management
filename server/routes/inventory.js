@@ -32,6 +32,32 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Generate next product ID based on category
+router.get('/next-id', authenticateToken, async (req, res) => {
+  try {
+    const { category } = req.query;
+    if (!category) return res.status(400).json({ message: 'Category is required' });
+
+    const prefix = category.substring(0, 4).toUpperCase();
+    const latest = await getRow(
+      `SELECT product_id FROM products WHERE product_id LIKE ? ORDER BY product_id DESC LIMIT 1`,
+      [`${prefix}%`]
+    );
+
+    let nextNum = 1;
+    if (latest) {
+      const match = latest.product_id.match(/(\d+)$/);
+      if (match) nextNum = parseInt(match[1]) + 1;
+    }
+
+    const nextId = prefix + String(nextNum).padStart(3, '0');
+    res.json({ nextId });
+  } catch (error) {
+    console.error('Generate next ID error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get single product
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
@@ -52,8 +78,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
-  body('product_id').notEmpty().withMessage('Product ID is required'),
+  body('product_id').optional(),
   body('product_name').notEmpty().withMessage('Product name is required'),
+  body('category').notEmpty().withMessage('Category is required'),
   body('unit').isIn(['kg', 'packet', 'bag', 'liters']).withMessage('Unit must be kg, packet, bag, or liters'),
   body('quantity_available').isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
   body('purchase_price').isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
@@ -65,7 +92,7 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const {
+    let {
       product_id,
       category,
       product_name,
@@ -81,6 +108,21 @@ router.post('/', [
     const validCategory = await getRow('SELECT id FROM product_categories WHERE name = ?', [category]);
     if (!validCategory) {
       return res.status(400).json({ message: `Invalid category: ${category}` });
+    }
+
+    // Auto-generate product_id if not provided
+    if (!product_id || !product_id.trim()) {
+      const prefix = category.substring(0, 4).toUpperCase();
+      const latest = await getRow(
+        `SELECT product_id FROM products WHERE product_id LIKE ? ORDER BY product_id DESC LIMIT 1`,
+        [`${prefix}%`]
+      );
+      let nextNum = 1;
+      if (latest) {
+        const match = latest.product_id.match(/(\d+)$/);
+        if (match) nextNum = parseInt(match[1]) + 1;
+      }
+      product_id = prefix + String(nextNum).padStart(3, '0');
     }
 
     // Check if product_id already exists

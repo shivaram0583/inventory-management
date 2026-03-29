@@ -88,7 +88,7 @@ function initializeDatabase() {
   // Create sales table
   db.run(`CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sale_id TEXT UNIQUE NOT NULL,
+    sale_id TEXT NOT NULL,
     product_id INTEGER NOT NULL,
     quantity_sold REAL NOT NULL,
     price_per_unit REAL NOT NULL,
@@ -174,6 +174,7 @@ function initializeDatabase() {
     if (!err) {
       db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('seeds')`);
       db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('fertilizers')`);
+      db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('pesticides')`);
     }
   });
 
@@ -230,6 +231,33 @@ function initializeDatabase() {
         db.run(`DROP TABLE products`);
         db.run(`ALTER TABLE products_v3 RENAME TO products`, (e) => {
           if (!e) console.log('Migrated products table: added liters to unit options');
+        });
+      });
+    }
+  });
+
+  // Migrate sales table: remove UNIQUE constraint on sale_id for multi-item sales
+  db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='sales'", (err, row) => {
+    if (err || !row) return;
+    if (row.sql && row.sql.includes('sale_id TEXT UNIQUE')) {
+      db.serialize(() => {
+        db.run(`CREATE TABLE IF NOT EXISTS sales_v2 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sale_id TEXT NOT NULL,
+          product_id INTEGER NOT NULL,
+          quantity_sold REAL NOT NULL,
+          price_per_unit REAL NOT NULL,
+          total_amount REAL NOT NULL,
+          sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+          operator_id INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (product_id) REFERENCES products (id),
+          FOREIGN KEY (operator_id) REFERENCES users (id)
+        )`);
+        db.run(`INSERT INTO sales_v2 SELECT * FROM sales`);
+        db.run(`DROP TABLE sales`);
+        db.run(`ALTER TABLE sales_v2 RENAME TO sales`, (e) => {
+          if (!e) console.log('Migrated sales table: removed UNIQUE constraint on sale_id');
         });
       });
     }
