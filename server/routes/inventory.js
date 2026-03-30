@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
-const { getRow, runQuery, getAll } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 
 const router = express.Router();
 
@@ -81,7 +81,7 @@ router.post('/', [
   body('product_id').optional(),
   body('product_name').notEmpty().withMessage('Product name is required'),
   body('category').notEmpty().withMessage('Category is required'),
-  body('unit').isIn(['kg', 'packet', 'bag', 'liters']).withMessage('Unit must be kg, packet, bag, or liters'),
+  body('unit').isIn(['kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes']).withMessage('Invalid unit'),
   body('quantity_available').isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
   body('purchase_price').isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
   body('selling_price').isFloat({ min: 0 }).withMessage('Selling price must be non-negative')
@@ -162,7 +162,7 @@ router.put('/:id', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   body('product_name').optional().notEmpty().withMessage('Product name cannot be empty'),
-  body('unit').optional().isIn(['kg', 'packet', 'bag', 'liters']).withMessage('Unit must be kg, packet, bag, or liters'),
+  body('unit').optional().isIn(['kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes']).withMessage('Invalid unit'),
   body('quantity_available').optional().isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
   body('purchase_price').optional().isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
   body('selling_price').optional().isFloat({ min: 0 }).withMessage('Selling price must be non-negative')
@@ -226,7 +226,8 @@ router.put('/:id', [
       return res.status(400).json({ message: 'No fields to update' });
     }
 
-    updateFields.push('updated_at = CURRENT_TIMESTAMP');
+    updateFields.push('updated_at = ?');
+    updateValues.push(nowIST());
     updateValues.push(productId);
 
     await runQuery(
@@ -291,8 +292,8 @@ router.post('/:id/add-stock', [
 
     const newQuantity = product.quantity_available + quantity;
     await runQuery(
-      'UPDATE products SET quantity_available = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [newQuantity, productId]
+      'UPDATE products SET quantity_available = ?, updated_at = ? WHERE id = ?',
+      [newQuantity, nowIST(), productId]
     );
 
     const updatedProduct = await getRow('SELECT * FROM products WHERE id = ?', [productId]);

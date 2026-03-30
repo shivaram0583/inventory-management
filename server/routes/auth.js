@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
-const { getRow, runQuery, getAll } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -37,19 +37,16 @@ router.post('/login', [
 
     const sessionId = crypto.randomUUID();
     await runQuery(
-      'INSERT INTO sessions (id, user_id, last_activity) VALUES (?, ?, CURRENT_TIMESTAMP)',
-      [sessionId, user.id]
+      'INSERT INTO sessions (id, user_id, last_activity) VALUES (?, ?, ?)',
+      [sessionId, user.id, nowIST()]
     );
 
     const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
     const userAgent = (req.headers['user-agent'] || '').toString();
     
-    // Get current time in India timezone (UTC+5:30)
-    const indiaTime = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ');
-    
     await runQuery(
       'INSERT INTO login_logs (user_id, username, role, ip, user_agent, logged_in_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [user.id, user.username, user.role, ip, userAgent, indiaTime]
+      [user.id, user.username, user.role, ip, userAgent, nowIST()]
     );
 
     const token = jwt.sign(

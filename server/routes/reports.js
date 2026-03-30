@@ -1,6 +1,6 @@
 const express = require('express');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
-const { getRow, getAll, runQuery } = require('../database/db');
+const { getRow, getAll, runQuery, nowIST } = require('../database/db');
 const moment = require('moment');
 
 const router = express.Router();
@@ -21,7 +21,7 @@ router.get('/daily-sales', authenticateToken, async (req, res) => {
         COUNT(s.id) as transaction_count
        FROM sales s
        JOIN products p ON s.product_id = p.id
-       WHERE DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) = ?
+       WHERE DATE(s.sale_date) = ?
        GROUP BY s.product_id, p.product_name, p.variety, p.unit
        ORDER BY total_amount DESC`,
       [date]
@@ -33,12 +33,12 @@ router.get('/daily-sales', authenticateToken, async (req, res) => {
         SUM(quantity_sold) as total_items_sold,
         SUM(total_amount) as total_revenue
        FROM sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?`,
+       WHERE DATE(sale_date) = ?`,
       [date]
     );
 
     const customerSales = await getAll(
-      `SELECT * FROM customer_sales WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ? ORDER BY sale_date DESC`,
+      `SELECT * FROM customer_sales WHERE DATE(sale_date) = ? ORDER BY sale_date DESC`,
       [date]
     );
 
@@ -69,7 +69,7 @@ router.get('/sales-range', authenticateToken, async (req, res) => {
 
     const sales = await getAll(
       `SELECT 
-        DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) as sale_date,
+        DATE(s.sale_date) as sale_date,
         s.product_id,
         p.product_name,
         p.variety,
@@ -79,8 +79,8 @@ router.get('/sales-range', authenticateToken, async (req, res) => {
         COUNT(s.id) as transaction_count
        FROM sales s
        JOIN products p ON s.product_id = p.id
-       WHERE DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?
-       GROUP BY DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')), s.product_id, p.product_name, p.variety, p.unit
+       WHERE DATE(s.sale_date) BETWEEN ? AND ?
+       GROUP BY DATE(s.sale_date), s.product_id, p.product_name, p.variety, p.unit
        ORDER BY sale_date DESC, total_amount DESC`,
       [start_date, end_date]
     );
@@ -91,7 +91,7 @@ router.get('/sales-range', authenticateToken, async (req, res) => {
         SUM(quantity_sold) as total_items_sold,
         SUM(total_amount) as total_revenue
        FROM sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?`,
+       WHERE DATE(sale_date) BETWEEN ? AND ?`,
       [start_date, end_date]
     );
 
@@ -193,7 +193,7 @@ router.get('/product-performance', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date && end_date) {
-      dateFilter = "WHERE DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      dateFilter = "WHERE DATE(s.sale_date) BETWEEN ? AND ?";
       params.push(start_date, end_date);
     }
 
@@ -229,7 +229,7 @@ router.get('/product-performance', authenticateToken, async (req, res) => {
         COALESCE(COUNT(s.id), 0) as transaction_count
        FROM products p
        LEFT JOIN sales s ON p.id = s.product_id
-       ${dateFilter ? `AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?` : ''}
+       ${dateFilter ? `AND DATE(s.sale_date) BETWEEN ? AND ?` : ''}
        GROUP BY p.id, p.product_name, p.variety, p.category, p.unit
        ORDER BY total_revenue ASC
        LIMIT ?`,
@@ -254,13 +254,13 @@ router.get('/monthly-trend', authenticateToken, async (req, res) => {
     
     const trend = await getAll(
       `SELECT 
-        strftime('%Y-%m', datetime(sale_date, '+5 hours', '+30 minutes')) as month,
+        strftime('%Y-%m', sale_date) as month,
         COUNT(DISTINCT sale_id) as transactions,
         SUM(quantity_sold) as items_sold,
         SUM(total_amount) as revenue
        FROM sales
-       WHERE datetime(sale_date, '+5 hours', '+30 minutes') >= date(datetime('now', '+5 hours', '+30 minutes'), '-${months} months')
-       GROUP BY strftime('%Y-%m', datetime(sale_date, '+5 hours', '+30 minutes'))
+       WHERE sale_date >= date('${moment().utcOffset('+05:30').format('YYYY-MM-DD')}', '-${months} months')
+       GROUP BY strftime('%Y-%m', sale_date)
        ORDER BY month DESC`,
       []
     );
@@ -283,7 +283,7 @@ router.get('/purchases', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date && end_date) {
-      dateFilter = "WHERE DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      dateFilter = "WHERE DATE(pu.purchase_date) BETWEEN ? AND ?";
       params.push(start_date, end_date);
     }
 
@@ -316,7 +316,7 @@ router.get('/purchases', authenticateToken, async (req, res) => {
         SUM(quantity) as total_items,
         SUM(total_amount) as total_cost
        FROM purchases
-       ${start_date && end_date ? "WHERE DATE(datetime(purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?" : ''}`,
+       ${start_date && end_date ? "WHERE DATE(purchase_date) BETWEEN ? AND ?" : ''}`,
       
       start_date && end_date ? [start_date, end_date] : []
     );
@@ -343,7 +343,7 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date && end_date) {
-      dateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      dateFilter = "AND DATE(pu.purchase_date) BETWEEN ? AND ?";
       params.push(start_date, end_date);
     }
 
@@ -375,7 +375,7 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
     let detailDateFilter = '';
     let detailSupplierFilter = '';
     if (start_date && end_date) {
-      detailDateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      detailDateFilter = "AND DATE(pu.purchase_date) BETWEEN ? AND ?";
       detailParams.push(start_date, end_date);
     }
     if (supplier) {
@@ -410,7 +410,7 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
         SUM(total_amount) AS total_cost
       FROM purchases
       WHERE supplier IS NOT NULL AND supplier != ''
-        ${start_date && end_date ? "AND DATE(datetime(purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?" : ''}
+        ${start_date && end_date ? "AND DATE(purchase_date) BETWEEN ? AND ?" : ''}
         ${supplier ? 'AND supplier = ?' : ''}
     `, [...(start_date && end_date ? [start_date, end_date] : []), ...(supplier ? [supplier] : [])]);
 
@@ -438,7 +438,7 @@ router.get('/customer-sales', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date && end_date) {
-      dateFilter = "WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      dateFilter = "WHERE DATE(sale_date) BETWEEN ? AND ?";
       params.push(start_date, end_date);
     }
 

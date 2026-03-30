@@ -231,6 +231,7 @@ const Reports = () => {
                   <th>Address</th>
                   <SortableHeader label="Item" sortKey="product_name" sortConfig={custSalesSort} onSort={sortCustSales} />
                   <SortableHeader label="Quantity" sortKey="quantity" sortConfig={custSalesSort} onSort={sortCustSales} />
+                  <SortableHeader label="Payment" sortKey="payment_mode" sortConfig={custSalesSort} onSort={sortCustSales} />
                   <SortableHeader label="Time" sortKey="sale_date" sortConfig={custSalesSort} onSort={sortCustSales} />
                 </tr>
               </thead>
@@ -242,6 +243,13 @@ const Reports = () => {
                     <td>{cs.customer_address || '-'}</td>
                     <td>{cs.product_name}</td>
                     <td>{cs.quantity}</td>
+                    <td>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                        cs.payment_mode === 'upi' ? 'bg-purple-100 text-purple-700' :
+                        cs.payment_mode === 'card' ? 'bg-blue-100 text-blue-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>{cs.payment_mode || 'cash'}</span>
+                    </td>
                     <td className="text-sm">{fmtDateTime(cs.sale_date)}</td>
                   </tr>
                 ))}
@@ -773,6 +781,7 @@ const Reports = () => {
                   <th>Address</th>
                   <SortableHeader label="Item" sortKey="product_name" sortConfig={archiveSort} onSort={sortArchive} />
                   <SortableHeader label="Quantity" sortKey="quantity" sortConfig={archiveSort} onSort={sortArchive} />
+                  <SortableHeader label="Payment" sortKey="payment_mode" sortConfig={archiveSort} onSort={sortArchive} />
                   <SortableHeader label="Date" sortKey="sale_date" sortConfig={archiveSort} onSort={sortArchive} />
                   {isAdmin && <th>Action</th>}
                 </tr>
@@ -786,6 +795,13 @@ const Reports = () => {
                     <td>{r.customer_address || '-'}</td>
                     <td>{r.product_name}</td>
                     <td>{r.quantity}</td>
+                    <td>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                        r.payment_mode === 'upi' ? 'bg-purple-100 text-purple-700' :
+                        r.payment_mode === 'card' ? 'bg-blue-100 text-blue-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>{r.payment_mode || 'cash'}</span>
+                    </td>
                     <td className="text-sm">{fmtDateTime(r.sale_date)}</td>
                     {isAdmin && (
                       <td>

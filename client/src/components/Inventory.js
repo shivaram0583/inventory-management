@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import SharedModal from './shared/Modal';
+import CustomSelect from './shared/CustomSelect';
 import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
 import {
@@ -12,6 +13,18 @@ import {
   AlertTriangle,
   X
 } from 'lucide-react';
+
+const UNIT_OPTIONS = [
+  { value: 'kg', label: 'kg' },
+  { value: 'grams', label: 'grams' },
+  { value: 'packet', label: 'packet' },
+  { value: 'bag', label: 'bag' },
+  { value: 'liters', label: 'liters' },
+  { value: 'ml', label: 'ml' },
+  { value: 'pieces', label: 'pieces' },
+  { value: 'bottles', label: 'bottles' },
+  { value: 'tonnes', label: 'tonnes' },
+];
 
 const Inventory = () => {
   const { user } = useAuth();
@@ -259,17 +272,12 @@ const Inventory = () => {
               />
             </div>
           </div>
-          <div className="flex gap-2 items-center">
-            <select
-              className="input-field"
+          <div className="flex gap-2 items-center" style={{minWidth:'180px'}}>
+            <CustomSelect
+              options={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))]}
               value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-            >
-              <option value="all">All Categories</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
-              ))}
-            </select>
+              onChange={(val) => setCategoryFilter(val)}
+            />
           </div>
         </div>
       </div>
@@ -365,16 +373,13 @@ const Inventory = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                <select
+                <CustomSelect
                   required
-                  className="input-field"
+                  options={categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))}
                   value={formData.category}
-                  onChange={(e) => { const cat = e.target.value; setFormData(f => ({...f, category: cat})); fetchNextId(cat); }}
-                >
-                  {categories.map(c => (
-                    <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
-                  ))}
-                </select>
+                  onChange={(val) => { setFormData(f => ({...f, category: val})); fetchNextId(val); }}
+                  placeholder="Select category"
+                />
               </div>
             </div>
             <div>
@@ -410,17 +415,13 @@ const Inventory = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-                <select
+                <CustomSelect
                   required
-                  className="input-field"
+                  options={UNIT_OPTIONS}
                   value={formData.unit}
-                  onChange={(e) => setFormData({...formData, unit: e.target.value})}
-                >
-                  <option value="kg">kg</option>
-                  <option value="packet">packet</option>
-                  <option value="bag">bag</option>
-                  <option value="liters">liters</option>
-                </select>
+                  onChange={(val) => setFormData({...formData, unit: val})}
+                  placeholder="Select unit"
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -480,16 +481,13 @@ const Inventory = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                <select
+                <CustomSelect
                   required
-                  className="input-field"
+                  options={categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))}
                   value={formData.category}
-                  onChange={(e) => setFormData(f => ({...f, category: e.target.value}))}
-                >
-                  {categories.map(c => (
-                    <option key={c.id} value={c.name} className="capitalize">{c.name.charAt(0).toUpperCase() + c.name.slice(1)}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setFormData(f => ({...f, category: val}))}
+                  placeholder="Select category"
+                />
               </div>
             </div>
             <div>
@@ -525,17 +523,13 @@ const Inventory = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-                <select
+                <CustomSelect
                   required
-                  className="input-field"
+                  options={UNIT_OPTIONS}
                   value={formData.unit}
-                  onChange={(e) => setFormData({...formData, unit: e.target.value})}
-                >
-                  <option value="kg">kg</option>
-                  <option value="packet">packet</option>
-                  <option value="bag">bag</option>
-                  <option value="liters">liters</option>
-                </select>
+                  onChange={(val) => setFormData({...formData, unit: val})}
+                  placeholder="Select unit"
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -662,23 +656,19 @@ const Inventory = () => {
 
 const Modal = ({ title, children, onClose }) => {
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={onClose} />
-        
-        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-          <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-gray-900">{title}</h3>
-              <button
-                onClick={onClose}
-                className="text-gray-400 hover:text-gray-500"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-            {children}
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+         style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-scale-in flex flex-col"
+           style={{maxHeight:'85vh'}}>
+        <div className="flex justify-between items-center px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
+          <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+          <button onClick={onClose}
+            className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5 overflow-y-auto flex-1" style={{scrollbarWidth:'thin'}}>
+          {children}
         </div>
       </div>
     </div>
