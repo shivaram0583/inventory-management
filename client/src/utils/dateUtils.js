@@ -22,12 +22,13 @@ const IST_OPTIONS_TIME = {
   hour12: true
 };
 
-// SQLite CURRENT_TIMESTAMP returns UTC as 'YYYY-MM-DD HH:MM:SS' (no Z).
-// Appending 'Z' forces correct UTC parsing before displaying as IST.
+// Timestamps are stored as IST (Asia/Kolkata) in 'YYYY-MM-DD HH:MM:SS' format.
+// Append '+05:30' so the browser interprets them as IST, not local time.
 const toDate = (str) => {
   if (!str) return null;
   const normalized = str.toString().replace(' ', 'T');
-  const iso = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+  // If already has timezone info, use as-is; otherwise treat as IST
+  const iso = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + '+05:30';
   const d = new Date(iso);
   return isNaN(d.getTime()) ? null : d;
 };

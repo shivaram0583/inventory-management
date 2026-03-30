@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
-const { getRow, runQuery, getAll } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const crypto = require('crypto');
 const moment = require('moment');
 
@@ -118,18 +118,13 @@ router.post('/', [
     const purchaseId = 'PUR' + moment().utcOffset('+05:30').format('YYYYMMDDHHmmss') +
       crypto.randomBytes(2).toString('hex').toUpperCase();
 
-    // Convert user-selected IST date to UTC for consistent storage
-    // (All other timestamps use UTC; fmtDateTime appends 'Z' assuming UTC)
+    // Store IST timestamp: use selected date with current IST time
     let storedDate;
-    if (purchase_date) {
-      if (String(purchase_date).length === 10) {
-        // Date-only string (YYYY-MM-DD) chosen in IST — treat as IST midnight and convert to UTC
-        storedDate = moment.utc(purchase_date + 'T00:00:00+05:30').format('YYYY-MM-DD HH:mm:ss');
-      } else {
-        storedDate = purchase_date;
-      }
+    if (purchase_date && String(purchase_date).length === 10) {
+      const currentTime = moment().utcOffset('+05:30').format('HH:mm:ss');
+      storedDate = purchase_date + ' ' + currentTime;
     } else {
-      storedDate = moment.utc().format('YYYY-MM-DD HH:mm:ss');
+      storedDate = nowIST();
     }
 
     // Insert purchase record
@@ -148,9 +143,9 @@ router.post('/', [
          quantity_available = quantity_available + ?,
          purchase_price = ?,
          supplier = COALESCE(?, supplier),
-         updated_at = CURRENT_TIMESTAMP
+         updated_at = ?
        WHERE id = ?`,
-      [quantity, price_per_unit, supplier || null, product_id]
+      [quantity, price_per_unit, supplier || null, nowIST(), product_id]
     );
 
     const purchase = await getRow(
@@ -189,14 +184,11 @@ router.put('/:id', [
     const totalAmount = quantity * price_per_unit;
     const qtyDiff = quantity - purchase.quantity;
 
-    // Convert user-selected IST date to UTC
+    // Store IST timestamp: use selected date with current IST time
     let storedDate;
-    if (purchase_date) {
-      if (String(purchase_date).length === 10) {
-        storedDate = moment.utc(purchase_date + 'T00:00:00+05:30').format('YYYY-MM-DD HH:mm:ss');
-      } else {
-        storedDate = purchase_date;
-      }
+    if (purchase_date && String(purchase_date).length === 10) {
+      const currentTime = moment().utcOffset('+05:30').format('HH:mm:ss');
+      storedDate = purchase_date + ' ' + currentTime;
     } else {
       storedDate = purchase.purchase_date;
     }
@@ -206,9 +198,9 @@ router.put('/:id', [
       `UPDATE products SET
          quantity_available = quantity_available + ?,
          purchase_price = ?,
-         updated_at = CURRENT_TIMESTAMP
+         updated_at = ?
        WHERE id = ?`,
-      [qtyDiff, price_per_unit, purchase.product_id]
+      [qtyDiff, price_per_unit, nowIST(), purchase.product_id]
     );
 
     await runQuery(

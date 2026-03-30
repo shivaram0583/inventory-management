@@ -11,7 +11,8 @@ import {
   Store,
   Menu,
   X,
-  Truck
+  Truck,
+  ArrowLeftRight
 } from 'lucide-react';
 
 const Layout = () => {
@@ -41,16 +42,22 @@ const Layout = () => {
       current: isActive('/inventory')
     },
     {
+      name: 'Purchases',
+      href: '/purchases',
+      icon: Truck,
+      current: isActive('/purchases')
+    },
+    {
       name: 'Sales',
       href: '/sales',
       icon: ShoppingCart,
       current: isActive('/sales')
     },
     {
-      name: 'Purchases',
-      href: '/purchases',
-      icon: Truck,
-      current: isActive('/purchases')
+      name: 'Transactions',
+      href: '/transactions',
+      icon: ArrowLeftRight,
+      current: isActive('/transactions')
     },
     {
       name: 'Reports',
@@ -112,7 +119,7 @@ const Layout = () => {
             <div className="h-8 w-8 rounded-xl bg-white/20 flex items-center justify-center">
               <Store className="h-5 w-5 text-white" />
             </div>
-            <span className="text-lg font-bold text-white tracking-wide">SLVT</span>
+            <span className="text-lg font-bold text-white tracking-wide">SVLVT</span>
           </div>
         </div>
 
@@ -129,7 +136,7 @@ const Layout = () => {
                 style={{background:'linear-gradient(90deg,rgba(240,244,255,0.8),rgba(250,245,255,0.8))'}}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-1">
             <p className="text-xs text-gray-400">
-              © 2026 <span className="font-medium text-gray-500">Shri Lakshmi Vigneswara Traders</span>. All rights reserved.
+              © 2026 <span className="font-medium text-gray-500">Sri Venkata Lakshmi Vigneswara Traders</span>. All rights reserved.
             </p>
             <p className="text-xs text-gray-400">
               Developed by{' '}
@@ -155,7 +162,7 @@ const SidebarContent = ({ navigation, user, onLogout }) => {
           <Store className="h-6 w-6 text-white" />
         </div>
         <div className="ml-3">
-          <h1 className="text-base font-bold text-white tracking-wide">SLVT</h1>
+          <h1 className="text-base font-bold text-white tracking-wide">SVLVT</h1>
           <p className="text-xs text-indigo-300">Inventory System</p>
         </div>
       </div>

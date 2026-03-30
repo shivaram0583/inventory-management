@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
+import CustomSelect from './shared/CustomSelect';
 import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
 
@@ -165,11 +166,15 @@ const Users = () => {
           </div>
           <div>
             <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Role</label>
-            <select value={newRole} onChange={(e) => setNewRole(e.target.value)}
-              className="input-field" disabled={!canManage || creating}>
-              <option value="operator">Operator</option>
-              <option value="admin">Admin</option>
-            </select>
+            <CustomSelect
+              options={[
+                { value: 'operator', label: 'Operator' },
+                { value: 'admin', label: 'Admin' },
+              ]}
+              value={newRole}
+              onChange={(val) => setNewRole(val)}
+              disabled={!canManage || creating}
+            />
           </div>
           <div className="md:col-span-3">
             <button type="submit" className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"

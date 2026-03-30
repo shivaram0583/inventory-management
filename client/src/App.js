@@ -11,6 +11,7 @@ import Receipt from './components/Receipt';
 import Layout from './components/Layout';
 import Users from './components/Users';
 import Purchases from './components/Purchases';
+import Transactions from './components/Transactions';
 import Modal from './components/shared/Modal';
 
 function ProtectedRoute({ children }) {
@@ -66,6 +67,7 @@ function AppRoutes() {
         <Route path="inventory" element={<Inventory />} />
         <Route path="sales" element={<Sales />} />
         <Route path="purchases" element={<Purchases />} />
+        <Route path="transactions" element={<Transactions />} />
         <Route path="reports" element={<Reports />} />
         <Route path="users" element={
           <AdminRoute>

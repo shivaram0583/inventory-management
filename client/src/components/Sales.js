@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import SharedModal from './shared/Modal';
+import CustomSelect from './shared/CustomSelect';
 import { 
   ShoppingCart, 
   Plus, 
@@ -16,8 +17,10 @@ import {
 
 const Sales = () => {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
@@ -30,6 +33,7 @@ const Sales = () => {
 
   useEffect(() => {
     fetchProducts();
+    fetchCategories();
   }, []);
 
   const fetchProducts = async () => {
@@ -42,19 +46,29 @@ const Sales = () => {
     }
   };
 
+  const fetchCategories = async () => {
+    try {
+      const response = await axios.get('/api/purchases/categories');
+      setCategories(response.data);
+    } catch (error) {
+      console.error('Fetch categories error:', error);
+    }
+  };
+
   const openReceipt = (saleId) => {
     if (!saleId) return;
-    const receiptUrl = `${window.location.origin}/receipt/${saleId}`;
-    window.open(receiptUrl, '_blank', 'noopener');
+    window.location.href = `/receipt/${saleId}`;
   };
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const filteredProducts = products.filter(product =>
-    product.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.variety?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.product_id.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.variety?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.product_id.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = categoryFilter === 'all' || product.category === categoryFilter;
+    return matchesSearch && matchesCategory;
+  });
 
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.product_id === product.id);
@@ -202,12 +216,19 @@ const Sales = () => {
               </span>
               <h2 className="text-base font-bold text-gray-800">Products</h2>
             </div>
-            <div className="mb-4 mt-3">
-              <div className="relative">
+            <div className="flex gap-3 mb-4 mt-3">
+              <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input type="text" placeholder="Search products..."
                   className="input-field pl-10" value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)} />
+              </div>
+              <div style={{minWidth:'160px'}}>
+                <CustomSelect
+                  options={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))]}
+                  value={categoryFilter}
+                  onChange={(val) => setCategoryFilter(val)}
+                />
               </div>
             </div>
 
@@ -344,12 +365,15 @@ const Sales = () => {
                     <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
                       <CreditCard className="h-3 w-3" />Payment Mode
                     </label>
-                    <select className="input-field !py-1.5 !text-xs" value={paymentMode}
-                      onChange={(e) => setPaymentMode(e.target.value)}>
-                      <option value="cash">Cash</option>
-                      <option value="card">Card</option>
-                      <option value="upi">UPI</option>
-                    </select>
+                    <CustomSelect
+                      options={[
+                        { value: 'cash', label: 'Cash' },
+                        { value: 'card', label: 'Card' },
+                        { value: 'upi', label: 'UPI' },
+                      ]}
+                      value={paymentMode}
+                      onChange={(val) => setPaymentMode(val)}
+                    />
                   </div>
                 </div>
 

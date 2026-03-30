@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Download, X, FileText, Loader } from 'lucide-react';
+import CustomSelect from './shared/CustomSelect';
 import { downloadCSV } from '../utils/csvExport';
 import { getISTDateString, fmtDateTime } from '../utils/dateUtils';
 
@@ -186,30 +187,28 @@ const ReportDownloader = () => {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
-            <div className="flex items-center justify-between mb-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+             style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col" style={{maxHeight:'85vh'}}>
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-green-600" />
-                <h2 className="text-lg font-semibold text-gray-900">Download CSV Report</h2>
+                <h2 className="text-lg font-bold text-gray-900">Download CSV Report</h2>
               </div>
-              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setOpen(false)}
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1" style={{scrollbarWidth:'thin'}}>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Report Type</label>
-                <select
+                <CustomSelect
+                  options={REPORT_TYPES.map(t => ({ value: t.id, label: t.label }))}
                   value={reportType}
-                  onChange={e => setReportType(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  {REPORT_TYPES.map(t => (
-                    <option key={t.id} value={t.id}>{t.label}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setReportType(val)}
+                />
               </div>
 
               {selectedType?.needsRange && (
@@ -220,7 +219,7 @@ const ReportDownloader = () => {
                       type="date"
                       value={startDate}
                       onChange={e => setStartDate(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      className="input-field"
                     />
                   </div>
                   <div>
@@ -229,7 +228,7 @@ const ReportDownloader = () => {
                       type="date"
                       value={endDate}
                       onChange={e => setEndDate(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      className="input-field"
                     />
                   </div>
                 </div>
@@ -245,17 +244,19 @@ const ReportDownloader = () => {
               )}
             </div>
 
-            <div className="mt-6 flex gap-3">
+            <div className="px-6 py-4 flex gap-3 border-t border-gray-100 flex-shrink-0"
+                 style={{background:'linear-gradient(90deg,#f8faff,#f5f3ff)'}}>
               <button
                 onClick={() => setOpen(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50"
+                className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDownload}
                 disabled={loading}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-60"
+                className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50"
+                style={{background:'linear-gradient(135deg,#10b981,#059669)'}}
               >
                 {loading ? (
                   <><Loader className="h-4 w-4 animate-spin" /> Generating...</>
