@@ -109,7 +109,7 @@ const Receipt = () => {
             <div className="flex justify-center mb-2">
               <Store className="h-12 w-12 text-blue-600" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900">Shri Lakshmi Vigneswara Traders</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Sri Venkata Lakshmi Vigneswara Traders</h1>
             <p className="text-sm text-gray-600 mt-1">Inventory Management System</p>
             <div className="mt-2 text-xs text-gray-500">
               <p className="flex items-center justify-center">

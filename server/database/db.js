@@ -165,6 +165,17 @@ function initializeDatabase() {
     }
   });
 
+  // Migrate customer_sales table: add payment_mode column if missing
+  db.all(`PRAGMA table_info(customer_sales)`, (err, columns) => {
+    if (err) return;
+    const hasPaymentMode = columns.some((c) => c.name === 'payment_mode');
+    if (!hasPaymentMode) {
+      db.run(`ALTER TABLE customer_sales ADD COLUMN payment_mode TEXT DEFAULT 'cash'`, (e) => {
+        if (!e) console.log('Added payment_mode column to customer_sales table');
+      });
+    }
+  });
+
   // Create product_categories table for dynamic categories
   db.run(`CREATE TABLE IF NOT EXISTS product_categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,6 +247,35 @@ function initializeDatabase() {
     }
   });
 
+  // Migrate products table: expand unit CHECK to include pieces, bottles, tonnes, grams, ml
+  db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'", (err, row) => {
+    if (err || !row) return;
+    if (row.sql && !row.sql.includes('pieces')) {
+      db.serialize(() => {
+        db.run(`CREATE TABLE IF NOT EXISTS products_v4 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          product_id TEXT UNIQUE NOT NULL,
+          category TEXT NOT NULL,
+          product_name TEXT NOT NULL,
+          variety TEXT,
+          quantity_available REAL NOT NULL DEFAULT 0,
+          unit TEXT NOT NULL CHECK (unit IN ('kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes')),
+          purchase_price REAL NOT NULL DEFAULT 0,
+          selling_price REAL NOT NULL DEFAULT 0,
+          supplier TEXT,
+          date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+        db.run(`INSERT OR IGNORE INTO products_v4 SELECT * FROM products`);
+        db.run(`DROP TABLE products`);
+        db.run(`ALTER TABLE products_v4 RENAME TO products`, (e) => {
+          if (!e) console.log('Migrated products table: added pieces, bottles, tonnes, grams, ml units');
+        });
+      });
+    }
+  });
+
   // Migrate sales table: remove UNIQUE constraint on sale_id for multi-item sales
   db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='sales'", (err, row) => {
     if (err || !row) return;
@@ -282,6 +322,83 @@ function initializeDatabase() {
       console.error('Error creating purchases table:', err.message);
     } else {
       console.log('Purchases table created successfully');
+    }
+  });
+
+  // Create bank_accounts table
+  db.run(`CREATE TABLE IF NOT EXISTS bank_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_name TEXT NOT NULL,
+    bank_name TEXT NOT NULL,
+    account_number TEXT,
+    balance REAL NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating bank_accounts table:', err.message);
+    } else {
+      console.log('Bank accounts table created successfully');
+    }
+  });
+
+  // Create expenditures table
+  db.run(`CREATE TABLE IF NOT EXISTS expenditures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    amount REAL NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT DEFAULT 'general',
+    expense_date DATE NOT NULL,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating expenditures table:', err.message);
+    } else {
+      console.log('Expenditures table created successfully');
+    }
+  });
+
+  // Create bank_transfers table
+  db.run(`CREATE TABLE IF NOT EXISTS bank_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_account_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    transfer_type TEXT NOT NULL CHECK (transfer_type IN ('deposit', 'withdrawal')),
+    description TEXT,
+    transfer_date DATE NOT NULL,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating bank_transfers table:', err.message);
+    } else {
+      console.log('Bank transfers table created successfully');
+    }
+  });
+
+  // Create supplier_payments table
+  db.run(`CREATE TABLE IF NOT EXISTS supplier_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    payment_mode TEXT NOT NULL DEFAULT 'bank' CHECK (payment_mode IN ('cash', 'bank', 'upi')),
+    bank_account_id INTEGER,
+    description TEXT,
+    payment_date DATE NOT NULL,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating supplier_payments table:', err.message);
+    } else {
+      console.log('Supplier payments table created successfully');
     }
   });
 
@@ -382,9 +499,15 @@ function getAll(query, params = []) {
   });
 }
 
+// Returns current IST datetime as 'YYYY-MM-DD HH:mm:ss' string
+function nowIST() {
+  return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace('T', ' ');
+}
+
 module.exports = {
   db,
   runQuery,
   getRow,
-  getAll
+  getAll,
+  nowIST
 };

@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken } = require('../middleware/auth');
-const { getRow, runQuery, getAll } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const moment = require('moment');
 
 const router = express.Router();
@@ -73,16 +73,16 @@ router.post('/', [
     for (const saleItem of saleItems) {
       // Create sale record
       await runQuery(
-        `INSERT INTO sales (sale_id, product_id, quantity_sold, price_per_unit, total_amount, operator_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [saleId, saleItem.product.id, saleItem.quantity, saleItem.pricePerUnit, saleItem.itemTotal, req.user.id]
+        `INSERT INTO sales (sale_id, product_id, quantity_sold, price_per_unit, total_amount, sale_date, operator_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [saleId, saleItem.product.id, saleItem.quantity, saleItem.pricePerUnit, saleItem.itemTotal, nowIST(), req.user.id]
       );
 
       // Update product stock
       const newQuantity = saleItem.product.quantity_available - saleItem.quantity;
       await runQuery(
-        'UPDATE products SET quantity_available = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [newQuantity, saleItem.product.id]
+        'UPDATE products SET quantity_available = ?, updated_at = ? WHERE id = ?',
+        [newQuantity, nowIST(), saleItem.product.id]
       );
     }
 
@@ -108,8 +108,9 @@ router.post('/', [
     await Promise.all(
       saleItems.map((saleItem) =>
         runQuery(
-          `INSERT INTO customer_sales (sale_id, receipt_id, customer_name, customer_mobile, customer_address, product_name, quantity, sale_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          `INSERT INTO customer_sales (sale_id, receipt_id, customer_name, customer_mobile, customer_address, product_name, quantity, payment_mode, sale_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
           [
             saleId,
             receipt?.id || null,
@@ -117,11 +118,46 @@ router.post('/', [
             customer_mobile || null,
             customer_address || null,
             saleItem.product.product_name,
-            saleItem.quantity
+            saleItem.quantity,
+            payment_mode || 'cash',
+            nowIST()
           ]
         )
       )
     );
+
+    // Auto-deposit UPI/Card payments into default SBI bank account
+    if (payment_mode === 'upi' || payment_mode === 'card') {
+      try {
+        // Find or create the default SBI bank account
+        let sbiAccount = await getRow(
+          "SELECT * FROM bank_accounts WHERE LOWER(bank_name) LIKE '%sbi%' LIMIT 1"
+        );
+        if (!sbiAccount) {
+          const result = await runQuery(
+            `INSERT INTO bank_accounts (account_name, bank_name, balance) VALUES (?, ?, ?)`,
+            ['SBI Account', 'SBI Bank', 0]
+          );
+          sbiAccount = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [result.id]);
+        }
+
+        // Update bank balance
+        await runQuery(
+          'UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+          [totalAmount, nowIST(), sbiAccount.id]
+        );
+
+        // Record the bank transfer for audit trail
+        const todayIST = moment().utcOffset('+05:30').format('YYYY-MM-DD');
+        await runQuery(
+          `INSERT INTO bank_transfers (bank_account_id, transfer_type, amount, description, transfer_date)
+           VALUES (?, 'deposit', ?, ?, ?)`,
+          [sbiAccount.id, totalAmount, `Auto-deposit: ${payment_mode.toUpperCase()} sale ${saleId}`, todayIST]
+        );
+      } catch (bankErr) {
+        console.error('Auto bank deposit error (non-fatal):', bankErr);
+      }
+    }
 
     res.status(201).json({
       saleId,

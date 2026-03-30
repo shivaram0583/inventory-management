@@ -29,7 +29,7 @@ router.get('/admin', [
         SUM(quantity_sold) as items_sold,
         SUM(total_amount) as revenue
        FROM sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?`,
+       WHERE DATE(sale_date) = ?`,
       [today]
     );
 
@@ -54,12 +54,12 @@ router.get('/admin', [
     // Sales comparison (last 7 days)
     const weekComparison = await getAll(
       `SELECT 
-        DATE(datetime(sale_date, '+5 hours', '+30 minutes')) as date,
+        DATE(sale_date) as date,
         SUM(total_amount) as revenue,
         COUNT(DISTINCT sale_id) as transactions
        FROM sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) >= date(datetime('now', '+5 hours', '+30 minutes'), '-7 days')
-       GROUP BY DATE(datetime(sale_date, '+5 hours', '+30 minutes'))
+       WHERE DATE(sale_date) >= date('${today}', '-7 days')
+       GROUP BY DATE(sale_date)
        ORDER BY date DESC`
     );
 
@@ -71,7 +71,7 @@ router.get('/admin', [
         SUM(p.quantity_available) as total_stock,
         COALESCE(SUM(s.total_amount), 0) as revenue
        FROM products p
-       LEFT JOIN sales s ON p.id = s.product_id AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) = ?
+       LEFT JOIN sales s ON p.id = s.product_id AND DATE(s.sale_date) = ?
        GROUP BY p.category`,
       [today]
     );
@@ -131,7 +131,7 @@ router.get('/operator', [
         SUM(quantity_sold) as items_sold,
         SUM(total_amount) as revenue
        FROM sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ? AND operator_id = ?`,
+       WHERE DATE(sale_date) = ? AND operator_id = ?`,
       [today, req.user.id]
     );
 
@@ -157,7 +157,7 @@ router.get('/operator', [
         p.selling_price,
         COUNT(s.id) as sales_count
        FROM products p
-       LEFT JOIN sales s ON p.id = s.product_id AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) = ?
+       LEFT JOIN sales s ON p.id = s.product_id AND DATE(s.sale_date) = ?
        WHERE p.quantity_available > 0
        GROUP BY p.id, p.product_name, p.variety, p.quantity_available, p.unit, p.selling_price
        ORDER BY sales_count DESC, p.product_name
@@ -191,10 +191,10 @@ router.get('/quick-stats', authenticateToken, async (req, res) => {
       `SELECT 
         (SELECT COUNT(*) FROM products) as total_products,
         (SELECT SUM(quantity_available) FROM products) as total_stock,
-        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as today_transactions,
-        (SELECT SUM(total_amount) FROM sales WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as today_revenue,
-        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE strftime('%Y-%m', datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as month_transactions,
-        (SELECT SUM(total_amount) FROM sales WHERE strftime('%Y-%m', datetime(sale_date, '+5 hours', '+30 minutes')) = ?) as month_revenue`,
+        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE DATE(sale_date) = ?) as today_transactions,
+        (SELECT SUM(total_amount) FROM sales WHERE DATE(sale_date) = ?) as today_revenue,
+        (SELECT COUNT(DISTINCT sale_id) FROM sales WHERE strftime('%Y-%m', sale_date) = ?) as month_transactions,
+        (SELECT SUM(total_amount) FROM sales WHERE strftime('%Y-%m', sale_date) = ?) as month_revenue`,
       [today, today, thisMonth, thisMonth]
     );
 

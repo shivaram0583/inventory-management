@@ -54,66 +54,62 @@ const Modal = ({
   const confirmG = type ? confirmGradientMap[type] : confirmGradientMap.info;
 
   return (
-    <div className="fixed inset-0 z-[100] overflow-y-auto animate-fade-in">
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20">
-        {/* Backdrop */}
-        <div
-          className="fixed inset-0 transition-opacity"
-          style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}
-          onClick={!hideClose ? onClose : undefined}
-        />
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-fade-in"
+         style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}
+         onClick={!hideClose ? onClose : undefined}>
 
-        {/* Modal card */}
-        <div className="relative bg-white rounded-2xl text-left shadow-2xl transform transition-all sm:my-8 sm:max-w-lg sm:w-full animate-scale-in border border-gray-100">
-          {/* Header */}
-          <div className="px-6 pt-5 pb-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                {icon && (
-                  <div className="h-9 w-9 rounded-xl flex items-center justify-center shadow-md flex-shrink-0"
-                       style={{background: iconBg}}>
-                    {icon}
-                  </div>
-                )}
-                <h3 className="text-base font-bold text-gray-900">{title}</h3>
-              </div>
-              {!hideClose && (
-                <button
-                  onClick={onClose}
-                  className="h-7 w-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all duration-150"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+      {/* Modal card */}
+      <div className="relative bg-white rounded-2xl text-left shadow-2xl w-full max-w-lg animate-scale-in border border-gray-100 flex flex-col"
+           style={{maxHeight:'85vh'}}
+           onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {icon && (
+                <div className="h-9 w-9 rounded-xl flex items-center justify-center shadow-md flex-shrink-0"
+                     style={{background: iconBg}}>
+                  {icon}
+                </div>
               )}
+              <h3 className="text-base font-bold text-gray-900">{title}</h3>
             </div>
-
-            <div className="text-sm text-gray-600 leading-relaxed">
-              {children}
-            </div>
-          </div>
-
-          {/* Footer buttons */}
-          {(confirmText || !hideClose) && (
-            <div className="px-6 py-4 flex justify-end gap-2.5 border-t border-gray-100"
-                 style={{background:'linear-gradient(90deg,#f8faff,#f5f3ff)'}}>
-              {onConfirm && (
-                <button
-                  onClick={onClose}
-                  className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 active:scale-95 transition-all duration-150 focus:outline-none"
-                >
-                  {cancelText}
-                </button>
-              )}
+            {!hideClose && (
               <button
-                onClick={() => { if (onConfirm) onConfirm(); onClose(); }}
-                className="px-4 py-2 text-sm font-semibold text-white rounded-xl shadow-md hover:shadow-lg active:scale-95 transition-all duration-150 focus:outline-none"
-                style={{background: confirmG}}
+                onClick={onClose}
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all duration-150"
               >
-                {confirmText || 'OK'}
+                <X className="h-4 w-4" />
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
+
+        <div className="px-6 py-4 overflow-y-auto flex-1 text-sm text-gray-600 leading-relaxed" style={{scrollbarWidth:'thin'}}>
+          {children}
+        </div>
+
+        {/* Footer buttons */}
+        {(confirmText || !hideClose) && (
+          <div className="px-6 py-4 flex justify-end gap-2.5 border-t border-gray-100 flex-shrink-0"
+               style={{background:'linear-gradient(90deg,#f8faff,#f5f3ff)'}}>
+            {onConfirm && (
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 active:scale-95 transition-all duration-150 focus:outline-none"
+              >
+                {cancelText}
+              </button>
+            )}
+            <button
+              onClick={() => { if (onConfirm) onConfirm(); onClose(); }}
+              className="px-4 py-2 text-sm font-semibold text-white rounded-xl shadow-md hover:shadow-lg active:scale-95 transition-all duration-150 focus:outline-none"
+              style={{background: confirmG}}
+            >
+              {confirmText || 'OK'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

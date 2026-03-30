@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
+import CustomSelect from './shared/CustomSelect';
 import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
 import { fmtDateTime, getISTDateString } from '../utils/dateUtils';
@@ -20,6 +21,18 @@ import {
   ChevronRight,
   ArrowLeft
 } from 'lucide-react';
+
+const UNIT_OPTIONS = [
+  { value: 'kg', label: 'kg' },
+  { value: 'grams', label: 'grams' },
+  { value: 'packet', label: 'packet' },
+  { value: 'bag', label: 'bag' },
+  { value: 'liters', label: 'liters' },
+  { value: 'ml', label: 'ml' },
+  { value: 'pieces', label: 'pieces' },
+  { value: 'bottles', label: 'bottles' },
+  { value: 'tonnes', label: 'tonnes' },
+];
 
 const Purchases = () => {
   const { user } = useAuth();
@@ -42,6 +55,7 @@ const Purchases = () => {
   const [formSupplier, setFormSupplier] = useState('');
   const [formDate, setFormDate] = useState(getISTDateString());
   const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('all');
   const [submitting, setSubmitting] = useState(false);
 
   // Category form state
@@ -143,10 +157,13 @@ const Purchases = () => {
     }
   }, [formProductId, products]);
 
-  const filteredProducts = products.filter(p =>
-    p.product_name.toLowerCase().includes(productSearch.toLowerCase()) ||
-    p.product_id.toLowerCase().includes(productSearch.toLowerCase()) ||
-    (p.variety || '').toLowerCase().includes(productSearch.toLowerCase())
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = p.product_name.toLowerCase().includes(productSearch.toLowerCase()) ||
+      p.product_id.toLowerCase().includes(productSearch.toLowerCase()) ||
+      (p.variety || '').toLowerCase().includes(productSearch.toLowerCase());
+    const matchesCategory = productCategoryFilter === 'all' || p.category === productCategoryFilter;
+    return matchesSearch && matchesCategory;
+  }
   );
 
   // Step 1 — validate and open confirmation popup
@@ -208,8 +225,8 @@ const Purchases = () => {
       price_per_unit: String(purchase.price_per_unit),
       supplier: purchase.supplier || '',
       purchase_date: purchase.purchase_date
-        ? new Date(purchase.purchase_date).toISOString().split('T')[0]
-        : new Date().toISOString().split('T')[0]
+        ? purchase.purchase_date.toString().substring(0, 10)
+        : new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
     });
     setEditModal({ open: true, purchase });
   };
@@ -382,11 +399,20 @@ const Purchases = () => {
                 <Plus className="h-3 w-3" /> New Product
               </button>
             </div>
-            <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input type="text" placeholder="Search products..."
-                className="input-field pl-10" value={productSearch}
-                onChange={e => setProductSearch(e.target.value)} />
+            <div className="flex gap-3 mb-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input type="text" placeholder="Search products..."
+                  className="input-field pl-10" value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)} />
+              </div>
+              <div style={{minWidth:'160px'}}>
+                <CustomSelect
+                  options={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))]}
+                  value={productCategoryFilter}
+                  onChange={(val) => setProductCategoryFilter(val)}
+                />
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto pr-1">
               {filteredProducts.map(p => (
@@ -447,18 +473,32 @@ const Purchases = () => {
             </div>
             <form onSubmit={handleRecordPurchase} className="p-5 space-y-4">
               {selectedProduct ? (
-                <div className="rounded-xl p-3 text-sm"
+                <div className="rounded-xl p-4 text-sm border-2 border-blue-400 relative"
                      style={{background:'linear-gradient(135deg,#eff6ff,#eef2ff)'}}>
-                  <p className="font-semibold text-gray-900">{selectedProduct.product_name}</p>
-                  {selectedProduct.variety && <p className="text-xs text-gray-500">{selectedProduct.variety}</p>}
-                  <p className="text-xs text-gray-500 capitalize">{selectedProduct.category} · {selectedProduct.unit}</p>
-                  <button type="button" onClick={() => setFormProductId('')}
-                    className="mt-1 text-xs text-red-400 hover:text-red-600 flex items-center gap-0.5">
-                    <X className="h-3 w-3" /> Clear
-                  </button>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-gray-900 text-base">{selectedProduct.product_name}</p>
+                      {selectedProduct.variety && <p className="text-sm text-gray-500 mt-0.5">{selectedProduct.variety}</p>}
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="inline-block text-xs px-2 py-0.5 rounded-full font-semibold capitalize"
+                              style={{background:'#ede9fe',color:'#6d28d9'}}>
+                          {selectedProduct.category}
+                        </span>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-blue-100 text-blue-700">
+                          {selectedProduct.quantity_available} {selectedProduct.unit}
+                        </span>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setFormProductId('')}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-white border border-gray-200 hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition-all duration-150 shadow-sm flex-shrink-0">
+                      <X className="h-3.5 w-3.5" /> Clear
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <p className="text-xs text-gray-400 italic">← Select a product from the list</p>
+                <div className="rounded-xl p-4 border-2 border-dashed border-gray-200 text-center">
+                  <p className="text-sm text-gray-400">← Select a product from the list</p>
+                </div>
               )}
 
               <div>
@@ -850,8 +890,8 @@ const Purchases = () => {
       {confirmModal.open && confirmModal.data && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
              style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
-            <div className="px-6 py-4 border-b border-gray-100"
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col" style={{maxHeight:'85vh'}}>
+            <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0"
                  style={{background:'linear-gradient(135deg,#eff6ff,#eef2ff)'}}>
               <div className="flex items-center gap-3">
                 <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow">
@@ -862,7 +902,7 @@ const Purchases = () => {
                   <p className="text-xs text-gray-500">This will be added to inventory</p>
                 </div>
                 <button onClick={() => setConfirmModal({ open: false, data: null })}
-                  className="ml-auto text-gray-400 hover:text-gray-600">
+                  className="ml-auto h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -941,8 +981,8 @@ const Purchases = () => {
       {editModal.open && editModal.purchase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
              style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100"
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col" style={{maxHeight:'85vh'}}>
+            <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0"
                  style={{background:'linear-gradient(135deg,#eff6ff,#eef2ff)'}}>
               <div className="flex items-center gap-3">
                 <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow">
@@ -953,13 +993,13 @@ const Purchases = () => {
                   <p className="text-xs text-gray-500 font-mono">{editModal.purchase.purchase_id}</p>
                 </div>
                 <button onClick={() => setEditModal({ open: false, purchase: null })}
-                  className="ml-auto text-gray-400 hover:text-gray-600">
+                  className="ml-auto h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
             </div>
-            <form onSubmit={handleEditPurchase}>
-              <div className="p-6 space-y-4">
+            <form onSubmit={handleEditPurchase} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1" style={{scrollbarWidth:'thin'}}>
                 <div className="rounded-xl px-4 py-3 mb-2"
                      style={{background:'linear-gradient(135deg,#f5f3ff,#eef2ff)'}}>
                   <p className="font-semibold text-gray-900 text-sm">{editModal.purchase.product_name}</p>
@@ -1034,7 +1074,7 @@ const Purchases = () => {
       {showNewProductModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
              style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col animate-scale-in" style={{maxHeight:'85vh'}}>
             <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0"
                  style={{background:'linear-gradient(135deg,#ecfdf5,#d1fae5)'}}>
               <div className="flex items-center gap-3">
@@ -1062,14 +1102,13 @@ const Purchases = () => {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Category *</label>
-                    <select required className="input-field !text-sm"
+                    <CustomSelect
+                      required
+                      options={categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase()+c.name.slice(1) }))}
                       value={newProductForm.category}
-                      onChange={e => { const cat = e.target.value; setNewProductForm(f => ({...f, category: cat})); fetchNextProductId(cat); }}>
-                      <option value="">-- Select --</option>
-                      {categories.map(c => (
-                        <option key={c.id} value={c.name}>{c.name.charAt(0).toUpperCase()+c.name.slice(1)}</option>
-                      ))}
-                    </select>
+                      onChange={(val) => { setNewProductForm(f => ({...f, category: val})); fetchNextProductId(val); }}
+                      placeholder="-- Select --"
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -1091,14 +1130,13 @@ const Purchases = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Unit *</label>
-                    <select required className="input-field !text-sm"
+                    <CustomSelect
+                      required
+                      options={UNIT_OPTIONS}
                       value={newProductForm.unit}
-                      onChange={e => setNewProductForm(f => ({...f, unit: e.target.value}))}>
-                      <option value="kg">kg</option>
-                      <option value="packet">packet</option>
-                      <option value="bag">bag</option>
-                      <option value="liters">liters</option>
-                    </select>
+                      onChange={(val) => setNewProductForm(f => ({...f, unit: val}))}
+                      placeholder="Select unit"
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Initial Quantity</label>
