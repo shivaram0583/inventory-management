@@ -147,7 +147,7 @@ const Login = () => {
                   Sri Venkata
                 </span>
                 <h1 className="text-4xl lg:text-6xl font-black leading-none login-title-sheen" style={{ color: '#312e81' }}>
-                  Lakshmi
+                  LAKSHMI
                 </h1>
               </div>
               <div className="mt-2 flex flex-wrap sm:flex-nowrap items-baseline gap-x-3 gap-y-1">
@@ -159,7 +159,7 @@ const Login = () => {
                     WebkitTextFillColor: 'transparent'
                   }}
                 >
-                  Vigneswara
+                  VIGNESWARA
                 </h2>
                 <span className="text-lg lg:text-xl font-semibold leading-none tracking-[0.12em] uppercase text-slate-500">
                   Traders
