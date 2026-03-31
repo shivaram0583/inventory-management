@@ -6,6 +6,10 @@ const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
 
 const router = express.Router();
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 // ─── BANK ACCOUNTS ──────────────────────────────────────────────────────────
 
@@ -36,7 +40,7 @@ router.post('/bank-accounts', [
     const { account_name, bank_name, account_number, balance = 0 } = req.body;
     const result = await runQuery(
       'INSERT INTO bank_accounts (account_name, bank_name, account_number, balance) VALUES (?, ?, ?, ?)',
-      [account_name, bank_name, account_number || null, balance]
+      [account_name, bank_name, account_number || null, toNumber(balance)]
     );
     const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [result.id]);
     res.status(201).json(account);
@@ -205,25 +209,27 @@ router.post('/bank-transfers', [
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { bank_account_id, amount, transfer_type, transfer_date, description } = req.body;
+    const accountId = Number(bank_account_id);
+    const transferAmount = toNumber(amount);
 
-    const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [bank_account_id]);
+    const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [accountId]);
     if (!account) return res.status(404).json({ message: 'Bank account not found' });
 
     // Update bank balance
     const newBalance = transfer_type === 'deposit'
-      ? account.balance + amount
-      : account.balance - amount;
+      ? toNumber(account.balance) + transferAmount
+      : toNumber(account.balance) - transferAmount;
 
     if (newBalance < 0) {
       return res.status(400).json({ message: 'Insufficient bank balance for withdrawal' });
     }
 
     await runQuery('UPDATE bank_accounts SET balance = ?, updated_at = ? WHERE id = ?',
-      [newBalance, nowIST(), bank_account_id]);
+      [newBalance, nowIST(), accountId]);
 
     const result = await runQuery(
       'INSERT INTO bank_transfers (bank_account_id, amount, transfer_type, description, transfer_date, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      [bank_account_id, amount, transfer_type, description || null, transfer_date, req.user.id]
+      [accountId, transferAmount, transfer_type, description || null, transfer_date, req.user.id]
     );
 
     const transfer = await getRow(
@@ -312,21 +318,23 @@ router.post('/supplier-payments', [
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { supplier_name, amount, payment_mode, bank_account_id, description, payment_date } = req.body;
+    const paymentAmount = toNumber(amount);
+    const accountId = bank_account_id ? Number(bank_account_id) : null;
 
     // If paying from bank, deduct from bank balance
-    if (payment_mode === 'bank' && bank_account_id) {
-      const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [bank_account_id]);
+    if (payment_mode === 'bank' && accountId) {
+      const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [accountId]);
       if (!account) return res.status(404).json({ message: 'Bank account not found' });
-      if (account.balance < amount) {
+      if (toNumber(account.balance) < paymentAmount) {
         return res.status(400).json({ message: 'Insufficient bank balance' });
       }
       await runQuery('UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-        [amount, nowIST(), bank_account_id]);
+        [paymentAmount, nowIST(), accountId]);
     }
 
     const result = await runQuery(
       'INSERT INTO supplier_payments (supplier_name, amount, payment_mode, bank_account_id, description, payment_date, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [supplier_name, amount, payment_mode, bank_account_id || null, description || null, payment_date, req.user.id]
+      [supplier_name, paymentAmount, payment_mode, accountId || null, description || null, payment_date, req.user.id]
     );
 
     const payment = await getRow(
@@ -343,7 +351,7 @@ router.post('/supplier-payments', [
       actorRole: req.user.role,
       type: 'supplier-payment',
       title: 'Recorded a supplier payment',
-      description: `₹${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} was paid to ${supplier_name}.`,
+      description: `₹${paymentAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} was paid to ${supplier_name}.`,
       createdAt: payment_date
     });
 
@@ -394,11 +402,11 @@ router.get('/supplier-balances', authenticateToken, async (req, res) => {
 
     const purchaseMap = {};
     for (const p of purchased) {
-      purchaseMap[p.supplier_name] = p.total_purchased;
+      purchaseMap[p.supplier_name] = toNumber(p.total_purchased);
     }
     const paidMap = {};
     for (const p of paid) {
-      paidMap[p.supplier_name] = p.total_paid;
+      paidMap[p.supplier_name] = toNumber(p.total_paid);
     }
 
     // Merge all supplier names
@@ -461,7 +469,12 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
 
     // Daily supplier payments
     const supplierPaymentsByDay = await getAll(`
-      SELECT payment_date as day, SUM(amount) as total_supplier_payments
+      SELECT
+        payment_date as day,
+        SUM(amount) as total_supplier_payments,
+        SUM(CASE WHEN payment_mode = 'cash' THEN amount ELSE 0 END) as total_supplier_cash_payments,
+        SUM(CASE WHEN payment_mode = 'bank' THEN amount ELSE 0 END) as total_supplier_bank_payments,
+        SUM(CASE WHEN payment_mode = 'upi' THEN amount ELSE 0 END) as total_supplier_upi_payments
       FROM supplier_payments
       WHERE payment_date BETWEEN ? AND ?
       GROUP BY payment_date ORDER BY payment_date
@@ -491,6 +504,9 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
     const depMap = toMap(depositsByDay, 'total_deposits');
     const withMap = toMap(withdrawalsByDay, 'total_withdrawals');
     const supMap = toMap(supplierPaymentsByDay, 'total_supplier_payments');
+    const supCashMap = toMap(supplierPaymentsByDay, 'total_supplier_cash_payments');
+    const supBankMap = toMap(supplierPaymentsByDay, 'total_supplier_bank_payments');
+    const supUpiMap = toMap(supplierPaymentsByDay, 'total_supplier_upi_payments');
     const purMap = toMap(purchasesByDay, 'total_purchases');
 
     const days = Array.from(daySet).sort();
@@ -522,26 +538,25 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
       WHERE payment_mode = 'cash' AND payment_date < ?
     `, [start_date]);
 
-    openingBalance = (priorSales?.total || 0)
-      - (priorExp?.total || 0)
-      - (priorDeposits?.total || 0)
-      + (priorWithdrawals?.total || 0)
-      - (priorSupplierCash?.total || 0);
+    openingBalance = toNumber(priorSales?.total)
+      - toNumber(priorExp?.total)
+      - toNumber(priorDeposits?.total)
+      + toNumber(priorWithdrawals?.total)
+      - toNumber(priorSupplierCash?.total);
 
     const summary = days.map(day => {
-      const sales = salesMap[day] || 0;
-      const expenditure = expMap[day] || 0;
-      const bankDeposits = depMap[day] || 0;
-      const bankWithdrawals = withMap[day] || 0;
-      const supplierPayments = supMap[day] || 0;
-      const purchases = purMap[day] || 0;
+      const sales = toNumber(salesMap[day]);
+      const expenditure = toNumber(expMap[day]);
+      const bankDeposits = toNumber(depMap[day]);
+      const bankWithdrawals = toNumber(withMap[day]);
+      const totalSupplierPayments = toNumber(supMap[day]);
+      const cashSupplierPayments = toNumber(supCashMap[day]);
+      const bankSupplierPayments = toNumber(supBankMap[day]);
+      const upiSupplierPayments = toNumber(supUpiMap[day]);
+      const purchases = toNumber(purMap[day]);
 
-      const closingBalance = openingBalance + sales - expenditure - bankDeposits + bankWithdrawals - supplierPayments;
-      // Note: supplier payments from cash reduce cash balance
-      // supplier payments from bank don't affect cash (already deducted from bank)
-      // For simplicity, we only deduct cash supplier payments from cash balance
-      // But since the payment_mode check is complex, we handle it differently:
-      // Actually we deducted ALL supplier payments above. Let me fix this.
+      const closingBalance =
+        openingBalance + sales - expenditure - bankDeposits + bankWithdrawals - cashSupplierPayments;
 
       const row = {
         date: day,
@@ -550,7 +565,11 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
         expenditure,
         bank_deposits: bankDeposits,
         bank_withdrawals: bankWithdrawals,
-        supplier_payments: supplierPayments,
+        supplier_payments: cashSupplierPayments,
+        supplier_payments_cash: cashSupplierPayments,
+        supplier_payments_bank: bankSupplierPayments,
+        supplier_payments_upi: upiSupplierPayments,
+        supplier_payments_total: totalSupplierPayments,
         purchases,
         closing_balance: closingBalance
       };

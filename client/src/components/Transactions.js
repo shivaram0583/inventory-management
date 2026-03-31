@@ -21,7 +21,12 @@ import {
   RefreshCw
 } from 'lucide-react';
 
-const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const num = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const fmt = (n) => num(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const Transactions = () => {
   const { user } = useAuth();
@@ -132,11 +137,16 @@ const Transactions = () => {
   const handleAddBankTransfer = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('/api/transactions/bank-transfers', bankTransferForm);
+      const payload = {
+        ...bankTransferForm,
+        bank_account_id: Number(bankTransferForm.bank_account_id),
+        amount: num(bankTransferForm.amount)
+      };
+      await axios.post('/api/transactions/bank-transfers', payload);
       setShowBankTransferModal(false);
       setBankTransferForm({ bank_account_id: bankAccounts[0]?.id || '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today });
       refreshAll();
-      showMsg('Transfer Recorded', `₹${fmt(bankTransferForm.amount)} ${bankTransferForm.transfer_type} recorded`);
+      showMsg('Transfer Recorded', `₹${fmt(payload.amount)} ${payload.transfer_type} recorded`);
     } catch (err) {
       showMsg('Error', err.response?.data?.message || 'Failed to record transfer', 'error');
     }
@@ -145,14 +155,16 @@ const Transactions = () => {
   const handleAddSupplierPayment = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('/api/transactions/supplier-payments', {
+      const payload = {
         ...supplierPayForm,
-        bank_account_id: supplierPayForm.payment_mode === 'bank' ? supplierPayForm.bank_account_id : null
-      });
+        amount: num(supplierPayForm.amount),
+        bank_account_id: supplierPayForm.payment_mode === 'bank' ? Number(supplierPayForm.bank_account_id) : null
+      };
+      await axios.post('/api/transactions/supplier-payments', payload);
       setShowSupplierPayModal(false);
       setSupplierPayForm({ supplier_name: '', amount: '', payment_mode: 'bank', bank_account_id: '', description: '', payment_date: today });
       refreshAll();
-      showMsg('Payment Recorded', `Paid ₹${fmt(supplierPayForm.amount)} to ${supplierPayForm.supplier_name}`);
+      showMsg('Payment Recorded', `Paid ₹${fmt(payload.amount)} to ${payload.supplier_name}`);
     } catch (err) {
       showMsg('Error', err.response?.data?.message || 'Failed to record payment', 'error');
     }
@@ -161,11 +173,15 @@ const Transactions = () => {
   const handleAddBankAccount = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('/api/transactions/bank-accounts', bankAccForm);
+      const payload = {
+        ...bankAccForm,
+        balance: num(bankAccForm.balance)
+      };
+      await axios.post('/api/transactions/bank-accounts', payload);
       setShowBankAccModal(false);
       setBankAccForm({ account_name: '', bank_name: '', account_number: '', balance: '' });
       refreshAll();
-      showMsg('Account Added', `Bank account "${bankAccForm.account_name}" added`);
+      showMsg('Account Added', `Bank account "${payload.account_name}" added`);
     } catch (err) {
       showMsg('Error', err.response?.data?.message || 'Failed to add account', 'error');
     }
@@ -192,10 +208,10 @@ const Transactions = () => {
 
   // Summary totals for header
   const totals = dailySummary.reduce((acc, d) => ({
-    sales: acc.sales + d.sales,
-    expenditure: acc.expenditure + d.expenditure,
-    bankDeposits: acc.bankDeposits + d.bank_deposits,
-    supplierPayments: acc.supplierPayments + d.supplier_payments
+    sales: acc.sales + num(d.sales),
+    expenditure: acc.expenditure + num(d.expenditure),
+    bankDeposits: acc.bankDeposits + num(d.bank_deposits),
+    supplierPayments: acc.supplierPayments + num(d.supplier_payments_total ?? d.supplier_payments)
   }), { sales: 0, expenditure: 0, bankDeposits: 0, supplierPayments: 0 });
 
   return (
@@ -557,7 +573,7 @@ const DailySummaryTab = ({ summary, loading, expandedDay, setExpandedDay }) => {
               <th className="text-right">Expenditure</th>
               <th className="text-right">To Bank</th>
               <th className="text-right">From Bank</th>
-              <th className="text-right">Supplier Pay</th>
+              <th className="text-right">Supplier Cash</th>
               <th className="text-right">Closing Bal.</th>
               <th></th>
             </tr>
@@ -572,7 +588,7 @@ const DailySummaryTab = ({ summary, loading, expandedDay, setExpandedDay }) => {
                   <td className="text-right font-medium text-red-600">{day.expenditure > 0 ? `-₹${fmt(day.expenditure)}` : '-'}</td>
                   <td className="text-right font-medium text-blue-600">{day.bank_deposits > 0 ? `-₹${fmt(day.bank_deposits)}` : '-'}</td>
                   <td className="text-right font-medium text-cyan-600">{day.bank_withdrawals > 0 ? `+₹${fmt(day.bank_withdrawals)}` : '-'}</td>
-                  <td className="text-right font-medium text-orange-600">{day.supplier_payments > 0 ? `-₹${fmt(day.supplier_payments)}` : '-'}</td>
+                  <td className="text-right font-medium text-orange-600">{num(day.supplier_payments_cash ?? day.supplier_payments) > 0 ? `-₹${fmt(day.supplier_payments_cash ?? day.supplier_payments)}` : '-'}</td>
                   <td className={`text-right font-bold ${day.closing_balance >= 0 ? 'text-gray-800' : 'text-red-700'}`}>₹{fmt(day.closing_balance)}</td>
                   <td className="text-center">
                     {expandedDay === day.date ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
@@ -582,10 +598,11 @@ const DailySummaryTab = ({ summary, loading, expandedDay, setExpandedDay }) => {
                   <tr>
                     <td colSpan={9} className="!p-0">
                       <div className="bg-violet-50/60 px-6 py-4 border-y border-violet-100">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                           <SummaryCard label="Total Sales" value={day.sales} icon={Wallet} color="emerald" />
                           <SummaryCard label="Total Expenditure" value={day.expenditure} icon={TrendingDown} color="red" />
                           <SummaryCard label="Bank Deposits" value={day.bank_deposits} icon={ArrowUpToLine} color="blue" />
+                          <SummaryCard label="Supplier Bank" value={day.supplier_payments_bank} icon={Landmark} color="violet" />
                           <SummaryCard label="Purchases (Stock)" value={day.purchases} icon={Truck} color="amber" />
                         </div>
                       </div>
@@ -602,8 +619,8 @@ const DailySummaryTab = ({ summary, loading, expandedDay, setExpandedDay }) => {
 };
 
 const SummaryCard = ({ label, value, icon: Icon, color }) => {
-  const bg = { emerald: 'bg-emerald-100', red: 'bg-red-100', blue: 'bg-blue-100', amber: 'bg-amber-100' };
-  const txt = { emerald: 'text-emerald-700', red: 'text-red-700', blue: 'text-blue-700', amber: 'text-amber-700' };
+  const bg = { emerald: 'bg-emerald-100', red: 'bg-red-100', blue: 'bg-blue-100', amber: 'bg-amber-100', violet: 'bg-violet-100' };
+  const txt = { emerald: 'text-emerald-700', red: 'text-red-700', blue: 'text-blue-700', amber: 'text-amber-700', violet: 'text-violet-700' };
   return (
     <div className={`rounded-xl px-4 py-3 ${bg[color] || 'bg-gray-100'}`}>
       <div className="flex items-center gap-2 mb-1">

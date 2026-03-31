@@ -320,19 +320,21 @@ const SidebarContent = ({ navigation, user, onLogout, notificationCount = 0, onO
 
   return (
     <>
-      <div className="relative flex items-center flex-shrink-0 px-5 pb-4 border-b border-white/10">
-        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center shadow-lg">
-          <Store className="h-6 w-6 text-white" />
-        </div>
-        <div className="ml-3 flex-1 min-w-0 pr-10">
-          <h1 className="text-base font-bold text-white tracking-wide">SVLVT</h1>
-          <p className="mt-0.5 text-xs text-indigo-300">Inventory System</p>
+      <div className="flex items-center justify-between flex-shrink-0 px-5 pb-4 border-b border-white/10">
+        <div className="flex items-center min-w-0 flex-1">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center shadow-lg">
+            <Store className="h-6 w-6 text-white" />
+          </div>
+          <div className="ml-3 min-w-0">
+            <h1 className="text-base font-bold text-white tracking-wide">SVLVT</h1>
+            <p className="mt-0.5 text-xs text-indigo-300">Inventory System</p>
+          </div>
         </div>
         {showNotifications && (
           <NotificationBell
             count={notificationCount}
             onClick={onOpenNotifications}
-            className="absolute right-5 top-0"
+            className="ml-4 flex-shrink-0"
           />
         )}
       </div>
