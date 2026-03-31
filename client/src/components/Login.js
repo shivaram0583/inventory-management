@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { User, Lock } from 'lucide-react';
+import { User, Lock, LogIn, ChevronRight } from 'lucide-react';
 import ganeshaIcon from '../assets/ganesha.png';
 
 const Login = () => {
@@ -31,61 +31,61 @@ const Login = () => {
   return (
     <div
       className="min-h-screen flex relative overflow-hidden"
-      style={{ background: 'linear-gradient(145deg,#f8f2e7 0%,#f5ecdf 28%,#efe9fb 58%,#f6f7ff 78%,#ffffff 100%)' }}
+      style={{ background: 'linear-gradient(135deg,#fff7ed 0%,#f9f5ff 44%,#eef4ff 74%,#ffffff 100%)' }}
     >
       <div
-        className="absolute inset-[-12%] pointer-events-none login-gradient-wave"
+        className="absolute inset-[-18%] pointer-events-none login-gradient-wave"
         style={{
           background:
-            'linear-gradient(120deg, rgba(245,158,11,0.18), rgba(255,255,255,0.04), rgba(99,102,241,0.18), rgba(139,92,246,0.16), rgba(255,255,255,0.04), rgba(245,158,11,0.14))',
-          backgroundSize: '220% 220%',
-          opacity: 0.9,
-          filter: 'blur(54px)'
+            'radial-gradient(circle at 18% 22%, rgba(245,158,11,0.28), transparent 24%), radial-gradient(circle at 72% 26%, rgba(99,102,241,0.22), transparent 28%), radial-gradient(circle at 54% 76%, rgba(139,92,246,0.18), transparent 30%)',
+          backgroundSize: '140% 140%',
+          opacity: 1,
+          filter: 'blur(34px)'
         }}
       />
       <div
-        className="absolute inset-0 pointer-events-none login-mesh-pan"
+        className="absolute inset-x-[-15%] top-[8%] h-72 pointer-events-none login-light-band"
         style={{
-          backgroundImage:
-            'linear-gradient(rgba(255,255,255,0.28) 1px, transparent 1px), linear-gradient(90deg, rgba(129,140,248,0.10) 1px, transparent 1px)',
-          backgroundSize: '120px 120px',
-          maskImage: 'radial-gradient(circle at center, black 35%, transparent 82%)'
+          background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.52), rgba(99,102,241,0.16), rgba(255,255,255,0))',
+          filter: 'blur(40px)',
+          transform: 'rotate(-10deg)'
         }}
       />
       <div
         className="absolute inset-x-[-10%] top-[-8%] h-64 pointer-events-none login-aurora"
         style={{
-          background: 'linear-gradient(90deg, rgba(245,158,11,0.18), rgba(99,102,241,0.22), rgba(139,92,246,0.16), rgba(255,255,255,0))',
-          filter: 'blur(52px)'
+          background: 'linear-gradient(90deg, rgba(245,158,11,0.18), rgba(255,255,255,0.10), rgba(99,102,241,0.20), rgba(255,255,255,0))',
+          filter: 'blur(56px)'
         }}
       />
       <div
-        className="absolute inset-x-[-12%] bottom-[4%] h-56 pointer-events-none login-aurora"
+        className="absolute inset-x-[-12%] bottom-[6%] h-56 pointer-events-none login-light-band"
         style={{
-          background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(129,140,248,0.18), rgba(245,158,11,0.16), rgba(255,255,255,0))',
-          filter: 'blur(54px)',
-          animationDelay: '1.8s'
+          background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(245,158,11,0.14), rgba(139,92,246,0.16), rgba(255,255,255,0))',
+          filter: 'blur(48px)',
+          transform: 'rotate(8deg)',
+          animationDelay: '1.2s'
         }}
       />
       <div
         className="absolute -top-24 -left-20 h-80 w-80 rounded-full pointer-events-none animate-blob-1"
         style={{
-          background: 'radial-gradient(circle, rgba(245,158,11,0.20), rgba(245,158,11,0.08), transparent 72%)',
-          filter: 'blur(38px)'
+          background: 'radial-gradient(circle, rgba(245,158,11,0.18), rgba(245,158,11,0.06), transparent 72%)',
+          filter: 'blur(46px)'
         }}
       />
       <div
         className="absolute -bottom-28 right-[-2%] h-96 w-96 rounded-full pointer-events-none animate-blob-2"
         style={{
-          background: 'radial-gradient(circle, rgba(99,102,241,0.18), rgba(139,92,246,0.12), transparent 74%)',
-          filter: 'blur(42px)'
+          background: 'radial-gradient(circle, rgba(99,102,241,0.18), rgba(139,92,246,0.10), transparent 74%)',
+          filter: 'blur(54px)'
         }}
       />
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            'radial-gradient(circle at 18% 22%, rgba(245,158,11,0.18), transparent 26%), radial-gradient(circle at 82% 20%, rgba(99,102,241,0.18), transparent 28%), radial-gradient(circle at 50% 78%, rgba(129,140,248,0.16), transparent 30%)'
+            'linear-gradient(115deg, rgba(255,255,255,0.44) 0%, rgba(255,255,255,0) 38%, rgba(255,255,255,0.30) 70%, rgba(255,255,255,0) 100%)'
         }}
       />
       <div
@@ -94,30 +94,80 @@ const Login = () => {
           background: 'linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,0))'
         }}
       />
-
       <div className="flex flex-col lg:flex-row w-full min-h-screen relative z-10">
         <div className="lg:w-1/2 flex flex-col items-center justify-center px-8 py-12 lg:py-0">
-          <div className="max-w-md">
-            <div
-              className="h-24 w-24 rounded-3xl flex items-center justify-center shadow-2xl mb-8 login-float-soft"
-              style={{
-                background: 'linear-gradient(135deg,#d97706,#f59e0b,#8b5cf6)',
-                boxShadow: '0 12px 40px rgba(217,119,6,0.28)'
-              }}
-            >
-              <img src={ganeshaIcon} alt="Ganesha icon" className="h-16 w-16 object-contain" />
+          <div className="max-w-lg w-full">
+            <div className="relative inline-flex mb-10">
+              <div
+                className="absolute inset-[-16px] rounded-[2rem] pointer-events-none login-halo-pulse"
+                style={{
+                  background: 'radial-gradient(circle, rgba(245,158,11,0.22), rgba(139,92,246,0.12), transparent 72%)',
+                  filter: 'blur(14px)'
+                }}
+              />
+              <div
+                className="absolute inset-[-10px] rounded-[2rem] pointer-events-none"
+                style={{
+                  border: '1px solid rgba(217,119,6,0.22)',
+                  background: 'linear-gradient(135deg, rgba(255,255,255,0.42), rgba(255,255,255,0.12))'
+                }}
+              />
+              <div
+                className="absolute -top-3 -right-3 h-6 w-6 rounded-full pointer-events-none login-orbit-dot"
+                style={{ background: 'linear-gradient(135deg,#f59e0b,#fb7185)' }}
+              />
+              <div
+                className="absolute -bottom-2 -left-2 h-4 w-4 rounded-full pointer-events-none login-orbit-dot-alt"
+                style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
+              />
+              <div
+                className="relative h-32 w-32 rounded-[2rem] flex items-center justify-center shadow-2xl mb-2 login-float-soft"
+                style={{
+                  background: 'linear-gradient(145deg, rgba(255,248,235,0.96), rgba(255,255,255,0.86) 40%, rgba(237,233,254,0.92) 100%)',
+                  boxShadow: '0 18px 48px rgba(217,119,6,0.20), 0 10px 30px rgba(99,102,241,0.16)',
+                  border: '1px solid rgba(255,255,255,0.75)'
+                }}
+              >
+                <div
+                  className="absolute inset-3 rounded-[1.5rem]"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(255,255,255,0.72), rgba(255,255,255,0.22))',
+                    border: '1px solid rgba(217,119,6,0.12)'
+                  }}
+                />
+                <img src={ganeshaIcon} alt="Ganesha icon" className="relative h-20 w-20 object-contain drop-shadow-[0_8px_18px_rgba(217,119,6,0.28)]" />
+              </div>
             </div>
-            <p className="text-sm font-semibold text-amber-600 uppercase tracking-widest mb-3">
+            <p className="text-sm font-semibold text-amber-600 uppercase tracking-[0.32em] mb-3">
               Welcome to
             </p>
-            <h1 className="text-4xl lg:text-5xl font-extrabold leading-tight" style={{ color: '#312e81' }}>
-              Sri Venkata Lakshmi
-            </h1>
-            <h1 className="text-4xl lg:text-5xl font-extrabold leading-tight mt-1" style={{ color: '#312e81' }}>
-              Vigneswara Traders
-            </h1>
-            <div className="mt-4 w-20 h-1.5 rounded-full" style={{ background: 'linear-gradient(90deg,#d97706,#8b5cf6)' }} />
-            <p className="mt-5 text-base text-slate-500 leading-relaxed max-w-sm">
+            <div className="text-left max-w-xl">
+              <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
+                <span className="text-lg lg:text-xl font-semibold tracking-[0.12em] uppercase text-slate-500">
+                  Sri Venkata
+                </span>
+                <h1 className="text-4xl lg:text-6xl font-black leading-none login-title-sheen" style={{ color: '#312e81' }}>
+                  Lakshmi
+                </h1>
+              </div>
+              <div className="mt-2 flex flex-wrap sm:flex-nowrap items-baseline gap-x-3 gap-y-1">
+                <h2
+                  className="inline-block text-3xl lg:text-[3.35rem] font-extrabold leading-[1.12]"
+                  style={{
+                    background: 'linear-gradient(135deg, #312e81 0%, #5b21b6 68%, #7c3aed 100%)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent'
+                  }}
+                >
+                  Vigneswara
+                </h2>
+                <span className="text-lg lg:text-xl font-semibold leading-none tracking-[0.12em] uppercase text-slate-500">
+                  Traders
+                </span>
+              </div>
+            </div>
+            <div className="mt-5 w-28 h-1.5 rounded-full" style={{ background: 'linear-gradient(90deg,#d97706,#8b5cf6)' }} />
+            <p className="mt-6 text-base lg:text-lg text-slate-500 leading-relaxed max-w-md">
               Secure sign-in experience for daily inventory, purchases, and sales operations.
             </p>
             <p className="mt-8 text-xs text-slate-400">
@@ -127,7 +177,7 @@ const Login = () => {
         </div>
 
         <div className="lg:w-1/2 flex items-center justify-center px-6 py-10 lg:py-0">
-          <div className="w-full max-w-md relative">
+          <div className="w-full max-w-[30rem] relative">
             <div
               className="absolute -top-10 right-8 h-24 w-24 rounded-full pointer-events-none login-float-soft"
               style={{
@@ -143,12 +193,12 @@ const Login = () => {
               }}
             />
             <div
-              className="relative rounded-3xl p-8 lg:p-10 border overflow-hidden login-card-float"
+              className="relative rounded-[2rem] p-8 lg:p-10 border overflow-hidden login-card-float"
               style={{
-                background: 'rgba(255,255,255,0.90)',
-                backdropFilter: 'blur(20px)',
-                boxShadow: '0 14px 52px rgba(99,102,241,0.14),0 4px 16px rgba(0,0,0,0.06)',
-                borderColor: 'rgba(196,181,253,0.34)'
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.86))',
+                backdropFilter: 'blur(22px)',
+                boxShadow: '0 18px 60px rgba(99,102,241,0.16),0 8px 24px rgba(217,119,6,0.08)',
+                borderColor: 'rgba(196,181,253,0.38)'
               }}
             >
               <div
@@ -160,7 +210,7 @@ const Login = () => {
                   className="h-8 w-8 rounded-xl flex items-center justify-center"
                   style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
                 >
-                  <Lock className="h-4 w-4 text-white" />
+                  <LogIn className="h-4 w-4 text-white" />
                 </span>
                 Sign In
               </h3>
@@ -238,7 +288,12 @@ const Login = () => {
                       Signing in...
                     </span>
                   ) : (
-                    'Sign In ->'
+                    <span className="flex items-center justify-center gap-2">
+                      Sign In
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/25 bg-white/10">
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </span>
+                    </span>
                   )}
                 </button>
               </form>

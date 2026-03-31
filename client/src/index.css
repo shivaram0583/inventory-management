@@ -175,6 +175,27 @@
   35%      { transform: translate3d(10px, -8px, 0) scale(1.04); }
   70%      { transform: translate3d(-6px, 6px, 0) scale(0.98); }
 }
+@keyframes halo-pulse {
+  0%, 100% { transform: scale(0.98); opacity: 0.6; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+@keyframes orbit-dot {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  25%  { transform: translate3d(5px, -8px, 0) scale(1.08); }
+  50%  { transform: translate3d(10px, 0, 0) scale(0.96); }
+  75%  { transform: translate3d(4px, 8px, 0) scale(1.04); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes orbit-dot-alt {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  30%  { transform: translate3d(-7px, 6px, 0) scale(1.06); }
+  60%  { transform: translate3d(-2px, -8px, 0) scale(0.94); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes title-sheen {
+  0%, 100% { text-shadow: 0 0 0 rgba(217,119,6,0); }
+  50%      { text-shadow: 0 8px 22px rgba(99,102,241,0.16), 0 4px 14px rgba(217,119,6,0.12); }
+}
 @keyframes slow-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
@@ -189,6 +210,11 @@
   50%  { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
 }
+@keyframes light-band-drift {
+  0%   { transform: translate3d(-6%, 0, 0) rotate(-8deg) scaleX(0.96); opacity: 0.28; }
+  50%  { transform: translate3d(4%, -3%, 0) rotate(-5deg) scaleX(1.04); opacity: 0.52; }
+  100% { transform: translate3d(-2%, 4%, 0) rotate(-2deg) scaleX(0.98); opacity: 0.34; }
+}
 .animate-blob-1 { animation: blob-drift-1 18s ease-in-out infinite; }
 .animate-blob-2 { animation: blob-drift-2 22s ease-in-out infinite; }
 .animate-blob-3 { animation: blob-drift-3 16s ease-in-out infinite; }
@@ -196,12 +222,17 @@
 .login-aurora { animation: aurora-sweep 20s ease-in-out infinite alternate; }
 .login-gradient-wave { animation: gradient-drift 18s ease infinite; }
 .login-mesh-pan { animation: soft-pan 18s ease-in-out infinite alternate; }
+.login-light-band { animation: light-band-drift 17s ease-in-out infinite alternate; }
 .login-flow-line { animation: flow-stream 16s ease-in-out infinite; }
 .login-flow-line-reverse { animation: flow-stream 20s ease-in-out infinite reverse; }
 .login-sparkle { animation: sparkle-twinkle 4.6s ease-in-out infinite; }
 .login-card-float { animation: float-glass 7.5s ease-in-out infinite; }
 .login-float-soft { animation: float-soft 6.5s ease-in-out infinite; }
 .login-float-delayed { animation: float-delayed 8.5s ease-in-out infinite; }
+.login-halo-pulse { animation: halo-pulse 5.6s ease-in-out infinite; }
+.login-orbit-dot { animation: orbit-dot 6s ease-in-out infinite; }
+.login-orbit-dot-alt { animation: orbit-dot-alt 7.5s ease-in-out infinite; }
+.login-title-sheen { animation: title-sheen 6s ease-in-out infinite; }
 .login-orbit { animation: slow-spin 26s linear infinite; }
 
 /* ── Custom Animations ── */

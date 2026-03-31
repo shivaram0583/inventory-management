@@ -1,5 +1,5 @@
 /**
- * Seed script: clears all data and inserts fresh sample products (4 per category).
+ * Seed script: clears all non-login data and inserts fresh sample products (4 per category).
  * Run from project root:  node server/seed.js
  */
 const path = require('path');
@@ -22,37 +22,41 @@ function run(sql, params = []) {
   });
 }
 
+function get(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err); else resolve(row);
+    });
+  });
+}
+
+function all(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err); else resolve(rows);
+    });
+  });
+}
+
 async function seed() {
-  console.log('Clearing all data...');
+  console.log('Clearing all non-login data...');
 
   // Delete in dependency order
   await run('DELETE FROM customer_sales');
   await run('DELETE FROM login_logs');
   await run('DELETE FROM sessions');
+  await run('DELETE FROM supplier_payments');
+  await run('DELETE FROM bank_transfers');
+  await run('DELETE FROM expenditures');
+  await run('DELETE FROM bank_accounts');
   await run('DELETE FROM purchases');
   await run('DELETE FROM receipts');
   await run('DELETE FROM sales');
-  // Recreate sales table without UNIQUE on sale_id (needed for multi-item sales)
-  await run('DROP TABLE IF EXISTS sales');
-  await run(`CREATE TABLE sales (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sale_id TEXT NOT NULL,
-    product_id INTEGER NOT NULL,
-    quantity_sold REAL NOT NULL,
-    price_per_unit REAL NOT NULL,
-    total_amount REAL NOT NULL,
-    sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    operator_id INTEGER,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products (id),
-    FOREIGN KEY (operator_id) REFERENCES users (id)
-  )`);
   await run('DELETE FROM products');
-  await run('DELETE FROM users');
   await run('DELETE FROM product_categories');
 
   // Reset autoincrement
-  await run("DELETE FROM sqlite_sequence WHERE name IN ('users','products','sales','receipts','purchases','customer_sales','login_logs','product_categories')");
+  await run("DELETE FROM sqlite_sequence WHERE name IN ('products','sales','receipts','purchases','customer_sales','login_logs','product_categories','bank_accounts','expenditures','bank_transfers','supplier_payments')");
 
   console.log('Seeding categories...');
   await run("INSERT INTO product_categories (name) VALUES ('seeds')");
@@ -60,11 +64,14 @@ async function seed() {
   await run("INSERT INTO product_categories (name) VALUES ('pesticides')");
   await run("INSERT INTO product_categories (name) VALUES ('tools')");
 
-  console.log('Seeding users...');
-  const adminHash = await bcrypt.hash('admin123', 10);
-  const operatorHash = await bcrypt.hash('operator123', 10);
-  await run("INSERT INTO users (username, password, role) VALUES (?, ?, 'admin')", ['admin', adminHash]);
-  await run("INSERT INTO users (username, password, role) VALUES (?, ?, 'operator')", ['operator', operatorHash]);
+  console.log('Ensuring login users exist...');
+  const userCount = await get('SELECT COUNT(*) AS count FROM users');
+  if (!userCount || userCount.count === 0) {
+    const adminHash = await bcrypt.hash('admin123', 10);
+    const operatorHash = await bcrypt.hash('operator123', 10);
+    await run("INSERT INTO users (username, password, role) VALUES (?, ?, 'admin')", ['admin', adminHash]);
+    await run("INSERT INTO users (username, password, role) VALUES (?, ?, 'operator')", ['operator', operatorHash]);
+  }
 
   console.log('Seeding products (4 per category)...');
 
@@ -104,21 +111,32 @@ async function seed() {
 
   // Also record initial purchase entries for each product
   const crypto = require('crypto');
-  const allProducts = await new Promise((resolve, reject) => {
-    db.all('SELECT * FROM products', (err, rows) => err ? reject(err) : resolve(rows));
-  });
+  const allProducts = await all('SELECT * FROM products ORDER BY category, product_name');
 
-  const adminUser = await new Promise((resolve, reject) => {
-    db.get("SELECT id FROM users WHERE username = 'admin'", (err, row) => err ? reject(err) : resolve(row));
-  });
+  const actingUser = await get(`
+    SELECT id
+    FROM users
+    WHERE is_active = 1
+    ORDER BY CASE WHEN username = 'admin' THEN 0 ELSE 1 END, id
+    LIMIT 1
+  `);
 
-  for (const prod of allProducts) {
+  if (!actingUser) {
+    throw new Error('No active users available to attach purchase records.');
+  }
+
+  const baseDate = new Date('2026-04-01T09:00:00');
+
+  for (const [index, prod] of allProducts.entries()) {
     const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
+    const purchaseDate = new Date(baseDate.getTime() + index * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
     await run(
-      `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, added_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, purchase_date, added_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [purchaseId, prod.id, prod.quantity_available, prod.purchase_price,
-       prod.quantity_available * prod.purchase_price, prod.supplier, adminUser.id]
+       prod.quantity_available * prod.purchase_price, prod.supplier, purchaseDate, actingUser.id]
     );
     // Small delay to ensure unique purchase IDs
     await new Promise(r => setTimeout(r, 5));
@@ -126,8 +144,8 @@ async function seed() {
 
   console.log('Done! Seeded:');
   console.log('  - 4 categories (seeds, fertilizers, pesticides, tools)');
-  console.log('  - 2 users (admin / admin123, operator / operator123)');
-  console.log('  - 16 products (4 per category) with initial purchase records');
+  console.log('  - Existing login users preserved (or defaults created if missing)');
+  console.log('  - 16 products (4 per category) with purchase-backed sample records');
 
   db.close();
 }
