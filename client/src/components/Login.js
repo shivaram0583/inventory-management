@@ -34,47 +34,72 @@ const Login = () => {
       style={{ background: 'linear-gradient(145deg,#f8f2e7 0%,#f5ecdf 28%,#efe9fb 58%,#f6f7ff 78%,#ffffff 100%)' }}
     >
       <div
-        className="absolute -top-32 -left-32 w-[480px] h-[480px] rounded-full pointer-events-none animate-blob-1"
+        className="absolute inset-[-12%] pointer-events-none login-gradient-wave"
         style={{
-          background: 'radial-gradient(circle at 40% 40%,rgba(245,158,11,0.18),rgba(217,119,6,0.12),transparent 70%)',
-          filter: 'blur(68px)',
-          opacity: 0.6,
-          mixBlendMode: 'multiply'
+          background:
+            'linear-gradient(120deg, rgba(245,158,11,0.18), rgba(255,255,255,0.04), rgba(99,102,241,0.18), rgba(139,92,246,0.16), rgba(255,255,255,0.04), rgba(245,158,11,0.14))',
+          backgroundSize: '220% 220%',
+          opacity: 0.9,
+          filter: 'blur(54px)'
         }}
       />
       <div
-        className="absolute -top-16 -right-24 w-[420px] h-[420px] rounded-full pointer-events-none animate-blob-2"
+        className="absolute inset-0 pointer-events-none login-mesh-pan"
         style={{
-          background: 'radial-gradient(circle at 60% 40%,rgba(99,102,241,0.14),rgba(168,85,247,0.10),transparent 70%)',
-          filter: 'blur(72px)',
-          opacity: 0.52,
-          mixBlendMode: 'multiply'
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,0.28) 1px, transparent 1px), linear-gradient(90deg, rgba(129,140,248,0.10) 1px, transparent 1px)',
+          backgroundSize: '120px 120px',
+          maskImage: 'radial-gradient(circle at center, black 35%, transparent 82%)'
         }}
       />
       <div
-        className="absolute -bottom-24 -left-20 w-[400px] h-[400px] rounded-full pointer-events-none animate-blob-3"
+        className="absolute inset-x-[-10%] top-[-8%] h-64 pointer-events-none login-aurora"
         style={{
-          background: 'radial-gradient(circle at 40% 60%,rgba(251,191,36,0.12),rgba(253,186,116,0.10),transparent 70%)',
-          filter: 'blur(64px)',
-          opacity: 0.5,
-          mixBlendMode: 'multiply'
+          background: 'linear-gradient(90deg, rgba(245,158,11,0.18), rgba(99,102,241,0.22), rgba(139,92,246,0.16), rgba(255,255,255,0))',
+          filter: 'blur(52px)'
         }}
       />
       <div
-        className="absolute -bottom-20 -right-16 w-[440px] h-[440px] rounded-full pointer-events-none animate-blob-4"
+        className="absolute inset-x-[-12%] bottom-[4%] h-56 pointer-events-none login-aurora"
         style={{
-          background: 'radial-gradient(circle at 60% 60%,rgba(129,140,248,0.12),rgba(221,214,254,0.14),transparent 70%)',
-          filter: 'blur(72px)',
-          opacity: 0.48,
-          mixBlendMode: 'multiply'
+          background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(129,140,248,0.18), rgba(245,158,11,0.16), rgba(255,255,255,0))',
+          filter: 'blur(54px)',
+          animationDelay: '1.8s'
+        }}
+      />
+      <div
+        className="absolute -top-24 -left-20 h-80 w-80 rounded-full pointer-events-none animate-blob-1"
+        style={{
+          background: 'radial-gradient(circle, rgba(245,158,11,0.20), rgba(245,158,11,0.08), transparent 72%)',
+          filter: 'blur(38px)'
+        }}
+      />
+      <div
+        className="absolute -bottom-28 right-[-2%] h-96 w-96 rounded-full pointer-events-none animate-blob-2"
+        style={{
+          background: 'radial-gradient(circle, rgba(99,102,241,0.18), rgba(139,92,246,0.12), transparent 74%)',
+          filter: 'blur(42px)'
+        }}
+      />
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(circle at 18% 22%, rgba(245,158,11,0.18), transparent 26%), radial-gradient(circle at 82% 20%, rgba(99,102,241,0.18), transparent 28%), radial-gradient(circle at 50% 78%, rgba(129,140,248,0.16), transparent 30%)'
+        }}
+      />
+      <div
+        className="absolute inset-x-0 top-0 h-56 pointer-events-none"
+        style={{
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,0))'
         }}
       />
 
       <div className="flex flex-col lg:flex-row w-full min-h-screen relative z-10">
         <div className="lg:w-1/2 flex flex-col items-center justify-center px-8 py-12 lg:py-0">
-          <div className="animate-fade-in-up max-w-md">
+          <div className="max-w-md">
             <div
-              className="h-24 w-24 rounded-3xl flex items-center justify-center shadow-2xl mb-8"
+              className="h-24 w-24 rounded-3xl flex items-center justify-center shadow-2xl mb-8 login-float-soft"
               style={{
                 background: 'linear-gradient(135deg,#d97706,#f59e0b,#8b5cf6)',
                 boxShadow: '0 12px 40px rgba(217,119,6,0.28)'
@@ -102,16 +127,34 @@ const Login = () => {
         </div>
 
         <div className="lg:w-1/2 flex items-center justify-center px-6 py-10 lg:py-0">
-          <div className="w-full max-w-md animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+          <div className="w-full max-w-md relative">
             <div
-              className="rounded-3xl p-8 lg:p-10 border"
+              className="absolute -top-10 right-8 h-24 w-24 rounded-full pointer-events-none login-float-soft"
               style={{
-                background: 'rgba(255,255,255,0.86)',
-                backdropFilter: 'blur(24px)',
-                boxShadow: '0 8px 48px rgba(99,102,241,0.12),0 2px 12px rgba(0,0,0,0.06)',
-                borderColor: 'rgba(196,181,253,0.30)'
+                background: 'radial-gradient(circle, rgba(99,102,241,0.22), rgba(99,102,241,0.08), transparent 72%)',
+                filter: 'blur(10px)'
+              }}
+            />
+            <div
+              className="absolute -bottom-8 -left-6 h-28 w-28 rounded-full pointer-events-none login-float-delayed"
+              style={{
+                background: 'radial-gradient(circle, rgba(245,158,11,0.20), rgba(245,158,11,0.06), transparent 74%)',
+                filter: 'blur(12px)'
+              }}
+            />
+            <div
+              className="relative rounded-3xl p-8 lg:p-10 border overflow-hidden login-card-float"
+              style={{
+                background: 'rgba(255,255,255,0.90)',
+                backdropFilter: 'blur(20px)',
+                boxShadow: '0 14px 52px rgba(99,102,241,0.14),0 4px 16px rgba(0,0,0,0.06)',
+                borderColor: 'rgba(196,181,253,0.34)'
               }}
             >
+              <div
+                className="absolute inset-x-0 top-0 h-20 pointer-events-none"
+                style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.62), rgba(255,255,255,0))' }}
+              />
               <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-2.5">
                 <span
                   className="h-8 w-8 rounded-xl flex items-center justify-center"
@@ -125,7 +168,7 @@ const Login = () => {
 
               {error && (
                 <div
-                  className="mb-5 p-3 rounded-xl border border-red-200 text-red-600 text-sm flex items-center gap-2 animate-fade-in"
+                  className="mb-5 p-3 rounded-xl border border-red-200 text-red-600 text-sm flex items-center gap-2"
                   style={{ background: 'linear-gradient(90deg,#fff5f5,#fef2f2)' }}
                 >
                   <span>!</span> {error}

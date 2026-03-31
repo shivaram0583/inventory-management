@@ -147,10 +147,62 @@
   80%  { transform: translate(25px, 15px) scale(1.07); }
   100% { transform: translate(0px, 0px) scale(1.02); }
 }
+@keyframes aurora-sweep {
+  0%   { transform: translate3d(-6%, 0, 0) rotate(-12deg) scale(0.96); }
+  50%  { transform: translate3d(6%, -3%, 0) rotate(4deg) scale(1.04); }
+  100% { transform: translate3d(-2%, 5%, 0) rotate(12deg) scale(1); }
+}
+@keyframes flow-stream {
+  0%   { transform: translate3d(-18%, -10%, 0) scaleX(0.92); opacity: 0.15; }
+  35%  { transform: translate3d(12%, 6%, 0) scaleX(1); opacity: 0.75; }
+  70%  { transform: translate3d(28%, -4%, 0) scaleX(1.06); opacity: 0.3; }
+  100% { transform: translate3d(44%, 12%, 0) scaleX(0.96); opacity: 0.12; }
+}
+@keyframes sparkle-twinkle {
+  0%, 100% { opacity: 0.2; transform: scale(0.9); }
+  50%      { opacity: 1; transform: scale(1.45); }
+}
+@keyframes float-glass {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-8px); }
+}
+@keyframes float-soft {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(0, -10px, 0) scale(1.03); }
+}
+@keyframes float-delayed {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  35%      { transform: translate3d(10px, -8px, 0) scale(1.04); }
+  70%      { transform: translate3d(-6px, 6px, 0) scale(0.98); }
+}
+@keyframes slow-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes soft-pan {
+  0%   { transform: translate3d(-3%, 0, 0) scale(1); opacity: 0.45; }
+  50%  { transform: translate3d(3%, -2%, 0) scale(1.04); opacity: 0.72; }
+  100% { transform: translate3d(-1%, 3%, 0) scale(0.98); opacity: 0.5; }
+}
+@keyframes gradient-drift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
 .animate-blob-1 { animation: blob-drift-1 18s ease-in-out infinite; }
 .animate-blob-2 { animation: blob-drift-2 22s ease-in-out infinite; }
 .animate-blob-3 { animation: blob-drift-3 16s ease-in-out infinite; }
 .animate-blob-4 { animation: blob-drift-4 24s ease-in-out infinite; }
+.login-aurora { animation: aurora-sweep 20s ease-in-out infinite alternate; }
+.login-gradient-wave { animation: gradient-drift 18s ease infinite; }
+.login-mesh-pan { animation: soft-pan 18s ease-in-out infinite alternate; }
+.login-flow-line { animation: flow-stream 16s ease-in-out infinite; }
+.login-flow-line-reverse { animation: flow-stream 20s ease-in-out infinite reverse; }
+.login-sparkle { animation: sparkle-twinkle 4.6s ease-in-out infinite; }
+.login-card-float { animation: float-glass 7.5s ease-in-out infinite; }
+.login-float-soft { animation: float-soft 6.5s ease-in-out infinite; }
+.login-float-delayed { animation: float-delayed 8.5s ease-in-out infinite; }
+.login-orbit { animation: slow-spin 26s linear infinite; }
 
 /* ── Custom Animations ── */
 @keyframes fadeInUp {

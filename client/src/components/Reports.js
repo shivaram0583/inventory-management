@@ -27,7 +27,6 @@ const Reports = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [activeTab, setActiveTab] = useState('daily');
-  const [selectedDate, setSelectedDate] = useState(getISTDateString());
   const [startDate, setStartDate] = useState(getISTDateString());
   const [endDate, setEndDate] = useState(getISTDateString());
   const [data, setData] = useState(null);
@@ -65,25 +64,19 @@ const Reports = () => {
     setError('');
     
     try {
-      if (activeTab === 'range') {
+      const tabsUsingDateRange = ['daily', 'performance', 'purchases', 'customerSales', 'suppliers'];
+      if (tabsUsingDateRange.includes(activeTab)) {
         if (!startDate || !endDate) {
           setError('Start date and end date are required');
           setLoading(false);
           return;
         }
 
-        const paramsRange = { start_date: startDate, end_date: endDate };
-        const [salesRangeResponse, purchasesRangeResponse] = await Promise.all([
-          axios.get('/api/reports/sales-range', { params: paramsRange }),
-          axios.get('/api/reports/purchases', { params: paramsRange })
-        ]);
-
-        setData({
-          ...salesRangeResponse.data,
-          purchaseSummary: purchasesRangeResponse.data.summary,
-          purchaseRecords: purchasesRangeResponse.data.purchases
-        });
-        return;
+        if (startDate > endDate) {
+          setError('Start date cannot be after end date');
+          setLoading(false);
+          return;
+        }
       }
 
       let url = '';
@@ -91,8 +84,13 @@ const Reports = () => {
 
       switch (activeTab) {
         case 'daily':
-          url = '/api/reports/daily-sales';
-          params = { date: selectedDate };
+          if (startDate === endDate) {
+            url = '/api/reports/daily-sales';
+            params = { date: endDate };
+          } else {
+            url = '/api/reports/sales-range';
+            params = { start_date: startDate, end_date: endDate };
+          }
           break;
         case 'inventory':
           url = '/api/reports/inventory-status';
@@ -126,7 +124,7 @@ const Reports = () => {
           break;
         default:
           url = '/api/reports/daily-sales';
-          params = { date: selectedDate };
+          params = { date: endDate };
           break;
       }
 
@@ -138,7 +136,7 @@ const Reports = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, selectedDate, startDate, endDate]);
+  }, [activeTab, startDate, endDate]);
 
   useEffect(() => {
     fetchReportData();
@@ -146,6 +144,7 @@ const Reports = () => {
 
   const renderDailyReport = () => {
     if (!data) return null;
+    if (startDate !== endDate) return renderDailyRangeReport();
 
     return (
       <div className="space-y-6">
@@ -266,7 +265,7 @@ const Reports = () => {
     );
   };
 
-  const renderRangeReport = () => {
+  const renderDailyRangeReport = () => {
     if (!data) return null;
 
     return (
@@ -961,8 +960,6 @@ const Reports = () => {
         return renderInventoryReport();
       case 'purchases':
         return renderPurchasesReport();
-      case 'range':
-        return renderRangeReport();
       case 'performance':
         return renderPerformanceReport();
       case 'trend':
@@ -976,7 +973,7 @@ const Reports = () => {
     }
   };
 
-  const tabHasFilters = ['daily', 'range', 'performance', 'purchases', 'customerSales', 'suppliers'].includes(activeTab);
+  const tabHasFilters = ['daily', 'performance', 'purchases', 'customerSales', 'suppliers'].includes(activeTab);
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -999,7 +996,6 @@ const Reports = () => {
             { id: 'daily', label: 'Daily Sales', icon: Calendar },
             { id: 'inventory', label: 'Inventory', icon: Package },
             { id: 'purchases', label: 'Purchases', icon: Truck },
-            { id: 'range', label: 'Date Range', icon: Calendar },
             { id: 'performance', label: 'Performance', icon: TrendingUp },
             { id: 'trend', label: 'Monthly Trend', icon: BarChart3 },
             { id: 'customerSales', label: 'Sales Archive', icon: Users },
@@ -1027,13 +1023,31 @@ const Reports = () => {
         <div className="card !py-4">
           <div className="flex flex-wrap gap-4 items-end">
             {activeTab === 'daily' && (
-              <div>
-                <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Date</label>
-                <input type="date" className="input-field" value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)} />
-              </div>
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">From</label>
+                  <input type="date" className="input-field" value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">To</label>
+                  <input type="date" className="input-field" value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = getISTDateString();
+                    setStartDate(today);
+                    setEndDate(today);
+                  }}
+                  className="btn-secondary !py-2"
+                >
+                  Today
+                </button>
+              </>
             )}
-            {(activeTab === 'range' || activeTab === 'performance' || activeTab === 'purchases' || activeTab === 'customerSales' || activeTab === 'suppliers') && (
+            {(activeTab === 'performance' || activeTab === 'purchases' || activeTab === 'customerSales' || activeTab === 'suppliers') && (
               <>
                 <div>
                   <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">From</label>
