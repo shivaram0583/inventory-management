@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const moment = require('moment');
+const { addReviewNotification } = require('../services/reviewNotifications');
 
 const router = express.Router();
 
@@ -123,6 +124,17 @@ router.post('/expenditures', [
       'SELECT e.*, u.username as created_by_name FROM expenditures e LEFT JOIN users u ON e.created_by = u.id WHERE e.id = ?',
       [result.id]
     );
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'transaction',
+      title: 'Added an expenditure',
+      description: `Expenditure of ₹${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} was added for ${description}.`,
+      createdAt: expense_date
+    });
+
     res.status(201).json(expenditure);
   } catch (error) {
     console.error('Create expenditure error:', error);
@@ -324,6 +336,17 @@ router.post('/supplier-payments', [
        LEFT JOIN users u ON sp.created_by = u.id WHERE sp.id = ?`,
       [result.id]
     );
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'supplier-payment',
+      title: 'Recorded a supplier payment',
+      description: `₹${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} was paid to ${supplier_name}.`,
+      createdAt: payment_date
+    });
+
     res.status(201).json(payment);
   } catch (error) {
     console.error('Create supplier payment error:', error);

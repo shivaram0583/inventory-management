@@ -258,7 +258,7 @@ const Inventory = () => {
       )}
 
       {/* Filters */}
-      <div className="card !py-4">
+      <div className="card !py-4 relative z-20">
         <div className="flex flex-col sm:flex-row gap-4 items-center">
           <div className="flex-1">
             <div className="relative">
