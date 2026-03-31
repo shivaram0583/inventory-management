@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
+const { addReviewNotification } = require('../services/reviewNotifications');
 
 const router = express.Router();
 
@@ -150,6 +151,16 @@ router.post('/', [
       );
     }
 
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'inventory',
+      title: 'Added a new inventory item',
+      description: `${newProduct.product_name} (${newProduct.product_id}) was added under ${newProduct.category}.`,
+      createdAt: nowIST()
+    });
+
     res.status(201).json(newProduct);
   } catch (error) {
     console.error('Add product error:', error);
@@ -236,6 +247,17 @@ router.put('/:id', [
     );
 
     const updatedProduct = await getRow('SELECT * FROM products WHERE id = ?', [productId]);
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'inventory',
+      title: 'Updated an inventory item',
+      description: `${updatedProduct.product_name} (${updatedProduct.product_id}) was updated.`,
+      createdAt: nowIST()
+    });
+
     res.json(updatedProduct);
   } catch (error) {
     console.error('Update product error:', error);
@@ -306,6 +328,16 @@ router.post('/:id/add-stock', [
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [purchaseId, updatedProduct.id, quantity, updatedProduct.purchase_price, quantity * updatedProduct.purchase_price, updatedProduct.supplier || null, req.user.id]
     );
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'inventory',
+      title: 'Added stock to inventory',
+      description: `${quantity} ${updatedProduct.unit} was added to ${updatedProduct.product_name} (${updatedProduct.product_id}).`,
+      createdAt: nowIST()
+    });
 
     res.json({
       message: `Added ${quantity} ${updatedProduct.unit} to stock`,

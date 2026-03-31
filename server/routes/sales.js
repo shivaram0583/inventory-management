@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const { authenticateToken } = require('../middleware/auth');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const moment = require('moment');
+const { addReviewNotification } = require('../services/reviewNotifications');
 
 const router = express.Router();
 
@@ -158,6 +159,16 @@ router.post('/', [
         console.error('Auto bank deposit error (non-fatal):', bankErr);
       }
     }
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'sale',
+      title: 'Completed a sale',
+      description: `${saleItems.length} item(s) were sold under ${saleId} for ₹${Number(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+      createdAt: nowIST()
+    });
 
     res.status(201).json({
       saleId,

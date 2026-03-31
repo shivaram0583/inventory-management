@@ -58,6 +58,7 @@ async function seed() {
   await run("INSERT INTO product_categories (name) VALUES ('seeds')");
   await run("INSERT INTO product_categories (name) VALUES ('fertilizers')");
   await run("INSERT INTO product_categories (name) VALUES ('pesticides')");
+  await run("INSERT INTO product_categories (name) VALUES ('tools')");
 
   console.log('Seeding users...');
   const adminHash = await bcrypt.hash('admin123', 10);
@@ -85,6 +86,12 @@ async function seed() {
     { pid: 'PEST002', cat: 'pesticides', name: 'Imidacloprid', variety: '17.8% SL', qty: 80, unit: 'liters', bp: 580, sp: 750, sup: 'Bayer CropScience' },
     { pid: 'PEST003', cat: 'pesticides', name: 'Mancozeb', variety: '75% WP', qty: 200, unit: 'kg', bp: 400, sp: 550, sup: 'Indofil Industries' },
     { pid: 'PEST004', cat: 'pesticides', name: 'Neem Oil', variety: 'Azadirachtin 1%', qty: 150, unit: 'liters', bp: 220, sp: 320, sup: 'Parry Agro' },
+
+    // Tools (TOOL001-004)
+    { pid: 'TOOL001', cat: 'tools', name: 'Hand Sprayer', variety: '16 Liter Manual', qty: 24, unit: 'pieces', bp: 850, sp: 1100, sup: 'Kisan Agri Tools' },
+    { pid: 'TOOL002', cat: 'tools', name: 'Garden Hoe', variety: 'Forged Steel Blade', qty: 18, unit: 'pieces', bp: 320, sp: 450, sup: 'GreenField Implements' },
+    { pid: 'TOOL003', cat: 'tools', name: 'Pruning Shear', variety: 'Heavy Duty', qty: 30, unit: 'pieces', bp: 260, sp: 390, sup: 'Falcon Farm Supplies' },
+    { pid: 'TOOL004', cat: 'tools', name: 'PVC Watering Can', variety: '10 Liter', qty: 20, unit: 'pieces', bp: 210, sp: 320, sup: 'AgroServe Traders' },
   ];
 
   for (const p of products) {
@@ -118,9 +125,9 @@ async function seed() {
   }
 
   console.log('Done! Seeded:');
-  console.log('  - 3 categories (seeds, fertilizers, pesticides)');
+  console.log('  - 4 categories (seeds, fertilizers, pesticides, tools)');
   console.log('  - 2 users (admin / admin123, operator / operator123)');
-  console.log('  - 12 products (4 per category) with initial purchase records');
+  console.log('  - 16 products (4 per category) with initial purchase records');
 
   db.close();
 }
