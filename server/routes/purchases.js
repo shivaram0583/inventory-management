@@ -4,6 +4,7 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const crypto = require('crypto');
 const moment = require('moment');
+const { addReviewNotification } = require('../services/reviewNotifications');
 
 const router = express.Router();
 
@@ -157,6 +158,16 @@ router.post('/', [
       [result.id]
     );
 
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'purchase',
+      title: 'Recorded a purchase',
+      description: `${quantity} ${purchase.unit} of ${purchase.product_name} was purchased${supplier ? ` from ${supplier}` : ''}.`,
+      createdAt: storedDate
+    });
+
     res.status(201).json({ ...purchase, message: 'Purchase recorded successfully' });
   } catch (error) {
     console.error('Record purchase error:', error);
@@ -222,6 +233,16 @@ router.put('/:id', [
        WHERE pur.id = ?`,
       [req.params.id]
     );
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'purchase',
+      title: 'Updated a purchase',
+      description: `Purchase for ${updated.product_name} was updated to ${quantity} ${updated.unit}.`,
+      createdAt: storedDate
+    });
 
     res.json({ ...updated, message: 'Purchase updated successfully' });
   } catch (error) {

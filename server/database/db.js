@@ -186,6 +186,7 @@ function initializeDatabase() {
       db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('seeds')`);
       db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('fertilizers')`);
       db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('pesticides')`);
+      db.run(`INSERT OR IGNORE INTO product_categories (name) VALUES ('tools')`);
     }
   });
 

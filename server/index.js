@@ -10,6 +10,7 @@ const reportsRoutes = require('./routes/reports');
 const dashboardRoutes = require('./routes/dashboard');
 const purchasesRoutes = require('./routes/purchases');
 const transactionsRoutes = require('./routes/transactions');
+const notificationsRoutes = require('./routes/notifications');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -55,6 +56,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/purchases', purchasesRoutes);
 app.use('/api/transactions', transactionsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 // Database initialization
 const db = require('./database/db');
