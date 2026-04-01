@@ -24,7 +24,9 @@ const Modal = ({
   confirmText,
   cancelText = 'Cancel',
   onConfirm,
-  hideClose = false
+  hideClose = false,
+  confirmDisabled = false,
+  hideCancel = false
 }) => {
   if (!isOpen) return null;
 
@@ -93,7 +95,7 @@ const Modal = ({
         {(confirmText || !hideClose) && (
           <div className="px-6 py-4 flex justify-end gap-2.5 border-t border-gray-100 flex-shrink-0"
                style={{background:'linear-gradient(90deg,#f8faff,#f5f3ff)'}}>
-            {onConfirm && (
+            {onConfirm && !hideCancel && (
               <button
                 onClick={onClose}
                 className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 active:scale-95 transition-all duration-150 focus:outline-none"
@@ -103,7 +105,8 @@ const Modal = ({
             )}
             <button
               onClick={() => { if (onConfirm) onConfirm(); onClose(); }}
-              className="px-4 py-2 text-sm font-semibold text-white rounded-xl shadow-md hover:shadow-lg active:scale-95 transition-all duration-150 focus:outline-none"
+              disabled={confirmDisabled}
+              className="px-4 py-2 text-sm font-semibold text-white rounded-xl shadow-md hover:shadow-lg active:scale-95 transition-all duration-150 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
               style={{background: confirmG}}
             >
               {confirmText || 'OK'}

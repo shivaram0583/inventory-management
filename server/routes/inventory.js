@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
+const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const { addReviewNotification } = require('../services/reviewNotifications');
 
@@ -79,6 +80,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
   body('product_id').optional(),
   body('product_name').notEmpty().withMessage('Product name is required'),
   body('category').notEmpty().withMessage('Category is required'),
@@ -172,6 +174,7 @@ router.post('/', [
 router.put('/:id', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
   body('product_name').optional().notEmpty().withMessage('Product name cannot be empty'),
   body('unit').optional().isIn(['kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes']).withMessage('Invalid unit'),
   body('quantity_available').optional().isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
@@ -296,6 +299,7 @@ router.delete('/:id', [
 router.post('/:id/add-stock', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
   body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive')
 ], async (req, res) => {
   try {

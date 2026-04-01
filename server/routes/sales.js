@@ -1,9 +1,11 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken } = require('../middleware/auth');
+const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
+const { getDailySetupStatus, getISTDateString } = require('../services/dailySetup');
 
 const router = express.Router();
 
@@ -26,6 +28,7 @@ function generateReceiptNumber(customerName) {
 // Create sale
 router.post('/', [
   authenticateToken,
+  requireDailySetupForOperatorWrites,
   body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
   body('items.*.product_id').isInt({ min: 1 }).withMessage('Valid product ID is required'),
   body('items.*.quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
@@ -40,6 +43,29 @@ router.post('/', [
 
     const { items, customer_name, customer_mobile, customer_address, payment_mode = 'cash' } = req.body;
     const saleId = generateSaleId();
+
+    let selectedBank = null;
+    if (payment_mode === 'upi' || payment_mode === 'card') {
+      const dailySetupStatus = await getDailySetupStatus();
+      if (!dailySetupStatus.hasBankAccounts) {
+        return res.status(400).json({
+          message: 'Add a bank account before accepting UPI or card payments.',
+          code: 'BANK_REQUIRED'
+        });
+      }
+
+      if (!dailySetupStatus.selectedBankAccountId) {
+        return res.status(400).json({
+          message: 'Select today\'s bank before accepting UPI or card payments.',
+          code: 'BANK_SELECTION_REQUIRED'
+        });
+      }
+
+      selectedBank = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [dailySetupStatus.selectedBankAccountId]);
+      if (!selectedBank) {
+        return res.status(404).json({ message: 'Selected bank account not found' });
+      }
+    }
     
     // Start transaction-like operation
     let totalAmount = 0;
@@ -127,33 +153,37 @@ router.post('/', [
       )
     );
 
-    // Auto-deposit UPI/Card payments into default SBI bank account
-    if (payment_mode === 'upi' || payment_mode === 'card') {
+    // Auto-deposit UPI/Card payments into the bank selected for the current business day
+    if (selectedBank) {
       try {
-        // Find or create the default SBI bank account
-        let sbiAccount = await getRow(
-          "SELECT * FROM bank_accounts WHERE LOWER(bank_name) LIKE '%sbi%' LIMIT 1"
-        );
-        if (!sbiAccount) {
-          const result = await runQuery(
-            `INSERT INTO bank_accounts (account_name, bank_name, balance) VALUES (?, ?, ?)`,
-            ['SBI Account', 'SBI Bank', 0]
-          );
-          sbiAccount = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [result.id]);
-        }
-
-        // Update bank balance
         await runQuery(
           'UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-          [totalAmount, nowIST(), sbiAccount.id]
+          [totalAmount, nowIST(), selectedBank.id]
         );
 
-        // Record the bank transfer for audit trail
-        const todayIST = moment().utcOffset('+05:30').format('YYYY-MM-DD');
         await runQuery(
-          `INSERT INTO bank_transfers (bank_account_id, transfer_type, amount, description, transfer_date)
-           VALUES (?, 'deposit', ?, ?, ?)`,
-          [sbiAccount.id, totalAmount, `Auto-deposit: ${payment_mode.toUpperCase()} sale ${saleId}`, todayIST]
+          `INSERT INTO bank_transfers (
+             bank_account_id,
+             transfer_type,
+             amount,
+             source_type,
+             source_reference,
+             payment_mode,
+             description,
+             transfer_date,
+             created_by
+           )
+           VALUES (?, 'deposit', ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            selectedBank.id,
+            totalAmount,
+            'sale',
+            saleId,
+            payment_mode,
+            `Auto-deposit: ${payment_mode.toUpperCase()} sale ${saleId}`,
+            getISTDateString(),
+            req.user.id
+          ]
         );
       } catch (bankErr) {
         console.error('Auto bank deposit error (non-fatal):', bankErr);

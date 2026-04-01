@@ -18,6 +18,8 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [dailySetupStatus, setDailySetupStatus] = useState(null);
+  const [dailySetupLoading, setDailySetupLoading] = useState(false);
   const idleTimerRef = useRef(null);
   const logoutInProgressRef = useRef(false);
 
@@ -35,6 +37,28 @@ export const AuthProvider = ({ children }) => {
       fetchUser();
     } else {
       setLoading(false);
+    }
+  }, []);
+
+  const refreshDailySetupStatus = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setDailySetupStatus(null);
+      setDailySetupLoading(false);
+      return null;
+    }
+
+    setDailySetupLoading(true);
+    try {
+      const response = await axios.get('/api/transactions/daily-setup/status');
+      setDailySetupStatus(response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch daily setup status:', error);
+      setDailySetupStatus(null);
+      return null;
+    } finally {
+      setDailySetupLoading(false);
     }
   }, []);
 
@@ -92,6 +116,8 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token');
     delete axios.defaults.headers.common['Authorization'];
     setUser(null);
+    setDailySetupStatus(null);
+    setDailySetupLoading(false);
 
     if (isSessionExpired) {
       setSessionExpired(true);
@@ -130,6 +156,23 @@ export const AuthProvider = ({ children }) => {
   }, [user, resetIdleTimer, clearIdleTimer]);
 
   useEffect(() => {
+    if (!user) {
+      setDailySetupStatus(null);
+      setDailySetupLoading(false);
+      return undefined;
+    }
+
+    refreshDailySetupStatus();
+    const intervalId = window.setInterval(() => {
+      refreshDailySetupStatus();
+    }, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [user, refreshDailySetupStatus]);
+
+  useEffect(() => {
     const id = axios.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -153,7 +196,10 @@ export const AuthProvider = ({ children }) => {
     logout,
     loading,
     sessionExpired,
-    dismissSessionExpired
+    dismissSessionExpired,
+    dailySetupStatus,
+    dailySetupLoading,
+    refreshDailySetupStatus
   };
 
   return (

@@ -11,6 +11,7 @@ const REPORT_TYPES = [
   { id: 'sales-range', label: 'Sales by Date Range', needsRange: true },
   { id: 'purchases', label: 'Purchases by Date Range', needsRange: true },
   { id: 'customer-sales', label: 'Customer Sales by Date Range', needsRange: true },
+  { id: 'transactions', label: 'Transactions Audit Report', needsRange: true },
   { id: 'suppliers', label: 'Supplier Report', needsRange: true },
   { id: 'supplier-details', label: 'Supplier Items Breakdown', needsRange: true },
 ];
@@ -66,6 +67,33 @@ const COLUMNS = {
     { key: 'quantity', label: 'Qty' },
     { key: 'sale_date_fmt', label: 'Sale Date (IST)' },
   ],
+  transactions: [
+    { key: 'row_type', label: 'Row Type' },
+    { key: 'period_start', label: 'Period Start' },
+    { key: 'period_end', label: 'Period End' },
+    { key: 'business_date', label: 'Business Date' },
+    { key: 'entry_type', label: 'Entry Type' },
+    { key: 'selected_bank', label: 'Default Bank Selected' },
+    { key: 'bank_selected_at_fmt', label: 'Default Bank Selected At (IST)' },
+    { key: 'balance_reviewed_by', label: 'Balance Reviewed By' },
+    { key: 'balance_reviewed_at_fmt', label: 'Balance Reviewed At (IST)' },
+    { key: 'opening_balance', label: 'Opening Balance (Rs.)' },
+    { key: 'sales', label: 'Sales (Rs.)' },
+    { key: 'expenditure', label: 'Expenditure (Rs.)' },
+    { key: 'bank_deposits', label: 'Bank Deposits (Rs.)' },
+    { key: 'bank_withdrawals', label: 'Bank Withdrawals (Rs.)' },
+    { key: 'supplier_payments_cash', label: 'Supplier Cash Payments (Rs.)' },
+    { key: 'closing_balance', label: 'Closing Balance (Rs.)' },
+    { key: 'amount', label: 'Entry Amount (Rs.)' },
+    { key: 'payment_mode', label: 'Payment Mode' },
+    { key: 'bank_account', label: 'Bank Account' },
+    { key: 'credited_to', label: 'Credited To' },
+    { key: 'reference', label: 'Reference' },
+    { key: 'category', label: 'Category' },
+    { key: 'party_name', label: 'Party Name' },
+    { key: 'description', label: 'Description' },
+    { key: 'created_by', label: 'Created By' },
+  ],
   suppliers: [
     { key: 'supplier', label: 'Supplier' },
     { key: 'products_supplied', label: 'Products Supplied' },
@@ -87,6 +115,155 @@ const COLUMNS = {
     { key: 'purchase_count', label: 'Purchases' },
     { key: 'last_purchase_fmt', label: 'Last Purchase (IST)' },
   ],
+};
+
+const formatBankLabel = (accountName, bankName) => {
+  if (accountName && bankName) return `${accountName} (${bankName})`;
+  return accountName || bankName || '';
+};
+
+const buildTransactionReportRows = (payload, startDate, endDate) => {
+  const summaryRow = {
+    row_type: 'report_summary',
+    period_start: startDate,
+    period_end: endDate,
+    business_date: '',
+    entry_type: 'summary',
+    selected_bank: '',
+    bank_selected_at_fmt: '',
+    balance_reviewed_by: '',
+    balance_reviewed_at_fmt: '',
+    opening_balance: '',
+    sales: payload.summary?.total_sales ?? 0,
+    expenditure: payload.summary?.total_expenditure ?? 0,
+    bank_deposits: payload.summary?.total_bank_deposits ?? 0,
+    bank_withdrawals: payload.summary?.total_bank_withdrawals ?? 0,
+    supplier_payments_cash: payload.summary?.total_supplier_cash ?? 0,
+    closing_balance: '',
+    amount: '',
+    payment_mode: '',
+    bank_account: '',
+    credited_to: '',
+    reference: `Days covered: ${payload.summary?.total_days ?? 0}`,
+    category: '',
+    party_name: '',
+    description: 'Transactions audit summary',
+    created_by: ''
+  };
+
+  const dailyRows = (payload.dailyRows || []).map((day) => ({
+    row_type: 'daily_summary',
+    period_start: startDate,
+    period_end: endDate,
+    business_date: day.business_date,
+    entry_type: 'daily_balance',
+    selected_bank: formatBankLabel(day.selected_bank_account_name, day.selected_bank_name),
+    bank_selected_at_fmt: fmtDateTime(day.bank_selected_at),
+    balance_reviewed_by: day.balance_reviewed_by_name || '',
+    balance_reviewed_at_fmt: fmtDateTime(day.balance_reviewed_at),
+    opening_balance: day.opening_balance,
+    sales: day.sales,
+    expenditure: day.expenditure,
+    bank_deposits: day.bank_deposits,
+    bank_withdrawals: day.bank_withdrawals,
+    supplier_payments_cash: day.supplier_payments_cash,
+    closing_balance: day.closing_balance,
+    amount: '',
+    payment_mode: '',
+    bank_account: formatBankLabel(day.selected_bank_account_name, day.selected_bank_name),
+    credited_to: formatBankLabel(day.selected_bank_account_name, day.selected_bank_name),
+    reference: '',
+    category: '',
+    party_name: '',
+    description: 'Daily opening and closing balance snapshot',
+    created_by: day.balance_reviewed_by_name || ''
+  }));
+
+  const expenditureRows = (payload.expenditures || []).map((item) => ({
+    row_type: 'detail',
+    period_start: startDate,
+    period_end: endDate,
+    business_date: item.expense_date,
+    entry_type: 'expenditure',
+    selected_bank: '',
+    bank_selected_at_fmt: '',
+    balance_reviewed_by: '',
+    balance_reviewed_at_fmt: '',
+    opening_balance: '',
+    sales: '',
+    expenditure: '',
+    bank_deposits: '',
+    bank_withdrawals: '',
+    supplier_payments_cash: '',
+    closing_balance: '',
+    amount: item.amount,
+    payment_mode: 'cash',
+    bank_account: '',
+    credited_to: '',
+    reference: `EXP-${item.id}`,
+    category: item.category || '',
+    party_name: '',
+    description: item.description || '',
+    created_by: item.created_by_name || ''
+  }));
+
+  const bankTransferRows = (payload.bankTransfers || []).map((item) => ({
+    row_type: 'detail',
+    period_start: startDate,
+    period_end: endDate,
+    business_date: item.transfer_date,
+    entry_type: item.transfer_type === 'deposit' ? 'bank_deposit' : 'bank_withdrawal',
+    selected_bank: '',
+    bank_selected_at_fmt: '',
+    balance_reviewed_by: '',
+    balance_reviewed_at_fmt: '',
+    opening_balance: '',
+    sales: '',
+    expenditure: '',
+    bank_deposits: '',
+    bank_withdrawals: '',
+    supplier_payments_cash: '',
+    closing_balance: '',
+    amount: item.amount,
+    payment_mode: item.payment_mode || '',
+    bank_account: formatBankLabel(item.account_name, item.bank_name),
+    credited_to: item.transfer_type === 'withdrawal' ? 'Cash Drawer' : formatBankLabel(item.account_name, item.bank_name),
+    reference: item.source_reference || `BT-${item.id}`,
+    category: item.source_type || '',
+    party_name: '',
+    description: item.description || '',
+    created_by: item.created_by_name || ''
+  }));
+
+  const supplierPaymentRows = (payload.supplierPayments || []).map((item) => ({
+    row_type: 'detail',
+    period_start: startDate,
+    period_end: endDate,
+    business_date: item.payment_date,
+    entry_type: 'supplier_payment',
+    selected_bank: '',
+    bank_selected_at_fmt: '',
+    balance_reviewed_by: '',
+    balance_reviewed_at_fmt: '',
+    opening_balance: '',
+    sales: '',
+    expenditure: '',
+    bank_deposits: '',
+    bank_withdrawals: '',
+    supplier_payments_cash: '',
+    closing_balance: '',
+    amount: item.amount,
+    payment_mode: item.payment_mode,
+    bank_account: formatBankLabel(item.account_name, item.bank_name),
+    credited_to: item.payment_mode === 'bank' ? formatBankLabel(item.account_name, item.bank_name) : '',
+    reference: `SP-${item.id}`,
+    category: '',
+    party_name: item.supplier_name || '',
+    description: item.description || '',
+    created_by: item.created_by_name || ''
+  }));
+
+  return [summaryRow, ...dailyRows, ...expenditureRows, ...bankTransferRows, ...supplierPaymentRows];
 };
 
 const ReportDownloader = () => {
@@ -138,6 +315,11 @@ const ReportDownloader = () => {
           ...r,
           sale_date_fmt: fmtDateTime(r.sale_date),
         }));
+      } else if (reportType === 'transactions') {
+        const res = await axios.get('/api/reports/transactions', {
+          params: { start_date: startDate, end_date: endDate }
+        });
+        rows = buildTransactionReportRows(res.data || {}, startDate, endDate);
       } else if (reportType === 'suppliers') {
         const res = await axios.get('/api/reports/suppliers', {
           params: { start_date: startDate, end_date: endDate }

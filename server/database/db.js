@@ -344,6 +344,29 @@ function initializeDatabase() {
     }
   });
 
+  db.run(`CREATE TABLE IF NOT EXISTS daily_operation_setup (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_date DATE NOT NULL UNIQUE,
+    selected_bank_account_id INTEGER,
+    bank_selected_by INTEGER,
+    bank_selected_at DATETIME,
+    opening_balance_snapshot REAL,
+    closing_balance_snapshot REAL,
+    balance_reviewed_by INTEGER,
+    balance_reviewed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (selected_bank_account_id) REFERENCES bank_accounts (id),
+    FOREIGN KEY (bank_selected_by) REFERENCES users (id),
+    FOREIGN KEY (balance_reviewed_by) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating daily_operation_setup table:', err.message);
+    } else {
+      console.log('Daily operation setup table created successfully');
+    }
+  });
+
   // Create expenditures table
   db.run(`CREATE TABLE IF NOT EXISTS expenditures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -368,6 +391,9 @@ function initializeDatabase() {
     bank_account_id INTEGER NOT NULL,
     amount REAL NOT NULL,
     transfer_type TEXT NOT NULL CHECK (transfer_type IN ('deposit', 'withdrawal')),
+    source_type TEXT,
+    source_reference TEXT,
+    payment_mode TEXT,
     description TEXT,
     transfer_date DATE NOT NULL,
     created_by INTEGER,
@@ -379,6 +405,32 @@ function initializeDatabase() {
       console.error('Error creating bank_transfers table:', err.message);
     } else {
       console.log('Bank transfers table created successfully');
+    }
+  });
+
+  db.all(`PRAGMA table_info(bank_transfers)`, (err, columns) => {
+    if (err) return;
+
+    const hasSourceType = columns.some((c) => c.name === 'source_type');
+    const hasSourceReference = columns.some((c) => c.name === 'source_reference');
+    const hasPaymentMode = columns.some((c) => c.name === 'payment_mode');
+
+    if (!hasSourceType) {
+      db.run(`ALTER TABLE bank_transfers ADD COLUMN source_type TEXT`, (e) => {
+        if (!e) console.log('Added source_type column to bank_transfers table');
+      });
+    }
+
+    if (!hasSourceReference) {
+      db.run(`ALTER TABLE bank_transfers ADD COLUMN source_reference TEXT`, (e) => {
+        if (!e) console.log('Added source_reference column to bank_transfers table');
+      });
+    }
+
+    if (!hasPaymentMode) {
+      db.run(`ALTER TABLE bank_transfers ADD COLUMN payment_mode TEXT`, (e) => {
+        if (!e) console.log('Added payment_mode column to bank_transfers table');
+      });
     }
   });
 
