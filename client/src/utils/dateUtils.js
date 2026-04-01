@@ -27,6 +27,10 @@ const IST_OPTIONS_TIME = {
 const toDate = (str) => {
   if (!str) return null;
   const normalized = str.toString().replace(' ', 'T');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const d = new Date(`${normalized}T00:00:00+05:30`);
+    return isNaN(d.getTime()) ? null : d;
+  }
   // If already has timezone info, use as-is; otherwise treat as IST
   const iso = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + '+05:30';
   const d = new Date(iso);

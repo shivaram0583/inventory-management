@@ -29,7 +29,7 @@ const num = (value) => {
 const fmt = (n) => num(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const Transactions = () => {
-  const { user } = useAuth();
+  const { user, dailySetupStatus, refreshDailySetupStatus } = useAuth();
   const isAdmin = user?.role === 'admin';
   const today = getISTDateString();
 
@@ -109,14 +109,17 @@ const Transactions = () => {
     } catch (e) { console.error(e); }
   }, []);
 
-  const refreshAll = useCallback(() => {
-    fetchBankAccounts();
-    fetchDailySummary();
-    fetchExpenditures();
-    fetchBankTransfers();
-    fetchSupplierPayments();
-    fetchSupplierBalances();
-  }, [fetchBankAccounts, fetchDailySummary, fetchExpenditures, fetchBankTransfers, fetchSupplierPayments, fetchSupplierBalances]);
+  const refreshAll = useCallback(async () => {
+    await Promise.all([
+      fetchBankAccounts(),
+      fetchDailySummary(),
+      fetchExpenditures(),
+      fetchBankTransfers(),
+      fetchSupplierPayments(),
+      fetchSupplierBalances(),
+      refreshDailySetupStatus?.()
+    ]);
+  }, [fetchBankAccounts, fetchDailySummary, fetchExpenditures, fetchBankTransfers, fetchSupplierPayments, fetchSupplierBalances, refreshDailySetupStatus]);
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
 
@@ -184,6 +187,18 @@ const Transactions = () => {
       showMsg('Account Added', `Bank account "${payload.account_name}" added`);
     } catch (err) {
       showMsg('Error', err.response?.data?.message || 'Failed to add account', 'error');
+    }
+  };
+
+  const handleSetDefaultBank = async (bankAccountId) => {
+    try {
+      await axios.post('/api/transactions/daily-setup/select-bank', {
+        bank_account_id: bankAccountId
+      });
+      await refreshAll();
+      showMsg('Default Bank Updated', 'Today\'s default bank has been updated successfully.');
+    } catch (err) {
+      showMsg('Error', err.response?.data?.message || 'Failed to update the default bank', 'error');
     }
   };
 
@@ -297,9 +312,11 @@ const Transactions = () => {
           bankAccounts={bankAccounts}
           bankTransfers={bankTransfers}
           isAdmin={isAdmin}
+          selectedBankAccountId={dailySetupStatus?.selectedBankAccountId || null}
           onAddAccount={() => { setBankAccForm({ account_name: '', bank_name: '', account_number: '', balance: '' }); setShowBankAccModal(true); }}
           onAddTransfer={() => { setBankTransferForm({ bank_account_id: bankAccounts[0]?.id || '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today }); setShowBankTransferModal(true); }}
           onDeleteTransfer={(id) => setDeleteModal({ open: true, type: 'bank-transfers', id, label: 'this transfer' })}
+          onSetDefaultBank={handleSetDefaultBank}
         />
       )}
 
@@ -686,9 +703,17 @@ const ExpendituresTab = ({ expenditures, isAdmin, onAdd, onDelete }) => (
 
 // ─── BANK TAB ───────────────────────────────────────────────────────────────
 
-const BankTab = ({ bankAccounts, bankTransfers, isAdmin, onAddAccount, onAddTransfer, onDeleteTransfer }) => (
+const BankTab = ({
+  bankAccounts,
+  bankTransfers,
+  isAdmin,
+  selectedBankAccountId,
+  onAddAccount,
+  onAddTransfer,
+  onDeleteTransfer,
+  onSetDefaultBank
+}) => (
   <div className="space-y-6">
-    {/* Bank Accounts */}
     <div>
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-bold text-gray-800">Bank Accounts</h3>
@@ -705,26 +730,52 @@ const BankTab = ({ bankAccounts, bankTransfers, isAdmin, onAddAccount, onAddTran
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {bankAccounts.map(acc => (
-            <div key={acc.id} className="rounded-xl border border-blue-100 p-5 shadow-sm"
-                 style={{background:'linear-gradient(135deg,#eff6ff,#f0f9ff)'}}>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="h-10 w-10 rounded-xl bg-blue-500 flex items-center justify-center">
-                  <Landmark className="h-5 w-5 text-white" />
+          {bankAccounts.map((acc) => {
+            const isDefault = Number(selectedBankAccountId) === Number(acc.id);
+
+            return (
+              <div
+                key={acc.id}
+                className={`rounded-xl p-5 shadow-sm ${isDefault ? 'border-2 border-violet-300' : 'border border-blue-100'}`}
+                style={{ background: isDefault ? 'linear-gradient(135deg,#f5f3ff,#eef2ff)' : 'linear-gradient(135deg,#eff6ff,#f0f9ff)' }}
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="h-10 w-10 rounded-xl bg-blue-500 flex items-center justify-center">
+                    <Landmark className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-gray-800">{acc.account_name}</p>
+                    <p className="text-xs text-gray-500">{acc.bank_name}{acc.account_number ? ` · ${acc.account_number}` : ''}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-bold text-gray-800">{acc.account_name}</p>
-                  <p className="text-xs text-gray-500">{acc.bank_name}{acc.account_number ? ` · ${acc.account_number}` : ''}</p>
-                </div>
+                <p className="text-2xl font-extrabold text-blue-700">₹{fmt(acc.balance)}</p>
+                <p className={`mt-2 text-xs font-medium ${isDefault ? 'text-violet-700' : 'text-gray-500'}`}>
+                  {isDefault ? 'This is the default bank selected for today.' : 'Available to set as the default bank for today.'}
+                </p>
+                {isAdmin && (
+                  <div className="mt-4">
+                    {isDefault ? (
+                      <span className="inline-flex items-center rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-700">
+                        Default Bank Selected
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onSetDefaultBank?.(acc.id)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700 transition-colors"
+                      >
+                        Set As Default
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              <p className="text-2xl font-extrabold text-blue-700">₹{fmt(acc.balance)}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
 
-    {/* Bank Transfers */}
     <div>
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-bold text-gray-800">Transfers</h3>
@@ -741,7 +792,8 @@ const BankTab = ({ bankAccounts, bankTransfers, isAdmin, onAddAccount, onAddTran
               <tr>
                 <th>Date</th>
                 <th>Type</th>
-                <th>Account</th>
+                <th>Credited To</th>
+                <th>Source</th>
                 <th>Description</th>
                 <th className="text-right">Amount</th>
                 {isAdmin && <th></th>}
@@ -749,7 +801,7 @@ const BankTab = ({ bankAccounts, bankTransfers, isAdmin, onAddAccount, onAddTran
             </thead>
             <tbody>
               {bankTransfers.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 6 : 5} className="text-center text-gray-400 py-8">No transfers found</td></tr>
+                <tr><td colSpan={isAdmin ? 7 : 6} className="text-center text-gray-400 py-8">No transfers found</td></tr>
               ) : bankTransfers.map(bt => (
                 <tr key={bt.id}>
                   <td className="font-medium">{formatDisplayDate(bt.transfer_date)}</td>
@@ -758,7 +810,8 @@ const BankTab = ({ bankAccounts, bankTransfers, isAdmin, onAddAccount, onAddTran
                       {bt.transfer_type === 'deposit' ? '↑ Deposit' : '↓ Withdrawal'}
                     </span>
                   </td>
-                  <td>{bt.account_name} <span className="text-xs text-gray-400">({bt.bank_name})</span></td>
+                  <td className="text-sm text-gray-700">{formatCreditedTo(bt)}</td>
+                  <td className="text-sm text-gray-500">{formatTransferSource(bt)}</td>
                   <td className="text-sm text-gray-500">{bt.description || '-'}</td>
                   <td className={`text-right font-bold ${bt.transfer_type === 'deposit' ? 'text-blue-600' : 'text-cyan-600'}`}>₹{fmt(bt.amount)}</td>
                   {isAdmin && (
@@ -905,6 +958,33 @@ const FormModal = ({ title, children, onClose }) => (
     </div>
   </div>
 );
+
+function formatTransferSource(transfer) {
+  if (transfer?.source_type === 'sale') {
+    const mode = transfer.payment_mode ? transfer.payment_mode.toUpperCase() : 'SALE';
+    return `${mode} sale${transfer.source_reference ? ` · ${transfer.source_reference}` : ''}`;
+  }
+
+  if (transfer?.source_type === 'manual') {
+    return 'Manual transfer';
+  }
+
+  return transfer?.source_reference || '-';
+}
+
+function formatCreditedTo(transfer) {
+  if (!transfer) return '-';
+
+  if (transfer.transfer_type === 'withdrawal') {
+    return 'Cash Drawer';
+  }
+
+  if (transfer.account_name && transfer.bank_name) {
+    return `${transfer.account_name} (${transfer.bank_name})`;
+  }
+
+  return transfer.account_name || transfer.bank_name || '-';
+}
 
 function formatDisplayDate(dateStr) {
   if (!dateStr) return '-';
