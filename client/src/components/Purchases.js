@@ -61,6 +61,7 @@ const Purchases = () => {
   // Category form state
   const [newCategoryName, setNewCategoryName] = useState('');
   const [deleteCatModal, setDeleteCatModal] = useState({ open: false, id: null, name: '' });
+  const [deleteSupplierModal, setDeleteSupplierModal] = useState({ open: false, supplier: '' });
 
   // Confirmation modal (before submitting purchase)
   const [confirmModal, setConfirmModal] = useState({ open: false, data: null });
@@ -314,6 +315,32 @@ const Purchases = () => {
       setTimeout(() => setSuccess(''), 3000);
     } catch (e) {
       setError(e.response?.data?.message || 'Failed to delete category');
+    }
+  };
+
+  const handleDeleteSupplier = async () => {
+    const supplierName = deleteSupplierModal.supplier;
+    setDeleteSupplierModal({ open: false, supplier: '' });
+    if (!supplierName) return;
+
+    setError('');
+    setSuccess('');
+    try {
+      const res = await axios.delete(`/api/purchases/suppliers/${encodeURIComponent(supplierName)}`);
+      const removed = res.data?.removed || {};
+
+      if (selectedSupplier === supplierName) {
+        setSelectedSupplier(null);
+        setSupplierDetail(null);
+      }
+
+      await fetchAll();
+      setSuccess(
+        `Supplier "${supplierName}" deleted. Removed ${removed.supplier_payments || 0} transaction records and cleared ${removed.purchases || 0} purchase entries.`
+      );
+      setTimeout(() => setSuccess(''), 5000);
+    } catch (e) {
+      setError(e.response?.data?.message || 'Failed to delete supplier');
     }
   };
 
@@ -674,6 +701,20 @@ const Purchases = () => {
                               <p className="text-sm font-bold text-teal-700">₹{Number(sup.total_spent || 0).toLocaleString('en-IN', {minimumFractionDigits:2})}</p>
                               <p className="text-xs text-gray-400">{sup.total_quantity} units</p>
                             </div>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteSupplierModal({ open: true, supplier: sup.supplier });
+                                }}
+                                className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 transition-colors"
+                                title="Delete supplier"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            )}
                             <ChevronRight className="h-4 w-4 text-gray-300" />
                           </div>
                         </div>
@@ -703,7 +744,19 @@ const Purchases = () => {
                 <div className="space-y-6">
                   {/* Supplier Header */}
                   <div className="card">
-                    <h2 className="text-lg font-bold text-gray-900 mb-3">{supplierDetail.supplier}</h2>
+                    <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <h2 className="text-lg font-bold text-gray-900">{supplierDetail.supplier}</h2>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteSupplierModal({ open: true, supplier: supplierDetail.supplier })}
+                          className="inline-flex items-center gap-2 self-start rounded-xl bg-red-50 px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-100 transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete Supplier
+                        </button>
+                      )}
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="rounded-xl p-4" style={{background:'linear-gradient(135deg,#f0fdfa,#ecfdf5)'}}>
                         <p className="text-xs font-semibold text-gray-500 uppercase">Total Purchases</p>
@@ -884,6 +937,20 @@ const Purchases = () => {
       >
         <p>Are you sure you want to delete the category <span className="font-semibold capitalize">"{deleteCatModal.name}"</span>?</p>
         <p className="mt-2 text-xs text-gray-500">Categories in use by existing products cannot be deleted.</p>
+      </SharedModal>
+
+      <SharedModal
+        isOpen={deleteSupplierModal.open}
+        onClose={() => setDeleteSupplierModal({ open: false, supplier: '' })}
+        title="Delete Supplier"
+        type="warning"
+        confirmText="Delete"
+        onConfirm={handleDeleteSupplier}
+      >
+        <p>Are you sure you want to delete supplier <span className="font-semibold">"{deleteSupplierModal.supplier}"</span>?</p>
+        <p className="mt-2 text-xs text-gray-500">
+          This will remove the supplier name from purchases and products, and delete that supplier&apos;s payment records from Transactions.
+        </p>
       </SharedModal>
 
       {/* Purchase Confirmation Modal */}
