@@ -4,6 +4,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
 import DailySetupGate from './shared/DailySetupGate';
+import { fmtDateTime } from '../utils/dateUtils';
 import {
   LayoutDashboard,
   Package,
@@ -92,14 +93,8 @@ const Layout = () => {
 
   const formatNotificationDate = (value) => {
     if (!value) return 'Unknown date';
-
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-
-    return parsed.toLocaleString('en-IN', {
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    });
+    const formatted = fmtDateTime(value);
+    return formatted === '-' ? value : formatted;
   };
 
   const navigation = [

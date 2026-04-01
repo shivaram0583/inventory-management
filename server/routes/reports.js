@@ -22,7 +22,7 @@ router.get('/daily-sales', authenticateToken, async (req, res) => {
         COUNT(s.id) as transaction_count
        FROM sales s
        JOIN products p ON s.product_id = p.id
-       WHERE DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) = ?
+       WHERE DATE(s.sale_date) = ?
        GROUP BY s.product_id, p.product_name, p.variety, p.unit
        ORDER BY total_amount DESC`,
       [date]
@@ -34,13 +34,13 @@ router.get('/daily-sales', authenticateToken, async (req, res) => {
         SUM(quantity_sold) as total_items_sold,
         SUM(total_amount) as total_revenue
        FROM sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?`,
+       WHERE DATE(sale_date) = ?`,
       [date]
     );
 
     const customerSales = await getAll(
       `SELECT * FROM customer_sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?
+       WHERE DATE(sale_date) = ?
        ORDER BY sale_date DESC`,
       [date]
     );
@@ -72,7 +72,7 @@ router.get('/sales-range', authenticateToken, async (req, res) => {
 
     const sales = await getAll(
       `SELECT 
-        DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) as sale_date,
+        DATE(s.sale_date) as sale_date,
         s.product_id,
         p.product_name,
         p.variety,
@@ -82,8 +82,8 @@ router.get('/sales-range', authenticateToken, async (req, res) => {
         COUNT(s.id) as transaction_count
        FROM sales s
        JOIN products p ON s.product_id = p.id
-       WHERE DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?
-       GROUP BY DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')), s.product_id, p.product_name, p.variety, p.unit
+       WHERE DATE(s.sale_date) BETWEEN ? AND ?
+       GROUP BY DATE(s.sale_date), s.product_id, p.product_name, p.variety, p.unit
        ORDER BY sale_date DESC, total_amount DESC`,
       [start_date, end_date]
     );
@@ -94,7 +94,7 @@ router.get('/sales-range', authenticateToken, async (req, res) => {
         SUM(quantity_sold) as total_items_sold,
         SUM(total_amount) as total_revenue
        FROM sales
-       WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?`,
+       WHERE DATE(sale_date) BETWEEN ? AND ?`,
       [start_date, end_date]
     );
 
