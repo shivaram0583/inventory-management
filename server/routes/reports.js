@@ -2,6 +2,7 @@ const express = require('express');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { getRow, getAll, runQuery, nowIST } = require('../database/db');
 const moment = require('moment');
+const { getDailyBalanceSnapshot, getDailySetupRecord, getISTDateString } = require('../services/dailySetup');
 
 const router = express.Router();
 
@@ -458,6 +459,105 @@ router.get('/customer-sales', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Customer sales archive error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/transactions', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ message: 'Start date and end date are required' });
+    }
+
+    const dailyRows = [];
+    const start = new Date(`${start_date}T00:00:00+05:30`);
+    const end = new Date(`${end_date}T00:00:00+05:30`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      return res.status(400).json({ message: 'Invalid date range' });
+    }
+
+    for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+      const businessDate = getISTDateString(cursor);
+      const [balance, setup] = await Promise.all([
+        getDailyBalanceSnapshot(businessDate),
+        getDailySetupRecord(businessDate)
+      ]);
+
+      dailyRows.push({
+        business_date: businessDate,
+        opening_balance: balance.openingBalance,
+        sales: balance.sales,
+        expenditure: balance.expenditure,
+        bank_deposits: balance.bankDeposits,
+        bank_withdrawals: balance.bankWithdrawals,
+        supplier_payments_cash: balance.supplierPaymentsCash,
+        closing_balance: balance.closingBalance,
+        selected_bank_account_id: setup?.selected_bank_account_id || null,
+        selected_bank_account_name: setup?.selected_bank_account_name || null,
+        selected_bank_name: setup?.selected_bank_name || null,
+        bank_selected_at: setup?.bank_selected_at || null,
+        balance_reviewed_at: setup?.balance_reviewed_at || null,
+        balance_reviewed_by_name: setup?.balance_reviewed_by_name || null,
+        opening_balance_snapshot: setup?.opening_balance_snapshot ?? null,
+        closing_balance_snapshot: setup?.closing_balance_snapshot ?? null
+      });
+    }
+
+    const [expenditures, bankTransfers, supplierPayments] = await Promise.all([
+      getAll(`
+        SELECT e.*, u.username as created_by_name
+        FROM expenditures e
+        LEFT JOIN users u ON u.id = e.created_by
+        WHERE e.expense_date BETWEEN ? AND ?
+        ORDER BY e.expense_date ASC, e.created_at ASC
+      `, [start_date, end_date]),
+      getAll(`
+        SELECT bt.*, ba.account_name, ba.bank_name, u.username as created_by_name
+        FROM bank_transfers bt
+        JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+        LEFT JOIN users u ON u.id = bt.created_by
+        WHERE bt.transfer_date BETWEEN ? AND ?
+        ORDER BY bt.transfer_date ASC, bt.created_at ASC
+      `, [start_date, end_date]),
+      getAll(`
+        SELECT sp.*, ba.account_name, ba.bank_name, u.username as created_by_name
+        FROM supplier_payments sp
+        LEFT JOIN bank_accounts ba ON ba.id = sp.bank_account_id
+        LEFT JOIN users u ON u.id = sp.created_by
+        WHERE sp.payment_date BETWEEN ? AND ?
+        ORDER BY sp.payment_date ASC, sp.created_at ASC
+      `, [start_date, end_date])
+    ]);
+
+    const summary = dailyRows.reduce((acc, row) => ({
+      total_days: acc.total_days + 1,
+      total_sales: acc.total_sales + Number(row.sales || 0),
+      total_expenditure: acc.total_expenditure + Number(row.expenditure || 0),
+      total_bank_deposits: acc.total_bank_deposits + Number(row.bank_deposits || 0),
+      total_bank_withdrawals: acc.total_bank_withdrawals + Number(row.bank_withdrawals || 0),
+      total_supplier_cash: acc.total_supplier_cash + Number(row.supplier_payments_cash || 0)
+    }), {
+      total_days: 0,
+      total_sales: 0,
+      total_expenditure: 0,
+      total_bank_deposits: 0,
+      total_bank_withdrawals: 0,
+      total_supplier_cash: 0
+    });
+
+    res.json({
+      range: { start_date, end_date },
+      summary,
+      dailyRows,
+      expenditures,
+      bankTransfers,
+      supplierPayments
+    });
+  } catch (error) {
+    console.error('Transactions report error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

@@ -1,9 +1,16 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
+const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
+const {
+  getDailyBalanceSnapshot,
+  getDailySetupStatus,
+  upsertSelectedBank,
+  markBalanceReviewed
+} = require('../services/dailySetup');
 
 const router = express.Router();
 const toNumber = (value) => {
@@ -20,6 +27,80 @@ router.get('/bank-accounts', authenticateToken, async (req, res) => {
     res.json(accounts);
   } catch (error) {
     console.error('Get bank accounts error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/daily-setup/status', authenticateToken, async (req, res) => {
+  try {
+    const status = await getDailySetupStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Get daily setup status error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/daily-setup/select-bank', [
+  authenticateToken,
+  authorizeRole(['admin']),
+  body('bank_account_id').isInt({ min: 1 }).withMessage('Bank account is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const bankAccountId = Number(req.body.bank_account_id);
+    const account = await getRow('SELECT * FROM bank_accounts WHERE id = ? AND is_active = 1', [bankAccountId]);
+    if (!account) {
+      return res.status(404).json({ message: 'Bank account not found' });
+    }
+
+    await upsertSelectedBank({
+      bankAccountId,
+      userId: req.user.id
+    });
+
+    const status = await getDailySetupStatus();
+    res.json({
+      message: 'Bank selected for today successfully',
+      dailySetupStatus: status
+    });
+  } catch (error) {
+    console.error('Select daily bank error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/daily-setup/review-balance', [
+  authenticateToken,
+  authorizeRole(['admin'])
+], async (req, res) => {
+  try {
+    const status = await getDailySetupStatus();
+    if (!status.hasBankAccounts) {
+      return res.status(400).json({ message: 'Add a bank account before reviewing daily balances.' });
+    }
+    if (!status.bankSelectionCompleted) {
+      return res.status(400).json({ message: 'Select today\'s bank before reviewing daily balances.' });
+    }
+
+    const balance = await getDailyBalanceSnapshot(status.businessDate);
+    await markBalanceReviewed({
+      userId: req.user.id,
+      openingBalance: balance.openingBalance,
+      closingBalance: balance.closingBalance
+    });
+
+    const refreshedStatus = await getDailySetupStatus();
+    res.json({
+      message: 'Today\'s balances reviewed successfully',
+      dailySetupStatus: refreshedStatus
+    });
+  } catch (error) {
+    console.error('Review daily balance error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -110,6 +191,7 @@ router.get('/expenditures', authenticateToken, async (req, res) => {
 router.post('/expenditures', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
   body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be positive'),
   body('description').notEmpty().trim().withMessage('Description is required'),
   body('expense_date').notEmpty().withMessage('Date is required'),
@@ -228,8 +310,18 @@ router.post('/bank-transfers', [
       [newBalance, nowIST(), accountId]);
 
     const result = await runQuery(
-      'INSERT INTO bank_transfers (bank_account_id, amount, transfer_type, description, transfer_date, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      [accountId, transferAmount, transfer_type, description || null, transfer_date, req.user.id]
+      `INSERT INTO bank_transfers (
+         bank_account_id,
+         amount,
+         transfer_type,
+         source_type,
+         source_reference,
+         payment_mode,
+         description,
+         transfer_date,
+         created_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [accountId, transferAmount, transfer_type, 'manual', null, null, description || null, transfer_date, req.user.id]
     );
 
     const transfer = await getRow(
@@ -511,6 +603,28 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
 
     const days = Array.from(daySet).sort();
 
+    const setupRows = await getAll(`
+      SELECT
+        dos.business_date,
+        dos.selected_bank_account_id,
+        dos.bank_selected_at,
+        dos.balance_reviewed_at,
+        dos.opening_balance_snapshot,
+        dos.closing_balance_snapshot,
+        ba.account_name AS selected_bank_account_name,
+        ba.bank_name AS selected_bank_name,
+        reviewer.username AS balance_reviewed_by_name
+      FROM daily_operation_setup dos
+      LEFT JOIN bank_accounts ba ON ba.id = dos.selected_bank_account_id
+      LEFT JOIN users reviewer ON reviewer.id = dos.balance_reviewed_by
+      WHERE dos.business_date BETWEEN ? AND ?
+    `, [start_date, end_date]);
+
+    const setupMap = setupRows.reduce((acc, row) => {
+      acc[row.business_date] = row;
+      return acc;
+    }, {});
+
     // Calculate running opening/closing balance
     // Opening balance for first day = 0 (user can adjust)
     // We compute: closing = opening + sales - expenditure - bank_deposits + bank_withdrawals
@@ -554,6 +668,7 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
       const bankSupplierPayments = toNumber(supBankMap[day]);
       const upiSupplierPayments = toNumber(supUpiMap[day]);
       const purchases = toNumber(purMap[day]);
+      const setup = setupMap[day];
 
       const closingBalance =
         openingBalance + sales - expenditure - bankDeposits + bankWithdrawals - cashSupplierPayments;
@@ -571,7 +686,15 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
         supplier_payments_upi: upiSupplierPayments,
         supplier_payments_total: totalSupplierPayments,
         purchases,
-        closing_balance: closingBalance
+        closing_balance: closingBalance,
+        selected_bank_account_id: setup?.selected_bank_account_id || null,
+        selected_bank_account_name: setup?.selected_bank_account_name || null,
+        selected_bank_name: setup?.selected_bank_name || null,
+        bank_selected_at: setup?.bank_selected_at || null,
+        balance_reviewed_at: setup?.balance_reviewed_at || null,
+        balance_reviewed_by_name: setup?.balance_reviewed_by_name || null,
+        opening_balance_snapshot: setup?.opening_balance_snapshot ?? null,
+        closing_balance_snapshot: setup?.closing_balance_snapshot ?? null
       };
 
       openingBalance = closingBalance;

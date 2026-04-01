@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
+const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const crypto = require('crypto');
 const moment = require('moment');
@@ -23,6 +24,7 @@ router.get('/categories', authenticateToken, async (req, res) => {
 router.post('/categories', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
   body('name').notEmpty().trim().withMessage('Category name is required')
 ], async (req, res) => {
   try {
@@ -100,6 +102,7 @@ router.get('/', authenticateToken, async (req, res) => {
 router.post('/', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
   body('product_id').isInt({ min: 1 }).withMessage('Valid product ID is required'),
   body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
   body('price_per_unit').isFloat({ min: 0 }).withMessage('Price must be non-negative')
@@ -179,6 +182,7 @@ router.post('/', [
 router.put('/:id', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
   body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
   body('price_per_unit').isFloat({ min: 0 }).withMessage('Price must be non-negative')
 ], async (req, res) => {
