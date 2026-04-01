@@ -23,7 +23,7 @@ const toNumber = (value) => {
 // GET all bank accounts
 router.get('/bank-accounts', authenticateToken, async (req, res) => {
   try {
-    const accounts = await getAll('SELECT * FROM bank_accounts ORDER BY created_at DESC');
+    const accounts = await getAll('SELECT * FROM bank_accounts WHERE is_active = 1 ORDER BY created_at DESC');
     res.json(accounts);
   } catch (error) {
     console.error('Get bank accounts error:', error);
@@ -158,6 +158,40 @@ router.put('/bank-accounts/:id', [
 
 // ─── EXPENDITURES ───────────────────────────────────────────────────────────
 
+router.delete('/bank-accounts/:id', [
+  authenticateToken,
+  authorizeRole(['admin'])
+], async (req, res) => {
+  try {
+    const account = await getRow('SELECT * FROM bank_accounts WHERE id = ? AND is_active = 1', [req.params.id]);
+    if (!account) return res.status(404).json({ message: 'Active bank account not found' });
+
+    const timestamp = nowIST();
+    const todayBusinessDate = moment().utcOffset('+05:30').format('YYYY-MM-DD');
+
+    await runQuery(
+      'UPDATE bank_accounts SET is_active = 0, updated_at = ? WHERE id = ?',
+      [timestamp, req.params.id]
+    );
+
+    await runQuery(
+      `UPDATE daily_operation_setup
+       SET selected_bank_account_id = NULL,
+           bank_selected_by = NULL,
+           bank_selected_at = NULL,
+           updated_at = ?
+       WHERE business_date = ?
+         AND selected_bank_account_id = ?`,
+      [timestamp, todayBusinessDate, req.params.id]
+    );
+
+    res.json({ message: 'Bank account removed successfully' });
+  } catch (error) {
+    console.error('Delete bank account error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET expenditures
 router.get('/expenditures', authenticateToken, async (req, res) => {
   try {
@@ -202,9 +236,10 @@ router.post('/expenditures', [
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { amount, description, expense_date, category = 'general' } = req.body;
+    const eventTimestamp = nowIST();
     const result = await runQuery(
-      'INSERT INTO expenditures (amount, description, category, expense_date, created_by) VALUES (?, ?, ?, ?, ?)',
-      [amount, description, category, expense_date, req.user.id]
+      'INSERT INTO expenditures (amount, description, category, expense_date, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [amount, description, category, expense_date, req.user.id, eventTimestamp]
     );
     const expenditure = await getRow(
       'SELECT e.*, u.username as created_by_name FROM expenditures e LEFT JOIN users u ON e.created_by = u.id WHERE e.id = ?',
@@ -218,7 +253,7 @@ router.post('/expenditures', [
       type: 'transaction',
       title: 'Added an expenditure',
       description: `Expenditure of ₹${Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} was added for ${description}.`,
-      createdAt: expense_date
+      createdAt: eventTimestamp
     });
 
     res.status(201).json(expenditure);
@@ -293,6 +328,7 @@ router.post('/bank-transfers', [
     const { bank_account_id, amount, transfer_type, transfer_date, description } = req.body;
     const accountId = Number(bank_account_id);
     const transferAmount = toNumber(amount);
+    const eventTimestamp = nowIST();
 
     const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [accountId]);
     if (!account) return res.status(404).json({ message: 'Bank account not found' });
@@ -307,7 +343,7 @@ router.post('/bank-transfers', [
     }
 
     await runQuery('UPDATE bank_accounts SET balance = ?, updated_at = ? WHERE id = ?',
-      [newBalance, nowIST(), accountId]);
+      [newBalance, eventTimestamp, accountId]);
 
     const result = await runQuery(
       `INSERT INTO bank_transfers (
@@ -319,9 +355,10 @@ router.post('/bank-transfers', [
          payment_mode,
          description,
          transfer_date,
-         created_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [accountId, transferAmount, transfer_type, 'manual', null, null, description || null, transfer_date, req.user.id]
+         created_by,
+         created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [accountId, transferAmount, transfer_type, 'manual', null, null, description || null, transfer_date, req.user.id, eventTimestamp]
     );
 
     const transfer = await getRow(
@@ -412,6 +449,7 @@ router.post('/supplier-payments', [
     const { supplier_name, amount, payment_mode, bank_account_id, description, payment_date } = req.body;
     const paymentAmount = toNumber(amount);
     const accountId = bank_account_id ? Number(bank_account_id) : null;
+    const eventTimestamp = nowIST();
 
     // If paying from bank, deduct from bank balance
     if (payment_mode === 'bank' && accountId) {
@@ -421,12 +459,12 @@ router.post('/supplier-payments', [
         return res.status(400).json({ message: 'Insufficient bank balance' });
       }
       await runQuery('UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-        [paymentAmount, nowIST(), accountId]);
+        [paymentAmount, eventTimestamp, accountId]);
     }
 
     const result = await runQuery(
-      'INSERT INTO supplier_payments (supplier_name, amount, payment_mode, bank_account_id, description, payment_date, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [supplier_name, paymentAmount, payment_mode, accountId || null, description || null, payment_date, req.user.id]
+      'INSERT INTO supplier_payments (supplier_name, amount, payment_mode, bank_account_id, description, payment_date, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [supplier_name, paymentAmount, payment_mode, accountId || null, description || null, payment_date, req.user.id, eventTimestamp]
     );
 
     const payment = await getRow(
@@ -444,7 +482,7 @@ router.post('/supplier-payments', [
       type: 'supplier-payment',
       title: 'Recorded a supplier payment',
       description: `₹${paymentAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} was paid to ${supplier_name}.`,
-      createdAt: payment_date
+      createdAt: eventTimestamp
     });
 
     res.status(201).json(payment);
@@ -529,9 +567,9 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
 
     // Daily sales totals (using IST conversion for sale_date)
     const salesByDay = await getAll(`
-      SELECT DATE(datetime(sale_date, '+5 hours', '+30 minutes')) as day, SUM(total_amount) as total_sales
+      SELECT DATE(sale_date) as day, SUM(total_amount) as total_sales
       FROM sales
-      WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?
+      WHERE DATE(sale_date) BETWEEN ? AND ?
       GROUP BY day ORDER BY day
     `, [start_date, end_date]);
 
@@ -574,9 +612,9 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
 
     // Daily purchase amounts (stock bought)
     const purchasesByDay = await getAll(`
-      SELECT DATE(datetime(purchase_date, '+5 hours', '+30 minutes')) as day, SUM(total_amount) as total_purchases
+      SELECT DATE(purchase_date) as day, SUM(total_amount) as total_purchases
       FROM purchases
-      WHERE DATE(datetime(purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?
+      WHERE DATE(purchase_date) BETWEEN ? AND ?
       GROUP BY day ORDER BY day
     `, [start_date, end_date]);
 
@@ -634,7 +672,7 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
     // Try to get the total cash before start_date
     const priorSales = await getRow(`
       SELECT COALESCE(SUM(total_amount), 0) as total FROM sales
-      WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) < ?
+      WHERE DATE(sale_date) < ?
     `, [start_date]);
     const priorExp = await getRow(`
       SELECT COALESCE(SUM(amount), 0) as total FROM expenditures WHERE expense_date < ?

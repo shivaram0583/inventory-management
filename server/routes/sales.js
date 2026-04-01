@@ -43,6 +43,7 @@ router.post('/', [
 
     const { items, customer_name, customer_mobile, customer_address, payment_mode = 'cash' } = req.body;
     const saleId = generateSaleId();
+    const saleTimestamp = nowIST();
 
     let selectedBank = null;
     if (payment_mode === 'upi' || payment_mode === 'card') {
@@ -102,23 +103,33 @@ router.post('/', [
       await runQuery(
         `INSERT INTO sales (sale_id, product_id, quantity_sold, price_per_unit, total_amount, sale_date, operator_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [saleId, saleItem.product.id, saleItem.quantity, saleItem.pricePerUnit, saleItem.itemTotal, nowIST(), req.user.id]
+        [saleId, saleItem.product.id, saleItem.quantity, saleItem.pricePerUnit, saleItem.itemTotal, saleTimestamp, req.user.id]
       );
 
       // Update product stock
       const newQuantity = saleItem.product.quantity_available - saleItem.quantity;
       await runQuery(
         'UPDATE products SET quantity_available = ?, updated_at = ? WHERE id = ?',
-        [newQuantity, nowIST(), saleItem.product.id]
+        [newQuantity, saleTimestamp, saleItem.product.id]
       );
     }
 
     // Create receipt
     const receiptNumber = generateReceiptNumber(customer_name);
     const receiptResult = await runQuery(
-      `INSERT INTO receipts (receipt_number, sale_id, customer_name, customer_mobile, customer_address, payment_mode, total_amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [receiptNumber, saleId, customer_name, customer_mobile || null, customer_address || null, payment_mode, totalAmount]
+      `INSERT INTO receipts (
+         receipt_number,
+         sale_id,
+         customer_name,
+         customer_mobile,
+         customer_address,
+         payment_mode,
+         total_amount,
+         receipt_date,
+         created_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [receiptNumber, saleId, customer_name, customer_mobile || null, customer_address || null, payment_mode, totalAmount, saleTimestamp, saleTimestamp]
     );
 
     // Get the complete sale details
@@ -147,7 +158,7 @@ router.post('/', [
             saleItem.product.product_name,
             saleItem.quantity,
             payment_mode || 'cash',
-            nowIST()
+            saleTimestamp
           ]
         )
       )
@@ -158,7 +169,7 @@ router.post('/', [
       try {
         await runQuery(
           'UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-          [totalAmount, nowIST(), selectedBank.id]
+          [totalAmount, saleTimestamp, selectedBank.id]
         );
 
         await runQuery(
@@ -171,9 +182,10 @@ router.post('/', [
              payment_mode,
              description,
              transfer_date,
-             created_by
+             created_by,
+             created_at
            )
-           VALUES (?, 'deposit', ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, 'deposit', ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             selectedBank.id,
             totalAmount,
@@ -182,7 +194,8 @@ router.post('/', [
             payment_mode,
             `Auto-deposit: ${payment_mode.toUpperCase()} sale ${saleId}`,
             getISTDateString(),
-            req.user.id
+            req.user.id,
+            saleTimestamp
           ]
         );
       } catch (bankErr) {
@@ -197,7 +210,7 @@ router.post('/', [
       type: 'sale',
       title: 'Completed a sale',
       description: `${saleItems.length} item(s) were sold under ${saleId} for ₹${Number(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
-      createdAt: nowIST()
+      createdAt: saleTimestamp
     });
 
     res.status(201).json({
@@ -228,12 +241,12 @@ router.get('/', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date) {
-      query += " AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) >= ?";
+      query += ' AND DATE(s.sale_date) >= ?';
       params.push(start_date);
     }
 
     if (end_date) {
-      query += " AND DATE(datetime(s.sale_date, '+5 hours', '+30 minutes')) <= ?";
+      query += ' AND DATE(s.sale_date) <= ?';
       params.push(end_date);
     }
 
@@ -300,12 +313,12 @@ router.get('/receipts/all', authenticateToken, async (req, res) => {
     const params = [];
 
     if (start_date) {
-      query += " AND DATE(datetime(r.receipt_date, '+5 hours', '+30 minutes')) >= ?";
+      query += ' AND DATE(r.receipt_date) >= ?';
       params.push(start_date);
     }
 
     if (end_date) {
-      query += " AND DATE(datetime(r.receipt_date, '+5 hours', '+30 minutes')) <= ?";
+      query += ' AND DATE(r.receipt_date) <= ?';
       params.push(end_date);
     }
 
