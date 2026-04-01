@@ -221,7 +221,7 @@ const Layout = () => {
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-1">
             <p className="text-xs text-gray-400">
-              Â© 2026 <span className="font-medium text-gray-500">Sri Venkata Lakshmi Vigneswara Traders</span>. All rights reserved.
+              (c) 2026 <span className="font-medium text-gray-500">Sri Venkata Lakshmi Vigneswara Traders</span>. All rights reserved.
             </p>
             <p className="text-xs text-gray-400">
               Developed by{' '}
@@ -233,7 +233,7 @@ const Layout = () => {
               >
                 dvvshivaram
               </a>
-              {' '}Â· dvvshivaram@gmail.com
+              {' '}| dvvshivaram@gmail.com
             </p>
           </div>
         </footer>
