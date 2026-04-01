@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 
 /**
@@ -55,7 +56,7 @@ const Modal = ({
   const iconBg   = type ? iconBgMap[type]          : iconBgMap.info;
   const confirmG = type ? confirmGradientMap[type] : confirmGradientMap.info;
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-fade-in"
          style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}
          onClick={!hideClose ? onClose : undefined}>
@@ -116,6 +117,12 @@ const Modal = ({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') {
+    return modalContent;
+  }
+
+  return createPortal(modalContent, document.body);
 };
 
 export default Modal;

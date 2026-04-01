@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
@@ -951,22 +952,44 @@ const SupplierTab = ({ supplierBalances, supplierPayments, bankAccounts, isAdmin
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
 const FormModal = ({ title, children, onClose }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-       style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
-    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-scale-in flex flex-col"
-         style={{maxHeight:'85vh'}}>
-      <div className="flex justify-between items-center px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
-        <h3 className="text-lg font-bold text-gray-900">{title}</h3>
-        <button onClick={onClose}
-          className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
-          <X className="h-5 w-5" />
-        </button>
+  typeof document === 'undefined'
+    ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+           style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-scale-in flex flex-col"
+             style={{maxHeight:'85vh'}}>
+          <div className="flex justify-between items-center px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
+            <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+            <button onClick={onClose}
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="px-6 py-5 overflow-y-auto flex-1" style={{scrollbarWidth:'thin'}}>
+            {children}
+          </div>
+        </div>
       </div>
-      <div className="px-6 py-5 overflow-y-auto flex-1" style={{scrollbarWidth:'thin'}}>
-        {children}
-      </div>
-    </div>
-  </div>
+    )
+    : createPortal(
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+           style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-scale-in flex flex-col"
+             style={{maxHeight:'85vh'}}>
+          <div className="flex justify-between items-center px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
+            <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+            <button onClick={onClose}
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="px-6 py-5 overflow-y-auto flex-1" style={{scrollbarWidth:'thin'}}>
+            {children}
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
 );
 
 function formatTransferSource(transfer) {

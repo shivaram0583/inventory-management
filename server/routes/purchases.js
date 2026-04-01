@@ -2,12 +2,109 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
-const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = require('../database/db');
+const {
+  getRow,
+  runQuery,
+  getAll,
+  nowIST,
+  combineISTDateWithCurrentTime
+} = require('../database/db');
 const crypto = require('crypto');
 const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
 
 const router = express.Router();
+
+const PURCHASE_STATUS = {
+  ORDERED: 'ordered',
+  DELIVERED: 'delivered'
+};
+
+const purchaseSelect = `
+  SELECT
+    pur.*,
+    COALESCE(pur.purchase_status, 'delivered') AS purchase_status,
+    COALESCE(pur.advance_amount, 0) AS advance_amount,
+    MAX(COALESCE(pur.total_amount, 0) - COALESCE(pur.advance_amount, 0), 0) AS balance_due,
+    p.product_name,
+    p.variety,
+    p.unit,
+    p.category,
+    u.username AS added_by_name
+  FROM purchases pur
+  JOIN products p ON pur.product_id = p.id
+  LEFT JOIN users u ON pur.added_by = u.id
+`;
+
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizePurchaseStatus = (value) => (
+  String(value).toLowerCase() === PURCHASE_STATUS.ORDERED
+    ? PURCHASE_STATUS.ORDERED
+    : PURCHASE_STATUS.DELIVERED
+);
+
+const createHttpError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
+
+async function fetchPurchaseById(id) {
+  return getRow(`${purchaseSelect} WHERE pur.id = ?`, [id]);
+}
+
+async function createAdvancePayment({
+  supplierName,
+  amount,
+  bankAccountId,
+  purchaseId,
+  paymentDate,
+  userId,
+  eventTimestamp
+}) {
+  if (!supplierName) {
+    throw createHttpError(400, 'Supplier name is required when recording an advance payment');
+  }
+
+  if (!bankAccountId) {
+    throw createHttpError(400, 'Select a bank account for the advance payment');
+  }
+
+  const account = await getRow('SELECT * FROM bank_accounts WHERE id = ? AND is_active = 1', [bankAccountId]);
+  if (!account) {
+    throw createHttpError(404, 'Bank account not found');
+  }
+
+  if (toNumber(account.balance) < amount) {
+    throw createHttpError(400, 'Insufficient bank balance for the advance payment');
+  }
+
+  await runQuery(
+    'UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+    [amount, eventTimestamp, bankAccountId]
+  );
+
+  const description = `Advance payment for purchase ${purchaseId}`;
+  const result = await runQuery(
+    `INSERT INTO supplier_payments (
+       supplier_name,
+       amount,
+       payment_mode,
+       bank_account_id,
+       description,
+       payment_date,
+       created_by,
+       created_at
+     ) VALUES (?, ?, 'bank', ?, ?, ?, ?, ?)`,
+    [supplierName, amount, bankAccountId, description, paymentDate, userId, eventTimestamp]
+  );
+
+  return result.id;
+}
 
 // GET all categories
 router.get('/categories', authenticateToken, async (req, res) => {
@@ -68,15 +165,10 @@ router.delete('/categories/:id', [
 // GET all purchases with product info
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { start_date, end_date, product_id } = req.query;
-    let query = `
-      SELECT pur.*, p.product_name, p.variety, p.unit, p.category, u.username as added_by_name
-      FROM purchases pur
-      JOIN products p ON pur.product_id = p.id
-      LEFT JOIN users u ON pur.added_by = u.id
-      WHERE 1=1
-    `;
+    const { start_date, end_date, product_id, status } = req.query;
+    let query = `${purchaseSelect} WHERE 1=1`;
     const params = [];
+
     if (start_date) {
       query += ' AND DATE(pur.purchase_date) >= ?';
       params.push(start_date);
@@ -89,6 +181,11 @@ router.get('/', authenticateToken, async (req, res) => {
       query += ' AND pur.product_id = ?';
       params.push(product_id);
     }
+    if (status && ['ordered', 'delivered'].includes(String(status).toLowerCase())) {
+      query += ' AND COALESCE(pur.purchase_status, ?) = ?';
+      params.push(PURCHASE_STATUS.DELIVERED, normalizePurchaseStatus(status));
+    }
+
     query += ' ORDER BY pur.purchase_date DESC';
     const purchases = await getAll(query, params);
     res.json(purchases);
@@ -98,14 +195,17 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// POST record a new purchase
+// POST record a new purchase or pending order
 router.post('/', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   requireDailySetupForOperatorWrites,
   body('product_id').isInt({ min: 1 }).withMessage('Valid product ID is required'),
   body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
-  body('price_per_unit').isFloat({ min: 0 }).withMessage('Price must be non-negative')
+  body('price_per_unit').isFloat({ min: 0 }).withMessage('Price must be non-negative'),
+  body('purchase_status').optional().isIn(['ordered', 'delivered']).withMessage('Invalid purchase status'),
+  body('advance_amount').optional().isFloat({ min: 0 }).withMessage('Advance amount must be non-negative'),
+  body('bank_account_id').optional({ nullable: true }).isInt({ min: 1 }).withMessage('Invalid bank account')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -113,12 +213,40 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { product_id, quantity, price_per_unit, supplier, purchase_date } = req.body;
+    const {
+      product_id,
+      quantity,
+      price_per_unit,
+      supplier,
+      purchase_date,
+      purchase_status,
+      advance_amount,
+      bank_account_id
+    } = req.body;
 
     const product = await getRow('SELECT * FROM products WHERE id = ?', [product_id]);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    const totalAmount = quantity * price_per_unit;
+    const quantityValue = toNumber(quantity);
+    const pricePerUnitValue = toNumber(price_per_unit);
+    const totalAmount = quantityValue * pricePerUnitValue;
+    const purchaseStatus = normalizePurchaseStatus(purchase_status);
+    const advanceAmount = toNumber(advance_amount);
+    const supplierName = supplier ? String(supplier).trim() : '';
+    const bankAccountId = bank_account_id ? Number(bank_account_id) : null;
+
+    if (advanceAmount > totalAmount) {
+      return res.status(400).json({ message: 'Advance amount cannot exceed the total purchase amount' });
+    }
+
+    if (advanceAmount > 0 && !supplierName) {
+      return res.status(400).json({ message: 'Supplier is required when paying an advance amount' });
+    }
+
+    if (advanceAmount > 0 && !bankAccountId) {
+      return res.status(400).json({ message: 'Select a bank account for the advance payment' });
+    }
+
     const purchaseId = 'PUR' + moment().utcOffset('+05:30').format('YYYYMMDDHHmmss') +
       crypto.randomBytes(2).toString('hex').toUpperCase();
 
@@ -126,51 +254,104 @@ router.post('/', [
     const storedDate = purchase_date && String(purchase_date).length === 10
       ? combineISTDateWithCurrentTime(purchase_date, eventTimestamp)
       : eventTimestamp;
+    const deliveryDate = purchaseStatus === PURCHASE_STATUS.DELIVERED ? storedDate : null;
 
-    // Insert purchase record
-    const result = await runQuery(
-      `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, purchase_date, added_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [purchaseId, product_id, quantity, price_per_unit, totalAmount,
-        supplier || null,
-        storedDate,
-        req.user.id]
-    );
+    await runQuery('BEGIN TRANSACTION');
 
-    // Update product stock and purchase price
-    await runQuery(
-      `UPDATE products SET
-         quantity_available = quantity_available + ?,
-         purchase_price = ?,
-         supplier = COALESCE(?, supplier),
-         updated_at = ?
-       WHERE id = ?`,
-      [quantity, price_per_unit, supplier || null, eventTimestamp, product_id]
-    );
+    let purchaseRowId;
+    try {
+      const purchaseResult = await runQuery(
+        `INSERT INTO purchases (
+           purchase_id,
+           product_id,
+           quantity,
+           price_per_unit,
+           total_amount,
+           supplier,
+           purchase_date,
+           delivery_date,
+           purchase_status,
+           advance_amount,
+           added_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          purchaseId,
+          product_id,
+          quantityValue,
+          pricePerUnitValue,
+          totalAmount,
+          supplierName || null,
+          storedDate,
+          deliveryDate,
+          purchaseStatus,
+          advanceAmount,
+          req.user.id
+        ]
+      );
+      purchaseRowId = purchaseResult.id;
 
-    const purchase = await getRow(
-      `SELECT pur.*, p.product_name, p.variety, p.unit, p.category, u.username as added_by_name
-       FROM purchases pur
-       JOIN products p ON pur.product_id = p.id
-       LEFT JOIN users u ON pur.added_by = u.id
-       WHERE pur.id = ?`,
-      [result.id]
-    );
+      if (advanceAmount > 0) {
+        const advancePaymentId = await createAdvancePayment({
+          supplierName,
+          amount: advanceAmount,
+          bankAccountId,
+          purchaseId,
+          paymentDate: String(storedDate).slice(0, 10),
+          userId: req.user.id,
+          eventTimestamp
+        });
+
+        await runQuery(
+          'UPDATE purchases SET advance_payment_id = ? WHERE id = ?',
+          [advancePaymentId, purchaseRowId]
+        );
+      }
+
+      if (purchaseStatus === PURCHASE_STATUS.DELIVERED) {
+        await runQuery(
+          `UPDATE products SET
+             quantity_available = quantity_available + ?,
+             purchase_price = ?,
+             supplier = COALESCE(?, supplier),
+             updated_at = ?
+           WHERE id = ?`,
+          [quantityValue, pricePerUnitValue, supplierName || null, eventTimestamp, product_id]
+        );
+      }
+
+      await runQuery('COMMIT');
+    } catch (transactionError) {
+      try {
+        await runQuery('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Rollback record purchase error:', rollbackError);
+      }
+      throw transactionError;
+    }
+
+    const purchase = await fetchPurchaseById(purchaseRowId);
 
     addReviewNotification({
       actorId: req.user.id,
       actorName: req.user.username,
       actorRole: req.user.role,
       type: 'purchase',
-      title: 'Recorded a purchase',
-      description: `${quantity} ${purchase.unit} of ${purchase.product_name} was purchased${supplier ? ` from ${supplier}` : ''}.`,
+      title: purchaseStatus === PURCHASE_STATUS.ORDERED ? 'Created a purchase order' : 'Recorded a purchase',
+      description: purchaseStatus === PURCHASE_STATUS.ORDERED
+        ? `${quantityValue} ${purchase.unit} of ${purchase.product_name} was ordered${supplierName ? ` from ${supplierName}` : ''}.`
+        : `${quantityValue} ${purchase.unit} of ${purchase.product_name} was received${supplierName ? ` from ${supplierName}` : ''}.`,
       createdAt: eventTimestamp
     });
 
-    res.status(201).json({ ...purchase, message: 'Purchase recorded successfully' });
+    res.status(201).json({
+      ...purchase,
+      message: purchaseStatus === PURCHASE_STATUS.ORDERED
+        ? 'Purchase order recorded. Inventory will update after delivery.'
+        : 'Purchase recorded successfully'
+    });
   } catch (error) {
     console.error('Record purchase error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(error.status || 500).json({ message: error.message || 'Server error' });
   }
 });
 
@@ -192,43 +373,89 @@ router.put('/:id', [
     if (!purchase) return res.status(404).json({ message: 'Purchase not found' });
 
     const { quantity, price_per_unit, supplier, purchase_date } = req.body;
-    const totalAmount = quantity * price_per_unit;
-    const qtyDiff = quantity - purchase.quantity;
+    const quantityValue = toNumber(quantity);
+    const pricePerUnitValue = toNumber(price_per_unit);
+    const totalAmount = quantityValue * pricePerUnitValue;
+    const supplierName = supplier ? String(supplier).trim() : '';
+    const purchaseStatus = normalizePurchaseStatus(purchase.purchase_status);
+    const existingAdvance = toNumber(purchase.advance_amount);
+
+    if (existingAdvance > totalAmount) {
+      return res.status(400).json({ message: 'Total amount cannot be less than the recorded advance payment' });
+    }
+
+    if (existingAdvance > 0 && !supplierName) {
+      return res.status(400).json({ message: 'Supplier is required because this purchase has an advance payment' });
+    }
 
     const eventTimestamp = nowIST();
     const storedDate = purchase_date && String(purchase_date).length === 10
       ? combineISTDateWithCurrentTime(purchase_date, eventTimestamp)
       : purchase.purchase_date;
+    const qtyDiff = quantityValue - toNumber(purchase.quantity);
 
-    // Adjust product stock by the quantity difference
-    await runQuery(
-      `UPDATE products SET
-         quantity_available = quantity_available + ?,
-         purchase_price = ?,
-         updated_at = ?
-       WHERE id = ?`,
-      [qtyDiff, price_per_unit, eventTimestamp, purchase.product_id]
-    );
+    let nextDeliveryDate = purchase.delivery_date;
+    if (
+      purchaseStatus === PURCHASE_STATUS.DELIVERED &&
+      (!purchase.delivery_date || purchase.delivery_date === purchase.purchase_date)
+    ) {
+      nextDeliveryDate = storedDate;
+    }
 
-    await runQuery(
-      `UPDATE purchases SET
-         quantity = ?, price_per_unit = ?, total_amount = ?,
-         supplier = ?, purchase_date = ?
-       WHERE id = ?`,
-      [quantity, price_per_unit, totalAmount,
-        supplier || null,
-        storedDate,
-        req.params.id]
-    );
+    await runQuery('BEGIN TRANSACTION');
+    try {
+      if (purchaseStatus === PURCHASE_STATUS.DELIVERED) {
+        await runQuery(
+          `UPDATE products SET
+             quantity_available = quantity_available + ?,
+             purchase_price = ?,
+             supplier = COALESCE(?, supplier),
+             updated_at = ?
+           WHERE id = ?`,
+          [qtyDiff, pricePerUnitValue, supplierName || null, eventTimestamp, purchase.product_id]
+        );
+      }
 
-    const updated = await getRow(
-      `SELECT pur.*, p.product_name, p.variety, p.unit, p.category, u.username as added_by_name
-       FROM purchases pur
-       JOIN products p ON pur.product_id = p.id
-       LEFT JOIN users u ON pur.added_by = u.id
-       WHERE pur.id = ?`,
-      [req.params.id]
-    );
+      if (purchase.advance_payment_id && supplierName) {
+        await runQuery(
+          `UPDATE supplier_payments
+           SET supplier_name = ?, description = ?
+           WHERE id = ?`,
+          [supplierName, `Advance payment for purchase ${purchase.purchase_id}`, purchase.advance_payment_id]
+        );
+      }
+
+      await runQuery(
+        `UPDATE purchases SET
+           quantity = ?,
+           price_per_unit = ?,
+           total_amount = ?,
+           supplier = ?,
+           purchase_date = ?,
+           delivery_date = ?
+         WHERE id = ?`,
+        [
+          quantityValue,
+          pricePerUnitValue,
+          totalAmount,
+          supplierName || null,
+          storedDate,
+          nextDeliveryDate || null,
+          req.params.id
+        ]
+      );
+
+      await runQuery('COMMIT');
+    } catch (transactionError) {
+      try {
+        await runQuery('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Rollback edit purchase error:', rollbackError);
+      }
+      throw transactionError;
+    }
+
+    const updated = await fetchPurchaseById(req.params.id);
 
     addReviewNotification({
       actorId: req.user.id,
@@ -236,14 +463,94 @@ router.put('/:id', [
       actorRole: req.user.role,
       type: 'purchase',
       title: 'Updated a purchase',
-      description: `Purchase for ${updated.product_name} was updated to ${quantity} ${updated.unit}.`,
+      description: `Purchase for ${updated.product_name} was updated to ${quantityValue} ${updated.unit}.`,
       createdAt: eventTimestamp
     });
 
     res.json({ ...updated, message: 'Purchase updated successfully' });
   } catch (error) {
     console.error('Edit purchase error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(error.status || 500).json({ message: error.message || 'Server error' });
+  }
+});
+
+// POST mark a pending purchase as delivered
+router.post('/:id/mark-delivered', [
+  authenticateToken,
+  authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
+  body('delivery_date').optional().trim()
+], async (req, res) => {
+  try {
+    const purchase = await getRow('SELECT * FROM purchases WHERE id = ?', [req.params.id]);
+    if (!purchase) {
+      return res.status(404).json({ message: 'Purchase not found' });
+    }
+
+    if (normalizePurchaseStatus(purchase.purchase_status) === PURCHASE_STATUS.DELIVERED) {
+      return res.status(400).json({ message: 'This purchase is already marked as delivered' });
+    }
+
+    const eventTimestamp = nowIST();
+    const suppliedDeliveryDate = req.body.delivery_date;
+    const deliveryDate = suppliedDeliveryDate && String(suppliedDeliveryDate).length === 10
+      ? combineISTDateWithCurrentTime(suppliedDeliveryDate, eventTimestamp)
+      : eventTimestamp;
+
+    await runQuery('BEGIN TRANSACTION');
+    try {
+      await runQuery(
+        `UPDATE products SET
+           quantity_available = quantity_available + ?,
+           purchase_price = ?,
+           supplier = COALESCE(?, supplier),
+           updated_at = ?
+         WHERE id = ?`,
+        [
+          toNumber(purchase.quantity),
+          toNumber(purchase.price_per_unit),
+          purchase.supplier || null,
+          eventTimestamp,
+          purchase.product_id
+        ]
+      );
+
+      await runQuery(
+        `UPDATE purchases
+         SET purchase_status = ?, delivery_date = ?
+         WHERE id = ?`,
+        [PURCHASE_STATUS.DELIVERED, deliveryDate, req.params.id]
+      );
+
+      await runQuery('COMMIT');
+    } catch (transactionError) {
+      try {
+        await runQuery('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Rollback mark delivered error:', rollbackError);
+      }
+      throw transactionError;
+    }
+
+    const updated = await fetchPurchaseById(req.params.id);
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'purchase',
+      title: 'Marked a purchase as delivered',
+      description: `${updated.quantity} ${updated.unit} of ${updated.product_name} was received into inventory.`,
+      createdAt: eventTimestamp
+    });
+
+    res.json({
+      ...updated,
+      message: 'Purchase marked as delivered and inventory updated successfully'
+    });
+  } catch (error) {
+    console.error('Mark purchase delivered error:', error);
+    res.status(error.status || 500).json({ message: error.message || 'Server error' });
   }
 });
 
@@ -270,7 +577,7 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
   }
 });
 
-// GET supplier detail — products supplied + purchase history
+// GET supplier detail - products supplied + purchase history
 router.get('/suppliers/:name', authenticateToken, async (req, res) => {
   try {
     const supplierName = decodeURIComponent(req.params.name);
@@ -284,7 +591,6 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
       params.push(start_date, end_date);
     }
 
-    // Products supplied by this supplier
     const products = await getAll(`
       SELECT
         p.product_id AS product_code,
@@ -303,7 +609,6 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
       ORDER BY total_spent DESC
     `, params);
 
-    // Full purchase history for this supplier
     const historyParams = [supplierName];
     let historyDateFilter = '';
     if (start_date && end_date) {
@@ -324,6 +629,9 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
         pu.price_per_unit,
         pu.total_amount,
         pu.purchase_date,
+        pu.delivery_date,
+        COALESCE(pu.purchase_status, 'delivered') AS purchase_status,
+        COALESCE(pu.advance_amount, 0) AS advance_amount,
         u.username AS added_by
       FROM purchases pu
       JOIN products p ON pu.product_id = p.id
@@ -332,7 +640,6 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
       ORDER BY pu.purchase_date DESC
     `, historyParams);
 
-    // Summary
     const summaryParams = [supplierName];
     let summaryDateFilter = '';
     if (start_date && end_date) {

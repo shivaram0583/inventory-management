@@ -230,6 +230,7 @@ const Reports = () => {
                   <th>Address</th>
                   <SortableHeader label="Item" sortKey="product_name" sortConfig={custSalesSort} onSort={sortCustSales} />
                   <SortableHeader label="Quantity" sortKey="quantity" sortConfig={custSalesSort} onSort={sortCustSales} />
+                  <SortableHeader label="Amount" sortKey="amount" sortConfig={custSalesSort} onSort={sortCustSales} />
                   <SortableHeader label="Payment" sortKey="payment_mode" sortConfig={custSalesSort} onSort={sortCustSales} />
                   <SortableHeader label="Time" sortKey="sale_date" sortConfig={custSalesSort} onSort={sortCustSales} />
                 </tr>
@@ -242,6 +243,7 @@ const Reports = () => {
                     <td>{cs.customer_address || '-'}</td>
                     <td>{cs.product_name}</td>
                     <td>{cs.quantity}</td>
+                    <td className="font-medium">₹{formatCurrency(cs.amount)}</td>
                     <td>
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${
                         cs.payment_mode === 'upi' ? 'bg-purple-100 text-purple-700' :
@@ -780,6 +782,7 @@ const Reports = () => {
                   <th>Address</th>
                   <SortableHeader label="Item" sortKey="product_name" sortConfig={archiveSort} onSort={sortArchive} />
                   <SortableHeader label="Quantity" sortKey="quantity" sortConfig={archiveSort} onSort={sortArchive} />
+                  <SortableHeader label="Amount" sortKey="amount" sortConfig={archiveSort} onSort={sortArchive} />
                   <SortableHeader label="Payment" sortKey="payment_mode" sortConfig={archiveSort} onSort={sortArchive} />
                   <SortableHeader label="Date" sortKey="sale_date" sortConfig={archiveSort} onSort={sortArchive} />
                   {isAdmin && <th>Action</th>}
@@ -794,6 +797,7 @@ const Reports = () => {
                     <td>{r.customer_address || '-'}</td>
                     <td>{r.product_name}</td>
                     <td>{r.quantity}</td>
+                    <td className="font-medium">₹{formatCurrency(r.amount)}</td>
                     <td>
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${
                         r.payment_mode === 'upi' ? 'bg-purple-100 text-purple-700' :

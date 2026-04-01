@@ -146,8 +146,19 @@ router.post('/', [
     await Promise.all(
       saleItems.map((saleItem) =>
         runQuery(
-          `INSERT INTO customer_sales (sale_id, receipt_id, customer_name, customer_mobile, customer_address, product_name, quantity, payment_mode, sale_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO customer_sales (
+             sale_id,
+             receipt_id,
+             customer_name,
+             customer_mobile,
+             customer_address,
+             product_name,
+             quantity,
+             amount,
+             payment_mode,
+             sale_date
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
           [
             saleId,
@@ -157,6 +168,7 @@ router.post('/', [
             customer_address || null,
             saleItem.product.product_name,
             saleItem.quantity,
+            saleItem.itemTotal,
             payment_mode || 'cash',
             saleTimestamp
           ]
