@@ -365,4 +365,109 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
   }
 });
 
+// DELETE supplier details (admin only)
+router.delete('/suppliers/:name', [
+  authenticateToken,
+  authorizeRole(['admin'])
+], async (req, res) => {
+  try {
+    const supplierName = decodeURIComponent(req.params.name || '').trim();
+    if (!supplierName) {
+      return res.status(400).json({ message: 'Supplier name is required' });
+    }
+
+    const [purchaseSummary, paymentSummary, productSummary] = await Promise.all([
+      getRow(
+        `SELECT COUNT(*) AS total_purchases, COALESCE(SUM(total_amount), 0) AS total_amount
+         FROM purchases
+         WHERE supplier = ?`,
+        [supplierName]
+      ),
+      getRow(
+        `SELECT COUNT(*) AS total_payments, COALESCE(SUM(amount), 0) AS total_amount
+         FROM supplier_payments
+         WHERE supplier_name = ?`,
+        [supplierName]
+      ),
+      getRow(
+        `SELECT COUNT(*) AS total_products
+         FROM products
+         WHERE supplier = ?`,
+        [supplierName]
+      )
+    ]);
+
+    const totalPurchases = Number(purchaseSummary?.total_purchases || 0);
+    const totalPayments = Number(paymentSummary?.total_payments || 0);
+    const totalProducts = Number(productSummary?.total_products || 0);
+
+    if (!totalPurchases && !totalPayments && !totalProducts) {
+      return res.status(404).json({ message: 'Supplier not found' });
+    }
+
+    const eventTimestamp = nowIST();
+
+    await runQuery('BEGIN TRANSACTION');
+    try {
+      const bankRestorations = await getAll(
+        `SELECT bank_account_id, COALESCE(SUM(amount), 0) AS total_amount
+         FROM supplier_payments
+         WHERE supplier_name = ?
+           AND payment_mode = 'bank'
+           AND bank_account_id IS NOT NULL
+         GROUP BY bank_account_id`,
+        [supplierName]
+      );
+
+      let restoredBankAmount = 0;
+      for (const bankRow of bankRestorations) {
+        const bankAmount = Number(bankRow.total_amount || 0);
+        restoredBankAmount += bankAmount;
+
+        await runQuery(
+          'UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+          [bankAmount, eventTimestamp, bankRow.bank_account_id]
+        );
+      }
+
+      const clearedPurchases = await runQuery(
+        'UPDATE purchases SET supplier = NULL WHERE supplier = ?',
+        [supplierName]
+      );
+
+      const clearedProducts = await runQuery(
+        'UPDATE products SET supplier = NULL, updated_at = ? WHERE supplier = ?',
+        [eventTimestamp, supplierName]
+      );
+
+      const deletedPayments = await runQuery(
+        'DELETE FROM supplier_payments WHERE supplier_name = ?',
+        [supplierName]
+      );
+
+      await runQuery('COMMIT');
+
+      res.json({
+        message: 'Supplier deleted successfully',
+        removed: {
+          purchases: clearedPurchases.changes || 0,
+          products: clearedProducts.changes || 0,
+          supplier_payments: deletedPayments.changes || 0,
+          restored_bank_amount: restoredBankAmount
+        }
+      });
+    } catch (transactionError) {
+      try {
+        await runQuery('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Rollback delete supplier error:', rollbackError);
+      }
+      throw transactionError;
+    }
+  } catch (error) {
+    console.error('Delete supplier error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;
