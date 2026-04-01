@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
-const { getRow, runQuery, getAll, nowIST } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = require('../database/db');
 const crypto = require('crypto');
 const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
@@ -78,11 +78,11 @@ router.get('/', authenticateToken, async (req, res) => {
     `;
     const params = [];
     if (start_date) {
-      query += " AND DATE(datetime(pur.purchase_date, '+5 hours', '+30 minutes')) >= ?";
+      query += ' AND DATE(pur.purchase_date) >= ?';
       params.push(start_date);
     }
     if (end_date) {
-      query += " AND DATE(datetime(pur.purchase_date, '+5 hours', '+30 minutes')) <= ?";
+      query += ' AND DATE(pur.purchase_date) <= ?';
       params.push(end_date);
     }
     if (product_id) {
@@ -122,14 +122,10 @@ router.post('/', [
     const purchaseId = 'PUR' + moment().utcOffset('+05:30').format('YYYYMMDDHHmmss') +
       crypto.randomBytes(2).toString('hex').toUpperCase();
 
-    // Store IST timestamp: use selected date with current IST time
-    let storedDate;
-    if (purchase_date && String(purchase_date).length === 10) {
-      const currentTime = moment().utcOffset('+05:30').format('HH:mm:ss');
-      storedDate = purchase_date + ' ' + currentTime;
-    } else {
-      storedDate = nowIST();
-    }
+    const eventTimestamp = nowIST();
+    const storedDate = purchase_date && String(purchase_date).length === 10
+      ? combineISTDateWithCurrentTime(purchase_date, eventTimestamp)
+      : eventTimestamp;
 
     // Insert purchase record
     const result = await runQuery(
@@ -149,7 +145,7 @@ router.post('/', [
          supplier = COALESCE(?, supplier),
          updated_at = ?
        WHERE id = ?`,
-      [quantity, price_per_unit, supplier || null, nowIST(), product_id]
+      [quantity, price_per_unit, supplier || null, eventTimestamp, product_id]
     );
 
     const purchase = await getRow(
@@ -168,7 +164,7 @@ router.post('/', [
       type: 'purchase',
       title: 'Recorded a purchase',
       description: `${quantity} ${purchase.unit} of ${purchase.product_name} was purchased${supplier ? ` from ${supplier}` : ''}.`,
-      createdAt: storedDate
+      createdAt: eventTimestamp
     });
 
     res.status(201).json({ ...purchase, message: 'Purchase recorded successfully' });
@@ -199,14 +195,10 @@ router.put('/:id', [
     const totalAmount = quantity * price_per_unit;
     const qtyDiff = quantity - purchase.quantity;
 
-    // Store IST timestamp: use selected date with current IST time
-    let storedDate;
-    if (purchase_date && String(purchase_date).length === 10) {
-      const currentTime = moment().utcOffset('+05:30').format('HH:mm:ss');
-      storedDate = purchase_date + ' ' + currentTime;
-    } else {
-      storedDate = purchase.purchase_date;
-    }
+    const eventTimestamp = nowIST();
+    const storedDate = purchase_date && String(purchase_date).length === 10
+      ? combineISTDateWithCurrentTime(purchase_date, eventTimestamp)
+      : purchase.purchase_date;
 
     // Adjust product stock by the quantity difference
     await runQuery(
@@ -215,7 +207,7 @@ router.put('/:id', [
          purchase_price = ?,
          updated_at = ?
        WHERE id = ?`,
-      [qtyDiff, price_per_unit, nowIST(), purchase.product_id]
+      [qtyDiff, price_per_unit, eventTimestamp, purchase.product_id]
     );
 
     await runQuery(
@@ -245,7 +237,7 @@ router.put('/:id', [
       type: 'purchase',
       title: 'Updated a purchase',
       description: `Purchase for ${updated.product_name} was updated to ${quantity} ${updated.unit}.`,
-      createdAt: storedDate
+      createdAt: eventTimestamp
     });
 
     res.json({ ...updated, message: 'Purchase updated successfully' });
@@ -288,7 +280,7 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
     const params = [supplierName];
 
     if (start_date && end_date) {
-      dateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      dateFilter = 'AND DATE(pu.purchase_date) BETWEEN ? AND ?';
       params.push(start_date, end_date);
     }
 
@@ -315,7 +307,7 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
     const historyParams = [supplierName];
     let historyDateFilter = '';
     if (start_date && end_date) {
-      historyDateFilter = "AND DATE(datetime(pu.purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      historyDateFilter = 'AND DATE(pu.purchase_date) BETWEEN ? AND ?';
       historyParams.push(start_date, end_date);
     }
 
@@ -344,7 +336,7 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
     const summaryParams = [supplierName];
     let summaryDateFilter = '';
     if (start_date && end_date) {
-      summaryDateFilter = "AND DATE(datetime(purchase_date, '+5 hours', '+30 minutes')) BETWEEN ? AND ?";
+      summaryDateFilter = 'AND DATE(purchase_date) BETWEEN ? AND ?';
       summaryParams.push(start_date, end_date);
     }
 

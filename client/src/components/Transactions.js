@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
 import CustomSelect from './shared/CustomSelect';
-import { getISTDateString } from '../utils/dateUtils';
+import { getISTDateString, fmtDateTime } from '../utils/dateUtils';
 import {
   ArrowLeftRight,
   Plus,
@@ -308,13 +308,14 @@ const Transactions = () => {
       )}
 
       {activeTab === 'bank' && (
-        <BankTab
+      <BankTab
           bankAccounts={bankAccounts}
           bankTransfers={bankTransfers}
           isAdmin={isAdmin}
           selectedBankAccountId={dailySetupStatus?.selectedBankAccountId || null}
           onAddAccount={() => { setBankAccForm({ account_name: '', bank_name: '', account_number: '', balance: '' }); setShowBankAccModal(true); }}
           onAddTransfer={() => { setBankTransferForm({ bank_account_id: bankAccounts[0]?.id || '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today }); setShowBankTransferModal(true); }}
+          onDeleteAccount={(id, label) => setDeleteModal({ open: true, type: 'bank-accounts', id, label })}
           onDeleteTransfer={(id) => setDeleteModal({ open: true, type: 'bank-transfers', id, label: 'this transfer' })}
           onSetDefaultBank={handleSetDefaultBank}
         />
@@ -677,7 +678,7 @@ const ExpendituresTab = ({ expenditures, isAdmin, onAdd, onDelete }) => (
               <tr><td colSpan={isAdmin ? 6 : 5} className="text-center text-gray-400 py-8">No expenditures found</td></tr>
             ) : expenditures.map(exp => (
               <tr key={exp.id}>
-                <td className="font-medium">{formatDisplayDate(exp.expense_date)}</td>
+                <td className="font-medium">{formatAuditTimestamp(exp.created_at, exp.expense_date)}</td>
                 <td>{exp.description}</td>
                 <td className="capitalize"><span className="px-2 py-0.5 rounded-full bg-gray-100 text-xs font-semibold text-gray-600">{exp.category}</span></td>
                 <td className="text-right font-bold text-red-600">₹{fmt(exp.amount)}</td>
@@ -710,6 +711,7 @@ const BankTab = ({
   selectedBankAccountId,
   onAddAccount,
   onAddTransfer,
+  onDeleteAccount,
   onDeleteTransfer,
   onSetDefaultBank
 }) => (
@@ -753,7 +755,7 @@ const BankTab = ({
                   {isDefault ? 'This is the default bank selected for today.' : 'Available to set as the default bank for today.'}
                 </p>
                 {isAdmin && (
-                  <div className="mt-4">
+                  <div className="mt-4 flex items-center gap-2">
                     {isDefault ? (
                       <span className="inline-flex items-center rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-700">
                         Default Bank Selected
@@ -767,6 +769,14 @@ const BankTab = ({
                         Set As Default
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteAccount?.(acc.id, `${acc.account_name} (${acc.bank_name})`)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Remove
+                    </button>
                   </div>
                 )}
               </div>
@@ -790,7 +800,7 @@ const BankTab = ({
           <table className="table">
             <thead>
               <tr>
-                <th>Date</th>
+                <th>Timestamp</th>
                 <th>Type</th>
                 <th>Credited To</th>
                 <th>Source</th>
@@ -804,7 +814,7 @@ const BankTab = ({
                 <tr><td colSpan={isAdmin ? 7 : 6} className="text-center text-gray-400 py-8">No transfers found</td></tr>
               ) : bankTransfers.map(bt => (
                 <tr key={bt.id}>
-                  <td className="font-medium">{formatDisplayDate(bt.transfer_date)}</td>
+                  <td className="font-medium">{formatAuditTimestamp(bt.created_at, bt.transfer_date)}</td>
                   <td>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${bt.transfer_type === 'deposit' ? 'bg-blue-100 text-blue-700' : 'bg-cyan-100 text-cyan-700'}`}>
                       {bt.transfer_type === 'deposit' ? '↑ Deposit' : '↓ Withdrawal'}
@@ -897,7 +907,7 @@ const SupplierTab = ({ supplierBalances, supplierPayments, bankAccounts, isAdmin
           <table className="table">
             <thead>
               <tr>
-                <th>Date</th>
+                <th>Timestamp</th>
                 <th>Supplier</th>
                 <th>Mode</th>
                 <th>Account</th>
@@ -911,7 +921,7 @@ const SupplierTab = ({ supplierBalances, supplierPayments, bankAccounts, isAdmin
                 <tr><td colSpan={isAdmin ? 7 : 6} className="text-center text-gray-400 py-8">No payments found</td></tr>
               ) : supplierPayments.map(sp => (
                 <tr key={sp.id}>
-                  <td className="font-medium">{formatDisplayDate(sp.payment_date)}</td>
+                  <td className="font-medium">{formatAuditTimestamp(sp.created_at, sp.payment_date)}</td>
                   <td className="font-semibold">{sp.supplier_name}</td>
                   <td>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
@@ -990,6 +1000,11 @@ function formatDisplayDate(dateStr) {
   if (!dateStr) return '-';
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatAuditTimestamp(timestamp, fallbackDate) {
+  if (timestamp) return fmtDateTime(timestamp);
+  return formatDisplayDate(fallbackDate);
 }
 
 export default Transactions;

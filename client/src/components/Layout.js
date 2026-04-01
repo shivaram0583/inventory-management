@@ -4,7 +4,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
 import DailySetupGate from './shared/DailySetupGate';
-import { fmtDate } from '../utils/dateUtils';
+import { fmtDateTime } from '../utils/dateUtils';
 import {
   LayoutDashboard,
   Package,
@@ -19,29 +19,19 @@ import {
   ArrowLeftRight,
   Bell,
   Trash2,
-  Clock3,
-  Building2,
-  Wallet,
-  CheckCircle2
+  Clock3
 } from 'lucide-react';
 
 const Layout = () => {
-  const { user, logout, dailySetupStatus, refreshDailySetupStatus } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [reviewNotifications, setReviewNotifications] = React.useState([]);
   const [showNotifications, setShowNotifications] = React.useState(false);
   const [loadingNotifications, setLoadingNotifications] = React.useState(false);
-  const [reviewingDailyBalance, setReviewingDailyBalance] = React.useState(false);
 
   const isAdmin = user?.role === 'admin';
-  const balanceReviewPending = Boolean(
-    isAdmin &&
-    dailySetupStatus?.bankSelectionCompleted &&
-    !dailySetupStatus?.balanceReviewCompleted
-  );
-  const notificationCount = reviewNotifications.length + (balanceReviewPending ? 1 : 0);
 
   const handleLogout = () => {
     logout();
@@ -78,20 +68,6 @@ const Layout = () => {
     return () => window.clearInterval(intervalId);
   }, [isAdmin, fetchReviewNotifications]);
 
-  React.useEffect(() => {
-    if (!balanceReviewPending || !dailySetupStatus?.businessDate) {
-      return;
-    }
-
-    const sessionKey = `daily-balance-review-opened-${dailySetupStatus.businessDate}`;
-    if (window.sessionStorage.getItem(sessionKey) === '1') {
-      return;
-    }
-
-    setShowNotifications(true);
-    window.sessionStorage.setItem(sessionKey, '1');
-  }, [balanceReviewPending, dailySetupStatus?.businessDate]);
-
   const handleOpenNotifications = async () => {
     setShowNotifications(true);
     await fetchReviewNotifications();
@@ -115,31 +91,10 @@ const Layout = () => {
     }
   };
 
-  const handleReviewDailyBalance = async () => {
-    try {
-      setReviewingDailyBalance(true);
-      await axios.post('/api/transactions/daily-setup/review-balance');
-      await Promise.all([
-        refreshDailySetupStatus?.(),
-        fetchReviewNotifications()
-      ]);
-    } catch (error) {
-      console.error('Failed to review daily balance:', error);
-    } finally {
-      setReviewingDailyBalance(false);
-    }
-  };
-
   const formatNotificationDate = (value) => {
     if (!value) return 'Unknown date';
-
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-
-    return parsed.toLocaleString('en-IN', {
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    });
+    const formatted = fmtDateTime(value);
+    return formatted === '-' ? value : formatted;
   };
 
   const navigation = [
@@ -214,7 +169,7 @@ const Layout = () => {
             navigation={navigation}
             user={user}
             onLogout={handleLogout}
-            notificationCount={notificationCount}
+            notificationCount={reviewNotifications.length}
             onOpenNotifications={handleOpenNotifications}
           />
         </div>
@@ -229,7 +184,7 @@ const Layout = () => {
             navigation={navigation}
             user={user}
             onLogout={handleLogout}
-            notificationCount={notificationCount}
+            notificationCount={reviewNotifications.length}
             onOpenNotifications={handleOpenNotifications}
           />
         </div>
@@ -266,7 +221,7 @@ const Layout = () => {
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-1">
             <p className="text-xs text-gray-400">
-              Â© 2026 <span className="font-medium text-gray-500">Sri Venkata Lakshmi Vigneswara Traders</span>. All rights reserved.
+              (c) 2026 <span className="font-medium text-gray-500">Sri Venkata Lakshmi Vigneswara Traders</span>. All rights reserved.
             </p>
             <p className="text-xs text-gray-400">
               Developed by{' '}
@@ -278,7 +233,7 @@ const Layout = () => {
               >
                 dvvshivaram
               </a>
-              {' '}Â· dvvshivaram@gmail.com
+              {' '}| dvvshivaram@gmail.com
             </p>
           </div>
         </footer>
@@ -287,76 +242,19 @@ const Layout = () => {
       <SharedModal
         isOpen={showNotifications}
         onClose={() => setShowNotifications(false)}
-        title="Notifications"
+        title="Operator Review Notifications"
         type="info"
         confirmText={reviewNotifications.length ? 'Clear All' : 'Close'}
         onConfirm={reviewNotifications.length ? handleClearNotifications : undefined}
       >
         {loadingNotifications ? (
           <div className="py-6 text-center text-sm text-gray-400">Loading notifications...</div>
-        ) : reviewNotifications.length === 0 && !balanceReviewPending ? (
+        ) : reviewNotifications.length === 0 ? (
           <div className="py-6 text-center text-sm text-gray-400">
-            No notifications are waiting for review.
+            No operator updates are waiting for review.
           </div>
         ) : (
           <div className="space-y-3">
-            {balanceReviewPending && (
-              <div className="rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-teal-50/70 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      <p className="text-sm font-semibold text-gray-900">Review today&apos;s opening and closing balance</p>
-                    </div>
-                    <p className="mt-1 text-sm text-gray-600">
-                      Please verify today&apos;s balances and click OK to acknowledge them.
-                    </p>
-                    <div className="mt-3 rounded-2xl border border-indigo-100 bg-white/80 px-4 py-3 text-sm text-indigo-700">
-                      Business Date: <span className="font-semibold">{fmtDate(dailySetupStatus?.businessDate)}</span>
-                    </div>
-                    {dailySetupStatus?.selectedBank && (
-                      <div className="mt-3 rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                          <Building2 className="h-4 w-4" />
-                          Selected Bank
-                        </div>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {dailySetupStatus.selectedBank.account_name} - {dailySetupStatus.selectedBank.bank_name}
-                        </p>
-                      </div>
-                    )}
-                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4">
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          <Wallet className="h-3.5 w-3.5" />
-                          Opening Balance
-                        </div>
-                        <p className="mt-2 text-2xl font-bold text-slate-900">
-                          Rs. {Number(dailySetupStatus?.openingBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-emerald-200 bg-white/80 px-4 py-4">
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-600">
-                          <Wallet className="h-3.5 w-3.5" />
-                          Closing Balance
-                        </div>
-                        <p className="mt-2 text-2xl font-bold text-emerald-800">
-                          Rs. {Number(dailySetupStatus?.closingBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleReviewDailyBalance}
-                    disabled={reviewingDailyBalance}
-                    className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-all disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {reviewingDailyBalance ? 'Saving...' : 'OK'}
-                  </button>
-                </div>
-              </div>
-            )}
             {reviewNotifications.map((notification) => (
               <div
                 key={notification.id}

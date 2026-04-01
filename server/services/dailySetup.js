@@ -14,7 +14,7 @@ async function getDailyBalanceSnapshot(date = getISTDateString()) {
   const priorSales = await getRow(`
     SELECT COALESCE(SUM(total_amount), 0) as total
     FROM sales
-    WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) < ?
+    WHERE DATE(sale_date) < ?
   `, [date]);
 
   const priorExp = await getRow(`
@@ -44,7 +44,7 @@ async function getDailyBalanceSnapshot(date = getISTDateString()) {
   const todaySales = await getRow(`
     SELECT COALESCE(SUM(total_amount), 0) as total
     FROM sales
-    WHERE DATE(datetime(sale_date, '+5 hours', '+30 minutes')) = ?
+    WHERE DATE(sale_date) = ?
   `, [date]);
 
   const todayExp = await getRow(`
@@ -178,7 +178,11 @@ async function getDailySetupStatus(date = getISTDateString()) {
   ]);
 
   const hasBankAccounts = bankAccounts.length > 0;
-  const bankSelectionCompleted = Boolean(setup?.selected_bank_account_id);
+  const selectedBankIsActive = Boolean(
+    setup?.selected_bank_account_id &&
+    bankAccounts.some((account) => Number(account.id) === Number(setup.selected_bank_account_id))
+  );
+  const bankSelectionCompleted = selectedBankIsActive;
   const balanceReviewCompleted = Boolean(setup?.balance_reviewed_at);
   const isReady = hasBankAccounts && bankSelectionCompleted;
 
@@ -197,8 +201,8 @@ async function getDailySetupStatus(date = getISTDateString()) {
     businessDate: date,
     bankAccounts,
     hasBankAccounts,
-    selectedBankAccountId: setup?.selected_bank_account_id || null,
-    selectedBank: setup?.selected_bank_account_id ? {
+    selectedBankAccountId: selectedBankIsActive ? setup.selected_bank_account_id : null,
+    selectedBank: selectedBankIsActive ? {
       id: setup.selected_bank_account_id,
       account_name: setup.selected_bank_account_name,
       bank_name: setup.selected_bank_name,

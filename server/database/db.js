@@ -485,6 +485,9 @@ function initializeDatabase() {
   // Create default admin user after tables are created
   setTimeout(() => {
     createDefaultUsers();
+    runTimestampMigrations().catch((error) => {
+      console.error('Error running timestamp migrations:', error.message);
+    });
   }, 1000);
 }
 
@@ -511,6 +514,105 @@ function createDefaultUsers() {
   });
 
   console.log('Database initialized successfully');
+}
+
+function runOneTimeMigration(name, statements) {
+  return new Promise((resolve) => {
+    db.serialize(() => {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS app_migrations (
+          name TEXT PRIMARY KEY,
+          executed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (tableErr) => {
+        if (tableErr) {
+          console.error(`Error creating app_migrations for ${name}:`, tableErr.message);
+          resolve(false);
+          return;
+        }
+
+        db.get('SELECT name FROM app_migrations WHERE name = ?', [name], (checkErr, row) => {
+          if (checkErr) {
+            console.error(`Error checking migration ${name}:`, checkErr.message);
+            resolve(false);
+            return;
+          }
+
+          if (row) {
+            resolve(false);
+            return;
+          }
+
+          const runStatement = (index) => {
+            if (index >= statements.length) {
+              db.run('INSERT INTO app_migrations (name) VALUES (?)', [name], (insertErr) => {
+                if (insertErr) {
+                  console.error(`Error recording migration ${name}:`, insertErr.message);
+                  resolve(false);
+                } else {
+                  console.log(`Applied migration: ${name}`);
+                  resolve(true);
+                }
+              });
+              return;
+            }
+
+            db.run(statements[index], (statementErr) => {
+              if (statementErr) {
+                console.error(`Error applying migration ${name}:`, statementErr.message);
+                resolve(false);
+                return;
+              }
+
+              runStatement(index + 1);
+            });
+          };
+
+          runStatement(0);
+        });
+      });
+    });
+  });
+}
+
+async function runTimestampMigrations() {
+  await runOneTimeMigration('purchase-date-time-backfill-v1', [
+    `
+      UPDATE purchases
+      SET purchase_date = purchase_date || ' ' || time(datetime(created_at, '+5 hours', '+30 minutes'))
+      WHERE purchase_date IS NOT NULL
+        AND length(trim(purchase_date)) = 10
+        AND created_at IS NOT NULL
+    `
+  ]);
+
+  await runOneTimeMigration('receipt-date-sync-from-sales-v1', [
+    `
+      UPDATE receipts
+      SET receipt_date = (
+        SELECT MIN(s.sale_date)
+        FROM sales s
+        WHERE s.sale_id = receipts.sale_id
+      )
+      WHERE EXISTS (
+        SELECT 1
+        FROM sales s
+        WHERE s.sale_id = receipts.sale_id
+      )
+    `
+  ]);
+
+  await runOneTimeMigration('expenditures-created-at-ist-v1', [
+    `UPDATE expenditures SET created_at = datetime(created_at, '+5 hours', '+30 minutes') WHERE created_at IS NOT NULL`
+  ]);
+
+  await runOneTimeMigration('bank-transfers-created-at-ist-v1', [
+    `UPDATE bank_transfers SET created_at = datetime(created_at, '+5 hours', '+30 minutes') WHERE created_at IS NOT NULL`
+  ]);
+
+  await runOneTimeMigration('supplier-payments-created-at-ist-v1', [
+    `UPDATE supplier_payments SET created_at = datetime(created_at, '+5 hours', '+30 minutes') WHERE created_at IS NOT NULL`
+  ]);
 }
 
 // Helper function to run queries with promises
@@ -557,10 +659,19 @@ function nowIST() {
   return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace('T', ' ');
 }
 
+function combineISTDateWithCurrentTime(dateString, referenceTimestamp = nowIST()) {
+  if (!dateString) return referenceTimestamp;
+
+  const normalizedDate = String(dateString).trim().slice(0, 10);
+  const timePart = String(referenceTimestamp).trim().split(' ')[1] || '00:00:00';
+  return `${normalizedDate} ${timePart}`;
+}
+
 module.exports = {
   db,
   runQuery,
   getRow,
   getAll,
-  nowIST
+  nowIST,
+  combineISTDateWithCurrentTime
 };

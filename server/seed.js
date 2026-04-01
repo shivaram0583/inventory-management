@@ -38,6 +38,10 @@ function all(sql, params = []) {
   });
 }
 
+function formatIST(date) {
+  return date.toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace('T', ' ');
+}
+
 async function seed() {
   console.log('Clearing all non-login data...');
 
@@ -105,13 +109,14 @@ async function seed() {
     await run(
       `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [p.pid, p.cat, p.name, p.variety, p.qty, p.unit, p.bp, p.sp, p.sup]
+      [p.pid, p.cat, p.name, p.variety, 0, p.unit, p.bp, p.sp, p.sup]
     );
   }
 
   // Also record initial purchase entries for each product
   const crypto = require('crypto');
   const allProducts = await all('SELECT * FROM products ORDER BY category, product_name');
+  const productSeedMap = new Map(products.map((item) => [item.pid, item]));
 
   const actingUser = await get(`
     SELECT id
@@ -125,19 +130,33 @@ async function seed() {
     throw new Error('No active users available to attach purchase records.');
   }
 
-  const baseDate = new Date('2026-04-01T09:00:00');
+  const baseDate = new Date('2026-04-01T09:00:00+05:30');
 
   for (const [index, prod] of allProducts.entries()) {
+    const seedProduct = productSeedMap.get(prod.product_id);
+    if (!seedProduct) {
+      throw new Error(`Seed data not found for product ${prod.product_id}`);
+    }
+
     const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
-    const purchaseDate = new Date(baseDate.getTime() + index * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    const purchaseDate = new Date(baseDate.getTime() + index * 24 * 60 * 60 * 1000);
+    const purchaseTimestamp = formatIST(purchaseDate);
+
     await run(
       `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, purchase_date, added_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [purchaseId, prod.id, prod.quantity_available, prod.purchase_price,
-       prod.quantity_available * prod.purchase_price, prod.supplier, purchaseDate, actingUser.id]
+      [purchaseId, prod.id, seedProduct.qty, prod.purchase_price,
+       seedProduct.qty * prod.purchase_price, prod.supplier, purchaseTimestamp, actingUser.id]
     );
+
+    await run(
+      `UPDATE products
+       SET quantity_available = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [seedProduct.qty, purchaseTimestamp, prod.id]
+    );
+
     // Small delay to ensure unique purchase IDs
     await new Promise(r => setTimeout(r, 5));
   }
@@ -145,7 +164,7 @@ async function seed() {
   console.log('Done! Seeded:');
   console.log('  - 4 categories (seeds, fertilizers, pesticides, tools)');
   console.log('  - Existing login users preserved (or defaults created if missing)');
-  console.log('  - 16 products (4 per category) with purchase-backed sample records');
+  console.log('  - 16 products seeded through purchase-backed stock entries with updated timestamps');
 
   db.close();
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { Lock, RefreshCw, Wallet } from 'lucide-react';
+import { Building2, Lock, RefreshCw, Wallet } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fmtDate } from '../../utils/dateUtils';
 import CustomSelect from './CustomSelect';
@@ -107,6 +107,20 @@ const DailySetupGate = () => {
   const handleRefresh = async () => {
     setActionError('');
     await refreshDailySetupStatus();
+  };
+
+  const handleReviewBalance = async () => {
+    setSubmitting(true);
+    setActionError('');
+
+    try {
+      await axios.post('/api/transactions/daily-setup/review-balance');
+      await refreshDailySetupStatus();
+    } catch (error) {
+      setActionError(error.response?.data?.message || 'Failed to review the balances.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (!user) {
@@ -251,6 +265,58 @@ const DailySetupGate = () => {
             placeholder="Choose a bank account"
           />
         </div>
+        {actionError && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+            {actionError}
+          </div>
+        )}
+      </Modal>
+    );
+  }
+
+  if (isAdmin && !dailySetupStatus.balanceReviewCompleted) {
+    return (
+      <Modal
+        isOpen
+        onClose={() => {}}
+        title={"Review Today's Balances"}
+        type="success"
+        confirmText={submitting ? 'Saving...' : 'OK, Proceed'}
+        onConfirm={handleReviewBalance}
+        confirmDisabled={submitting}
+        hideClose
+        hideCancel
+      >
+        <p>
+          Review today&apos;s opening and closing balance before continuing with today&apos;s sales.
+        </p>
+        <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 text-sm text-indigo-700">
+          Business Date: <span className="font-semibold">{fmtDate(dailySetupStatus.businessDate)}</span>
+        </div>
+        {dailySetupStatus.selectedBank && (
+          <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/80 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+              <Building2 className="h-4 w-4" />
+              Selected Bank
+            </div>
+            <p className="mt-1 text-sm text-emerald-700">
+              {dailySetupStatus.selectedBank.account_name} - {dailySetupStatus.selectedBank.bank_name}
+            </p>
+          </div>
+        )}
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opening Balance</p>
+            <p className="mt-2 text-2xl font-bold text-slate-900">{formatCurrency(dailySetupStatus.openingBalance)}</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Current Closing Balance</p>
+            <p className="mt-2 text-2xl font-bold text-emerald-800">{formatCurrency(dailySetupStatus.closingBalance)}</p>
+          </div>
+        </div>
+        <p className="mt-4 text-sm text-gray-600">
+          Click OK after verifying these balances to proceed with today&apos;s daily sales.
+        </p>
         {actionError && (
           <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
             {actionError}
