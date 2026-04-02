@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { fmtTime } from '../utils/dateUtils';
+import { fmtDateTime, fmtTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import { 
@@ -9,7 +9,8 @@ import {
   AlertTriangle,
   IndianRupee,
   BarChart3,
-  Calendar
+  Calendar,
+  Clock3
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -186,6 +187,43 @@ const Dashboard = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Ordered Items */}
+        {dashboardData.ordered_items && (
+          <div className="card animate-fade-in-up stagger-2">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-sm">
+                <Clock3 className="h-4 w-4 text-white" />
+              </span>
+              Ordered Items
+            </h3>
+            <div className="space-y-2">
+              {dashboardData.ordered_items.length > 0 ? dashboardData.ordered_items.map((order, index) => (
+                <div key={index} className="flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 hover:shadow-sm cursor-default"
+                     style={{ background: 'linear-gradient(90deg,#fff7ed,#fffbeb)' }}>
+                  <div className="min-w-0 pr-3">
+                    <p className="text-sm font-semibold text-gray-800">{order.product_name}</p>
+                    {order.variety && <p className="text-xs text-gray-400">{order.variety}</p>}
+                    <p className="text-xs text-amber-500 font-mono mt-0.5">{order.purchase_id}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {order.quantity} {order.unit}
+                      {order.supplier ? ` • ${order.supplier}` : ''}
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-bold text-amber-700">Due: ₹{Number(order.balance_due || 0).toLocaleString('en-IN')}</p>
+                    <p className="text-xs text-gray-400">{fmtDateTime(order.purchase_date)}</p>
+                  </div>
+                </div>
+              )) : (
+                <div className="px-4 py-6 rounded-xl text-center text-sm text-gray-500"
+                     style={{ background: 'linear-gradient(90deg,#fff7ed,#fffbeb)' }}>
+                  No pending ordered items right now.
+                </div>
+              )}
             </div>
           </div>
         )}

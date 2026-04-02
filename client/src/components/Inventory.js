@@ -364,7 +364,7 @@ const Inventory = () => {
               />
             </div>
           </div>
-          <div className="flex gap-2 items-center" style={{minWidth:'180px'}}>
+          <div className="w-full sm:w-52 flex-shrink-0">
             <CustomSelect
               options={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))]}
               value={categoryFilter}
@@ -508,15 +508,6 @@ const Inventory = () => {
                 className="input-field"
                 value={formData.variety}
                 onChange={(e) => setFormData({...formData, variety: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
-              <input
-                type="text"
-                className="input-field"
-                value={formData.supplier}
-                onChange={(e) => setFormData({...formData, supplier: e.target.value})}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -781,6 +772,7 @@ const Inventory = () => {
         onClose={() => setDuplicateIdModal(false)}
         title="Duplicate Product ID"
         type="error"
+        theme="inventory"
         confirmText="OK"
       >
         <p>A product with ID <strong>"{formData.product_id}"</strong> already exists.</p>
@@ -793,6 +785,7 @@ const Inventory = () => {
         onClose={() => setDeleteConfirmModal({ open: false, product: null })}
         title="Delete Product"
         type="warning"
+        theme="inventory"
         confirmText="Delete"
         onConfirm={confirmDeleteProduct}
       >
@@ -806,6 +799,7 @@ const Inventory = () => {
         onClose={closeActionModal}
         title={actionModal.title}
         type={actionModal.type}
+        theme="inventory"
         confirmText="OK"
         hideClose={false}
       >
@@ -815,16 +809,61 @@ const Inventory = () => {
   );
 };
 
+const getInventoryModalMeta = (title) => {
+  if (title === 'Add New Product') {
+    return {
+      eyebrow: 'Inventory Form',
+      headerBg: 'linear-gradient(135deg,#e0f2fe,#cffafe)',
+      borderColor: 'border-sky-100/80',
+      headerBorder: 'border-sky-100/80',
+      Icon: Plus,
+      iconBg: 'linear-gradient(135deg,#0ea5e9,#0284c7)'
+    };
+  }
+
+  if (title === 'Update Selling Price') {
+    return {
+      eyebrow: 'Price Update',
+      headerBg: 'linear-gradient(135deg,#e0f2fe,#cffafe)',
+      borderColor: 'border-sky-100/80',
+      headerBorder: 'border-sky-100/80',
+      Icon: Edit,
+      iconBg: 'linear-gradient(135deg,#0284c7,#0369a1)'
+    };
+  }
+
+  return {
+    eyebrow: 'Stock Update',
+    headerBg: 'linear-gradient(135deg,#e0f2fe,#cffafe)',
+    borderColor: 'border-sky-100/80',
+    headerBorder: 'border-sky-100/80',
+    Icon: Plus,
+    iconBg: 'linear-gradient(135deg,#06b6d4,#0891b2)'
+  };
+};
+
 const Modal = ({ title, children, onClose }) => {
+  const meta = getInventoryModalMeta(title);
+  const HeaderIcon = meta.Icon;
   const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
          style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-scale-in flex flex-col"
+      <div className={`bg-white rounded-2xl shadow-2xl w-full max-w-lg animate-scale-in flex flex-col border overflow-hidden ${meta.borderColor}`}
            style={{maxHeight:'85vh'}}>
-        <div className="flex justify-between items-center px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
-          <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+        <div className={`flex justify-between items-center px-6 pt-5 pb-4 border-b flex-shrink-0 ${meta.headerBorder}`}
+             style={{ background: meta.headerBg }}>
+          <div className="flex items-center gap-3">
+            <span className="h-9 w-9 rounded-xl flex items-center justify-center shadow"
+                  style={{ background: meta.iconBg }}>
+              <HeaderIcon className="h-5 w-5 text-white" />
+            </span>
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-sky-700/70">{meta.eyebrow}</p>
+              <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+            </div>
+          </div>
           <button onClick={onClose}
-            className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+            className="h-8 w-8 rounded-lg flex items-center justify-center text-sky-400 hover:text-sky-700 hover:bg-white/80 transition-all">
             <X className="h-5 w-5" />
           </button>
         </div>

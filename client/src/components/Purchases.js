@@ -95,6 +95,7 @@ const getEmptyNewProductForm = () => ({
 const Purchases = () => {
   const { user, dailySetupStatus } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const canManagePurchases = ['admin', 'operator'].includes(user?.role);
 
   const [activeTab, setActiveTab] = useState('record');
   const [purchases, setPurchases] = useState([]);
@@ -123,7 +124,7 @@ const Purchases = () => {
   const [confirmModal, setConfirmModal] = useState({ open: false, data: null });
   const [editModal, setEditModal] = useState({ open: false, purchase: null });
   const [editForm, setEditForm] = useState({ quantity: '', price_per_unit: '', supplier: '', purchase_date: '' });
-  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editSubmitting] = useState(false);
   const [deliverModal, setDeliverModal] = useState({ open: false, purchase: null, delivery_date: getISTDateString() });
   const [deliverSubmitting, setDeliverSubmitting] = useState(false);
 
@@ -142,7 +143,13 @@ const Purchases = () => {
   const [supplierSearch, setSupplierSearch] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
 
-  const selectedProduct = products.find((p) => String(p.id) === String(formProductId));
+  const pendingPurchaseProductIds = new Set(
+    purchases
+      .filter((purchase) => String(purchase.purchase_status || PURCHASE_STATUS.DELIVERED).toLowerCase() === PURCHASE_STATUS.ORDERED)
+      .map((purchase) => String(purchase.product_id))
+  );
+  const availableProducts = products.filter((product) => !pendingPurchaseProductIds.has(String(product.id)));
+  const selectedProduct = availableProducts.find((p) => String(p.id) === String(formProductId));
   const totalCost = num(formQuantity) * num(formPrice);
   const advanceAmount = formStatus === PURCHASE_STATUS.ORDERED ? num(formAdvanceAmount) : 0;
   const remainingAmount = Math.max(totalCost - advanceAmount, 0);
@@ -257,7 +264,7 @@ const Purchases = () => {
     return (category.name || '').toLowerCase().includes(categorySearch.toLowerCase());
   });
 
-  const filteredProducts = [...products]
+  const filteredProducts = [...availableProducts]
     .filter((product) => {
       const q = productSearch.toLowerCase();
       const matchesSearch = product.product_name.toLowerCase().includes(q)
@@ -277,10 +284,11 @@ const Purchases = () => {
     key: 'purchase_date',
     direction: 'desc'
   });
+  const showHistoryActions = canManagePurchases && historyStatusFilter === PURCHASE_STATUS.ORDERED;
 
   const handleRecordPurchase = (event) => {
     event.preventDefault();
-    if (!formProductId || !formQuantity || !formPrice) {
+    if (!selectedProduct || !formQuantity || !formPrice) {
       setError('Product, quantity, and price are required');
       return;
     }
@@ -352,26 +360,16 @@ const Purchases = () => {
     }
   };
 
-  const handleEditPurchase = async (event) => {
+  const openDeliverPurchaseModal = (purchase) => {
+    setDeliverModal({
+      open: true,
+      purchase,
+      delivery_date: purchase.delivery_date ? String(purchase.delivery_date).slice(0, 10) : getISTDateString()
+    });
+  };
+
+  const handleEditPurchase = (event) => {
     event.preventDefault();
-    setEditSubmitting(true);
-    setError('');
-    try {
-      await axios.put(`/api/purchases/${editModal.purchase.id}`, {
-        quantity: num(editForm.quantity),
-        price_per_unit: num(editForm.price_per_unit),
-        supplier: editForm.supplier.trim() || undefined,
-        purchase_date: editForm.purchase_date
-      });
-      setEditModal({ open: false, purchase: null });
-      setSuccess('Purchase updated successfully');
-      await fetchAll();
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (e) {
-      setError(e.response?.data?.message || 'Failed to update purchase');
-    } finally {
-      setEditSubmitting(false);
-    }
   };
 
   const handleMarkDelivered = async (event) => {
@@ -444,10 +442,12 @@ const Purchases = () => {
       setShowNewProductModal(false);
       setNewProductForm(getEmptyNewProductForm());
       await fetchAll();
-      if (res.data?.id) {
+      if (res.data?.id && creationMode === PRODUCT_CREATION_MODE.INVENTORY) {
         setFormProductId(String(res.data.id));
         if (res.data.purchase_price) setFormPrice(String(res.data.purchase_price));
         if (res.data.supplier) setFormSupplier(res.data.supplier);
+      } else {
+        resetPurchaseForm();
       }
       setSuccess(
         creationMode === PRODUCT_CREATION_MODE.ORDER
@@ -613,7 +613,6 @@ const Purchases = () => {
                 <Plus className="h-3 w-3" /> New Product
               </button>
             </div>
-
             <div className="flex gap-3 mb-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -686,7 +685,7 @@ const Purchases = () => {
               {filteredProducts.length === 0 && (
                 <div className="col-span-2 text-center py-10 text-gray-400">
                   <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">No products found</p>
+                  <p className="text-sm">No available products found</p>
                   <button
                     type="button"
                     onClick={() => {
@@ -830,7 +829,7 @@ const Purchases = () => {
 
               <button
                 type="submit"
-                disabled={submitting || !formProductId}
+                disabled={submitting || !selectedProduct}
                 className="w-full py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ background: formStatus === PURCHASE_STATUS.ORDERED ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'linear-gradient(135deg,#3b82f6,#6366f1)' }}
               >
@@ -863,6 +862,10 @@ const Purchases = () => {
                 </button>
               ))}
             </div>
+            <div className="relative flex-1 lg:max-w-xs lg:ml-auto">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input type="text" placeholder="Search purchases..." className="input-field pl-10 !text-sm" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} />
+            </div>
             <div className="w-full lg:w-52">
               <CustomSelect
                 options={[
@@ -876,10 +879,6 @@ const Purchases = () => {
                 onChange={(value) => setHistoryCategoryFilter(value || 'all')}
                 placeholder="Filter by category"
               />
-            </div>
-            <div className="relative flex-1 lg:max-w-xs lg:ml-auto">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input type="text" placeholder="Search purchases..." className="input-field pl-10 !text-sm" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} />
             </div>
           </div>
 
@@ -900,6 +899,7 @@ const Purchases = () => {
                     <SortableHeader label="Amounts" sortKey="total_amount" sortConfig={sortConfig} onSort={requestSort} />
                     <SortableHeader label="Supplier" sortKey="supplier" sortConfig={sortConfig} onSort={requestSort} />
                     <SortableHeader label="Delivery" sortKey="delivery_date" sortConfig={sortConfig} onSort={requestSort} />
+                    {showHistoryActions && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -957,6 +957,20 @@ const Purchases = () => {
                             <span className="text-sm text-gray-500">Received immediately</span>
                           )}
                         </td>
+                        {showHistoryActions && (
+                          <td>
+                            <div className="flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => openDeliverPurchaseModal(purchase)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
+                              >
+                                <CheckCircle className="h-3.5 w-3.5" />
+                                Mark Delivered
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -1235,6 +1249,7 @@ const Purchases = () => {
         onClose={() => setDeleteCatModal({ open: false, id: null, name: '' })}
         title="Delete Category"
         type="warning"
+        theme="purchases"
         confirmText="Delete"
         onConfirm={handleDeleteCategory}
       >
@@ -1247,6 +1262,7 @@ const Purchases = () => {
         onClose={() => setDeleteSupplierModal({ open: false, supplier: '' })}
         title="Delete Supplier"
         type="warning"
+        theme="purchases"
         confirmText="Delete"
         onConfirm={handleDeleteSupplier}
       >
@@ -1258,10 +1274,10 @@ const Purchases = () => {
 
       {confirmModal.open && confirmModal.data && renderPortalModal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col" style={{ maxHeight: '85vh' }}>
-            <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED ? 'linear-gradient(135deg,#fff7ed,#fffbeb)' : 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col border border-indigo-100/70 overflow-hidden" style={{ maxHeight: '85vh' }}>
+            <div className="px-6 py-4 border-b border-indigo-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
               <div className="flex items-center gap-3">
-                <span className={`h-9 w-9 rounded-xl flex items-center justify-center shadow ${confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED ? 'bg-gradient-to-br from-amber-500 to-orange-600' : 'bg-gradient-to-br from-blue-500 to-indigo-600'}`}>
+                <span className="h-9 w-9 rounded-xl flex items-center justify-center shadow bg-gradient-to-br from-indigo-500 to-violet-600">
                   {confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED ? <Clock3 className="h-5 w-5 text-white" /> : <CheckCircle className="h-5 w-5 text-white" />}
                 </span>
                 <div>
@@ -1272,14 +1288,14 @@ const Purchases = () => {
                     {confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED ? 'Inventory will update after delivery confirmation' : 'Inventory will be updated immediately'}
                   </p>
                 </div>
-                <button onClick={() => setConfirmModal({ open: false, data: null })} className="ml-auto h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+                <button onClick={() => setConfirmModal({ open: false, data: null })} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-indigo-300 hover:text-indigo-700 hover:bg-white/80 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
             </div>
 
             <div className="p-6 space-y-4">
-              <div className="rounded-xl p-4 space-y-3" style={{ background: 'linear-gradient(135deg,#f8faff,#f5f3ff)' }}>
+              <div className="rounded-2xl p-4 space-y-3" style={{ background: 'linear-gradient(135deg,#f8faff,#f5f3ff)' }}>
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="font-bold text-gray-900">{confirmModal.data.product?.product_name}</p>
@@ -1321,16 +1337,16 @@ const Purchases = () => {
                 </div>
 
                 {confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED && confirmModal.data.advance_amount > 0 && (
-                  <div className="rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-700">
+                  <div className="rounded-2xl border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-700">
                     Advance will be deducted from: <span className="font-bold">{confirmModal.data.bank_account_name}</span>
                   </div>
                 )}
               </div>
 
-              <div className="rounded-xl px-4 py-3 space-y-2" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
+              <div className="rounded-2xl px-4 py-3 space-y-2" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Total Cost</span>
-                  <span className="text-2xl font-extrabold text-blue-700">{fmtMoney(confirmModal.data.quantity * confirmModal.data.price_per_unit)}</span>
+                  <span className="text-2xl font-extrabold text-indigo-700">{fmtMoney(confirmModal.data.quantity * confirmModal.data.price_per_unit)}</span>
                 </div>
                 {confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED && (
                   <>
@@ -1340,7 +1356,7 @@ const Purchases = () => {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">Balance due</span>
-                      <span className="font-semibold text-amber-700">{fmtMoney((confirmModal.data.quantity * confirmModal.data.price_per_unit) - confirmModal.data.advance_amount)}</span>
+                      <span className="font-semibold text-indigo-700">{fmtMoney((confirmModal.data.quantity * confirmModal.data.price_per_unit) - confirmModal.data.advance_amount)}</span>
                     </div>
                   </>
                 )}
@@ -1353,11 +1369,11 @@ const Purchases = () => {
               </p>
             </div>
 
-            <div className="px-6 py-4 border-t border-gray-100 flex gap-3" style={{ background: 'linear-gradient(90deg,#f8faff,#f5f3ff)' }}>
-              <button onClick={() => setConfirmModal({ open: false, data: null })} className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+            <div className="px-6 py-4 border-t border-indigo-100 flex gap-3" style={{ background: 'linear-gradient(90deg,#f8faff,#f5f3ff)' }}>
+              <button onClick={() => setConfirmModal({ open: false, data: null })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
                 Cancel
               </button>
-              <button onClick={handleConfirmPurchase} className="flex-1 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all" style={{ background: confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
+              <button onClick={handleConfirmPurchase} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
                 {confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED ? 'Confirm Order' : 'Confirm Purchase'}
               </button>
             </div>
@@ -1367,7 +1383,7 @@ const Purchases = () => {
 
       {editModal.open && editModal.purchase && renderPortalModal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col" style={{ maxHeight: '85vh' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col border border-indigo-100/70 overflow-hidden" style={{ maxHeight: '85vh' }}>
             <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
               <div className="flex items-center gap-3">
                 <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow">
@@ -1377,7 +1393,7 @@ const Purchases = () => {
                   <h3 className="text-base font-bold text-gray-900">Edit Purchase</h3>
                   <p className="text-xs text-gray-500 font-mono">{editModal.purchase.purchase_id}</p>
                 </div>
-                <button onClick={() => setEditModal({ open: false, purchase: null })} className="ml-auto h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+                <button onClick={() => setEditModal({ open: false, purchase: null })} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-white/80 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1385,7 +1401,7 @@ const Purchases = () => {
 
             <form onSubmit={handleEditPurchase} className="flex flex-col flex-1 overflow-hidden">
               <div className="p-6 space-y-4 overflow-y-auto flex-1" style={{ scrollbarWidth: 'thin' }}>
-                <div className="rounded-xl px-4 py-3 mb-2" style={{ background: 'linear-gradient(135deg,#f5f3ff,#eef2ff)' }}>
+                <div className="rounded-2xl px-4 py-3 mb-2" style={{ background: 'linear-gradient(135deg,#f5f3ff,#eef2ff)' }}>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-semibold text-gray-900 text-sm">{editModal.purchase.product_name}</p>
@@ -1401,33 +1417,33 @@ const Purchases = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Quantity ({editModal.purchase.unit})</label>
-                    <input type="number" min="0.01" step="0.01" required className="input-field !text-sm" value={editForm.quantity} onChange={(e) => setEditForm((current) => ({ ...current, quantity: e.target.value }))} />
+                    <input type="number" min="0.01" step="0.01" required className="input-field !text-sm !rounded-2xl" value={editForm.quantity} onChange={(e) => setEditForm((current) => ({ ...current, quantity: e.target.value }))} />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Price / Unit (₹)</label>
-                    <input type="number" min="0" step="0.01" required className="input-field !text-sm" value={editForm.price_per_unit} onChange={(e) => setEditForm((current) => ({ ...current, price_per_unit: e.target.value }))} />
+                    <input type="number" min="0" step="0.01" required className="input-field !text-sm !rounded-2xl" value={editForm.price_per_unit} onChange={(e) => setEditForm((current) => ({ ...current, price_per_unit: e.target.value }))} />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Supplier</label>
-                  <input type="text" className="input-field !text-sm" placeholder="Supplier name" value={editForm.supplier} onChange={(e) => setEditForm((current) => ({ ...current, supplier: e.target.value }))} />
+                  <input type="text" className="input-field !text-sm !rounded-2xl" placeholder="Supplier name" value={editForm.supplier} onChange={(e) => setEditForm((current) => ({ ...current, supplier: e.target.value }))} />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Order / Purchase Date</label>
-                  <input type="date" className="input-field !text-sm" value={editForm.purchase_date} onChange={(e) => setEditForm((current) => ({ ...current, purchase_date: e.target.value }))} />
+                  <input type="date" className="input-field !text-sm !rounded-2xl" value={editForm.purchase_date} onChange={(e) => setEditForm((current) => ({ ...current, purchase_date: e.target.value }))} />
                 </div>
 
                 {num(editModal.purchase.advance_amount) > 0 && (
-                  <div className="rounded-xl border border-violet-100 bg-violet-50 px-4 py-3 text-xs text-violet-700">
+                  <div className="rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-xs text-violet-700">
                     This purchase already has an advance payment of <span className="font-bold">{fmtMoney(editModal.purchase.advance_amount)}</span>.
                     Keep a supplier name on this record so the due amount stays mapped correctly in Transactions.
                   </div>
                 )}
 
                 {editForm.quantity && editForm.price_per_unit && (
-                  <div className="rounded-xl px-4 py-3" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
+                  <div className="rounded-2xl px-4 py-3" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-semibold text-gray-500 uppercase">Updated Total</span>
                       <span className="text-xl font-extrabold text-blue-700">{fmtMoney(num(editForm.quantity) * num(editForm.price_per_unit))}</span>
@@ -1448,10 +1464,10 @@ const Purchases = () => {
               </div>
 
               <div className="px-6 py-4 border-t border-gray-100 flex gap-3" style={{ background: 'linear-gradient(90deg,#f8faff,#f5f3ff)' }}>
-                <button type="button" onClick={() => setEditModal({ open: false, purchase: null })} className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                <button type="button" onClick={() => setEditModal({ open: false, purchase: null })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
                   Cancel
                 </button>
-                <button type="submit" disabled={editSubmitting} className="flex-1 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+                <button type="submit" disabled={editSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
                   {editSubmitting ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
@@ -1462,42 +1478,42 @@ const Purchases = () => {
 
       {deliverModal.open && deliverModal.purchase && renderPortalModal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col">
-            <div className="px-6 py-4 border-b border-gray-100" style={{ background: 'linear-gradient(135deg,#ecfdf5,#d1fae5)' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col border border-indigo-100/80 overflow-hidden">
+            <div className="px-6 py-4 border-b border-indigo-100" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
               <div className="flex items-center gap-3">
-                <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow">
+                <span className="h-9 w-9 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow">
                   <CheckCircle className="h-5 w-5 text-white" />
                 </span>
                 <div>
                   <h3 className="text-base font-bold text-gray-900">Mark Order As Delivered</h3>
                   <p className="text-xs text-gray-500 font-mono">{deliverModal.purchase.purchase_id}</p>
                 </div>
-                <button onClick={() => setDeliverModal({ open: false, purchase: null, delivery_date: getISTDateString() })} className="ml-auto h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+                <button onClick={() => setDeliverModal({ open: false, purchase: null, delivery_date: getISTDateString() })} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-indigo-300 hover:text-indigo-700 hover:bg-white/80 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
             </div>
 
             <form onSubmit={handleMarkDelivered} className="p-6 space-y-4">
-              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
                 <p className="font-bold">{deliverModal.purchase.product_name}</p>
                 <p className="mt-1">{deliverModal.purchase.quantity} {deliverModal.purchase.unit} will be added to inventory.</p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Delivery Date</label>
-                <input type="date" className="input-field !text-sm" value={deliverModal.delivery_date} onChange={(e) => setDeliverModal((current) => ({ ...current, delivery_date: e.target.value }))} required />
+                <input type="date" className="input-field !text-sm !rounded-2xl" value={deliverModal.delivery_date} onChange={(e) => setDeliverModal((current) => ({ ...current, delivery_date: e.target.value }))} required />
               </div>
 
-              <div className="rounded-xl bg-gray-50 px-4 py-3 text-xs text-gray-500">
+              <div className="rounded-2xl bg-gray-50 px-4 py-3 text-xs text-gray-500">
                 Once confirmed, this stock will be reflected in inventory and the order status will change to delivered.
               </div>
 
               <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => setDeliverModal({ open: false, purchase: null, delivery_date: getISTDateString() })} className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                <button type="button" onClick={() => setDeliverModal({ open: false, purchase: null, delivery_date: getISTDateString() })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
                   Cancel
                 </button>
-                <button type="submit" disabled={deliverSubmitting} className="flex-1 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#059669,#10b981)' }}>
+                <button type="submit" disabled={deliverSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
                   {deliverSubmitting ? 'Updating...' : 'Confirm Delivery'}
                 </button>
               </div>
@@ -1508,17 +1524,16 @@ const Purchases = () => {
 
       {showNewProductModal && renderPortalModal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col animate-scale-in" style={{ maxHeight: '85vh' }}>
-            <div className="px-6 py-4 border-b border-gray-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#ecfdf5,#d1fae5)' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col animate-scale-in border border-indigo-100/80 overflow-hidden" style={{ maxHeight: '85vh' }}>
+            <div className="px-6 py-4 border-b border-indigo-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
               <div className="flex items-center gap-3">
-                <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow">
+                <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow">
                   <Plus className="h-5 w-5 text-white" />
                 </span>
                 <div>
                   <h3 className="text-base font-bold text-gray-900">Create New Product</h3>
-                  <p className="text-xs text-gray-500">Choose whether this new item is being received now or ordered for later delivery</p>
                 </div>
-                <button onClick={() => setShowNewProductModal(false)} className="ml-auto text-gray-400 hover:text-gray-600">
+                <button onClick={() => setShowNewProductModal(false)} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-indigo-300 hover:text-indigo-700 hover:bg-white/80 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1526,18 +1541,18 @@ const Purchases = () => {
 
             <form onSubmit={handleCreateProduct} className="overflow-y-auto">
               <div className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-2 rounded-xl bg-gray-100 p-1">
+                <div className="grid grid-cols-2 gap-2 rounded-2xl bg-gray-100 p-1">
                   <button
                     type="button"
                     onClick={() => setNewProductForm((current) => ({ ...current, creation_mode: PRODUCT_CREATION_MODE.INVENTORY }))}
-                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition-all ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.INVENTORY ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500'}`}
+                    className={`rounded-2xl px-3 py-2 text-sm font-semibold transition-all ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.INVENTORY ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}
                   >
                     Add To Inventory
                   </button>
                   <button
                     type="button"
                     onClick={() => setNewProductForm((current) => ({ ...current, creation_mode: PRODUCT_CREATION_MODE.ORDER, quantity_available: '0' }))}
-                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition-all ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500'}`}
+                    className={`rounded-2xl px-3 py-2 text-sm font-semibold transition-all ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500'}`}
                   >
                     Create Order
                   </button>
@@ -1546,7 +1561,7 @@ const Purchases = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Product ID <span className="text-gray-400">(auto)</span></label>
-                    <input type="text" readOnly className="input-field !text-sm bg-gray-50 text-gray-500 cursor-not-allowed" placeholder="Select category first..." value={newProductForm.product_id} />
+                    <input type="text" readOnly className="input-field !text-sm !rounded-2xl bg-gray-50 text-gray-500 cursor-not-allowed" placeholder="Select category first..." value={newProductForm.product_id} />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Category *</label>
@@ -1569,11 +1584,11 @@ const Purchases = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Product Name *</label>
-                    <input type="text" required className="input-field !text-sm" placeholder="e.g. Tomato Seeds" value={newProductForm.product_name} onChange={(e) => setNewProductForm((current) => ({ ...current, product_name: e.target.value }))} />
+                    <input type="text" required className="input-field !text-sm !rounded-2xl" placeholder="e.g. Tomato Seeds" value={newProductForm.product_name} onChange={(e) => setNewProductForm((current) => ({ ...current, product_name: e.target.value }))} />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Variety</label>
-                    <input type="text" className="input-field !text-sm" placeholder="e.g. Hybrid F1" value={newProductForm.variety} onChange={(e) => setNewProductForm((current) => ({ ...current, variety: e.target.value }))} />
+                    <input type="text" className="input-field !text-sm !rounded-2xl" placeholder="e.g. Hybrid F1" value={newProductForm.variety} onChange={(e) => setNewProductForm((current) => ({ ...current, variety: e.target.value }))} />
                   </div>
                 </div>
 
@@ -1590,7 +1605,7 @@ const Purchases = () => {
                       type="number"
                       min="0"
                       step="0.01"
-                      className={`input-field !text-sm ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
+                      className={`input-field !text-sm !rounded-2xl ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
                       value={newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? '0' : newProductForm.quantity_available}
                       onChange={(e) => setNewProductForm((current) => ({ ...current, quantity_available: e.target.value }))}
                       readOnly={newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER}
@@ -1601,11 +1616,11 @@ const Purchases = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Purchase Price (₹) *</label>
-                    <input type="number" min="0" step="0.01" required className="input-field !text-sm" placeholder="Cost per unit" value={newProductForm.purchase_price} onChange={(e) => setNewProductForm((current) => ({ ...current, purchase_price: e.target.value }))} />
+                    <input type="number" min="0" step="0.01" required className="input-field !text-sm !rounded-2xl" placeholder="Cost per unit" value={newProductForm.purchase_price} onChange={(e) => setNewProductForm((current) => ({ ...current, purchase_price: e.target.value }))} />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Selling Price (₹) *</label>
-                    <input type="number" min="0" step="0.01" required className="input-field !text-sm" placeholder="Price per unit" value={newProductForm.selling_price} onChange={(e) => setNewProductForm((current) => ({ ...current, selling_price: e.target.value }))} />
+                    <input type="number" min="0" step="0.01" required className="input-field !text-sm !rounded-2xl" placeholder="Price per unit" value={newProductForm.selling_price} onChange={(e) => setNewProductForm((current) => ({ ...current, selling_price: e.target.value }))} />
                   </div>
                 </div>
 
@@ -1613,7 +1628,7 @@ const Purchases = () => {
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Supplier</label>
                   <input
                     type="text"
-                    className="input-field !text-sm"
+                    className="input-field !text-sm !rounded-2xl"
                     placeholder={newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'Recommended for order tracking' : 'Optional'}
                     value={newProductForm.supplier}
                     onChange={(e) => setNewProductForm((current) => ({ ...current, supplier: e.target.value }))}
@@ -1629,7 +1644,7 @@ const Purchases = () => {
                           type="number"
                           min="0.01"
                           step="0.01"
-                          className="input-field !text-sm"
+                          className="input-field !text-sm !rounded-2xl"
                           value={newProductForm.order_quantity}
                           onChange={(e) => setNewProductForm((current) => ({ ...current, order_quantity: e.target.value }))}
                           required={newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER}
@@ -1639,7 +1654,7 @@ const Purchases = () => {
                         <label className="block text-xs font-semibold text-gray-600 mb-1">Order Date *</label>
                         <input
                           type="date"
-                          className="input-field !text-sm"
+                          className="input-field !text-sm !rounded-2xl"
                           value={newProductForm.order_date}
                           onChange={(e) => setNewProductForm((current) => ({ ...current, order_date: e.target.value }))}
                           required={newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER}
@@ -1654,7 +1669,7 @@ const Purchases = () => {
                           type="number"
                           min="0"
                           step="0.01"
-                          className="input-field !text-sm"
+                          className="input-field !text-sm !rounded-2xl"
                           value={newProductForm.advance_amount}
                           onChange={(e) => setNewProductForm((current) => ({ ...current, advance_amount: e.target.value }))}
                           placeholder="0 if no advance"
@@ -1670,31 +1685,31 @@ const Purchases = () => {
                             placeholder="Select bank"
                           />
                         ) : (
-                          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                             Add a bank account in Transactions before recording an advance payment.
                           </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-700">
                       This will create the product with zero on-hand stock and immediately create a pending purchase order for it.
                     </div>
                   </>
                 )}
 
                 {newProductForm.creation_mode === PRODUCT_CREATION_MODE.INVENTORY && (
-                  <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-700">
                     This will create the product and add the entered quantity directly into inventory right away.
                   </div>
                 )}
               </div>
 
-              <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0" style={{ background: 'linear-gradient(90deg,#ecfdf5,#d1fae5)' }}>
-                <button type="button" onClick={() => setShowNewProductModal(false)} className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+              <div className="px-6 py-4 border-t border-indigo-100 flex gap-3 flex-shrink-0" style={{ background: 'linear-gradient(90deg,#f8faff,#f5f3ff)' }}>
+                <button type="button" onClick={() => setShowNewProductModal(false)} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
                   Cancel
                 </button>
-                <button type="submit" disabled={newProductSubmitting} className="flex-1 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#059669,#10b981)' }}>
+                <button type="submit" disabled={newProductSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
                   {newProductSubmitting ? 'Creating...' : newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'Create Product & Order' : 'Create Product & Add Stock'}
                 </button>
               </div>

@@ -83,20 +83,31 @@ async function createAdvancePayment({
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { category, search } = req.query;
-    let query = 'SELECT * FROM products WHERE 1=1';
+    let query = `
+      SELECT p.*
+      FROM products p
+      WHERE NOT (
+        COALESCE(p.quantity_available, 0) <= 0
+        AND EXISTS (
+          SELECT 1
+          FROM purchases pur
+          WHERE pur.product_id = p.id
+            AND COALESCE(pur.purchase_status, 'delivered') = 'ordered'
+        )
+      )`;
     const params = [];
 
     if (category && category !== 'all') {
-      query += ' AND category = ?';
+      query += ' AND p.category = ?';
       params.push(category);
     }
 
     if (search) {
-      query += ' AND (product_name LIKE ? OR variety LIKE ? OR product_id LIKE ?)';
+      query += ' AND (p.product_name LIKE ? OR p.variety LIKE ? OR p.product_id LIKE ?)';
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
 
-    query += ' ORDER BY created_at DESC';
+    query += ' ORDER BY p.created_at DESC';
     
     const products = await getAll(query, params);
     res.json(products);
@@ -528,7 +539,19 @@ router.post('/:id/add-stock', [
 router.get('/alerts/low-stock', authenticateToken, async (req, res) => {
   try {
     const products = await getAll(
-      'SELECT * FROM products WHERE quantity_available <= 10 ORDER BY quantity_available ASC'
+      `SELECT p.*
+       FROM products p
+       WHERE p.quantity_available <= 10
+         AND NOT (
+           COALESCE(p.quantity_available, 0) <= 0
+           AND EXISTS (
+             SELECT 1
+             FROM purchases pur
+             WHERE pur.product_id = p.id
+               AND COALESCE(pur.purchase_status, 'delivered') = 'ordered'
+           )
+         )
+       ORDER BY p.quantity_available ASC`
     );
     res.json(products);
   } catch (error) {
