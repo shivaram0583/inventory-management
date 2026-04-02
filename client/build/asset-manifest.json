@@ -1,14 +1,14 @@
 {
   "files": {
-    "main.css": "/static/css/main.6cb4eb21.css",
-    "main.js": "/static/js/main.b705d017.js",
+    "main.css": "/static/css/main.e3b99f44.css",
+    "main.js": "/static/js/main.bde7051d.js",
     "static/media/ganesha.png": "/static/media/ganesha.d4faf0ca04441322ab0d.png",
     "index.html": "/index.html",
-    "main.6cb4eb21.css.map": "/static/css/main.6cb4eb21.css.map",
-    "main.b705d017.js.map": "/static/js/main.b705d017.js.map"
+    "main.e3b99f44.css.map": "/static/css/main.e3b99f44.css.map",
+    "main.bde7051d.js.map": "/static/js/main.bde7051d.js.map"
   },
   "entrypoints": [
-    "static/css/main.6cb4eb21.css",
-    "static/js/main.b705d017.js"
+    "static/css/main.e3b99f44.css",
+    "static/js/main.bde7051d.js"
   ]
 }

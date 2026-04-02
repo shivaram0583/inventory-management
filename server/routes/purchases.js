@@ -12,6 +12,11 @@ const {
 const crypto = require('crypto');
 const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
+const {
+  isBankTrackedSupplierPaymentMode,
+  getSupplierPaymentTransferReference,
+  createSupplierPaymentRecord
+} = require('../services/bankLedger');
 
 const router = express.Router();
 
@@ -66,42 +71,16 @@ async function createAdvancePayment({
   userId,
   eventTimestamp
 }) {
-  if (!supplierName) {
-    throw createHttpError(400, 'Supplier name is required when recording an advance payment');
-  }
-
-  if (!bankAccountId) {
-    throw createHttpError(400, 'Select a bank account for the advance payment');
-  }
-
-  const account = await getRow('SELECT * FROM bank_accounts WHERE id = ? AND is_active = 1', [bankAccountId]);
-  if (!account) {
-    throw createHttpError(404, 'Bank account not found');
-  }
-
-  if (toNumber(account.balance) < amount) {
-    throw createHttpError(400, 'Insufficient bank balance for the advance payment');
-  }
-
-  await runQuery(
-    'UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-    [amount, eventTimestamp, bankAccountId]
-  );
-
-  const description = `Advance payment for purchase ${purchaseId}`;
-  const result = await runQuery(
-    `INSERT INTO supplier_payments (
-       supplier_name,
-       amount,
-       payment_mode,
-       bank_account_id,
-       description,
-       payment_date,
-       created_by,
-       created_at
-     ) VALUES (?, ?, 'bank', ?, ?, ?, ?, ?)`,
-    [supplierName, amount, bankAccountId, description, paymentDate, userId, eventTimestamp]
-  );
+  const result = await createSupplierPaymentRecord({
+    supplierName,
+    amount,
+    paymentMode: 'bank',
+    bankAccountId,
+    description: `Advance payment for purchase ${purchaseId}`,
+    paymentDate,
+    userId,
+    eventTimestamp
+  });
 
   return result.id;
 }
@@ -720,9 +699,18 @@ router.delete('/suppliers/:name', [
         `SELECT bank_account_id, COALESCE(SUM(amount), 0) AS total_amount
          FROM supplier_payments
          WHERE supplier_name = ?
-           AND payment_mode = 'bank'
+           AND payment_mode IN ('bank', 'upi')
            AND bank_account_id IS NOT NULL
          GROUP BY bank_account_id`,
+        [supplierName]
+      );
+
+      const bankTrackedPayments = await getAll(
+        `SELECT id, bank_account_id, payment_mode
+         FROM supplier_payments
+         WHERE supplier_name = ?
+           AND payment_mode IN ('bank', 'upi')
+           AND bank_account_id IS NOT NULL`,
         [supplierName]
       );
 
@@ -734,6 +722,20 @@ router.delete('/suppliers/:name', [
         await runQuery(
           'UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
           [bankAmount, eventTimestamp, bankRow.bank_account_id]
+        );
+      }
+
+      for (const payment of bankTrackedPayments) {
+        if (!isBankTrackedSupplierPaymentMode(payment.payment_mode) || !payment.bank_account_id) {
+          continue;
+        }
+
+        await runQuery(
+          `DELETE FROM bank_transfers
+           WHERE source_type = 'supplier_payment'
+             AND source_reference = ?
+             AND bank_account_id = ?`,
+          [getSupplierPaymentTransferReference(payment.id), payment.bank_account_id]
         );
       }
 

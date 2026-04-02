@@ -4,6 +4,7 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
 const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = require('../database/db');
 const { addReviewNotification } = require('../services/reviewNotifications');
+const { createSupplierPaymentRecord } = require('../services/bankLedger');
 const crypto = require('crypto');
 const moment = require('moment');
 
@@ -39,42 +40,16 @@ async function createAdvancePayment({
   userId,
   eventTimestamp
 }) {
-  if (!supplierName) {
-    throw createHttpError(400, 'Supplier is required when paying an advance amount');
-  }
-
-  if (!bankAccountId) {
-    throw createHttpError(400, 'Select a bank account for the advance payment');
-  }
-
-  const account = await getRow('SELECT * FROM bank_accounts WHERE id = ? AND is_active = 1', [bankAccountId]);
-  if (!account) {
-    throw createHttpError(404, 'Bank account not found');
-  }
-
-  if (toNumber(account.balance) < amount) {
-    throw createHttpError(400, 'Insufficient bank balance for the advance payment');
-  }
-
-  await runQuery(
-    'UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-    [amount, eventTimestamp, bankAccountId]
-  );
-
-  const description = `Advance payment for purchase ${purchaseId}`;
-  const result = await runQuery(
-    `INSERT INTO supplier_payments (
-       supplier_name,
-       amount,
-       payment_mode,
-       bank_account_id,
-       description,
-       payment_date,
-       created_by,
-       created_at
-     ) VALUES (?, ?, 'bank', ?, ?, ?, ?, ?)`,
-    [supplierName, amount, bankAccountId, description, paymentDate, userId, eventTimestamp]
-  );
+  const result = await createSupplierPaymentRecord({
+    supplierName,
+    amount,
+    paymentMode: 'bank',
+    bankAccountId,
+    description: `Advance payment for purchase ${purchaseId}`,
+    paymentDate,
+    userId,
+    eventTimestamp
+  });
 
   return result.id;
 }
