@@ -2,29 +2,112 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
-const { getRow, runQuery, getAll, nowIST } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = require('../database/db');
 const { addReviewNotification } = require('../services/reviewNotifications');
+const crypto = require('crypto');
+const moment = require('moment');
 
 const router = express.Router();
+
+const PRODUCT_CREATION_MODE = {
+  INVENTORY: 'inventory',
+  ORDER: 'order'
+};
+
+const PURCHASE_STATUS = {
+  ORDERED: 'ordered',
+  DELIVERED: 'delivered'
+};
+
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const createHttpError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
+
+async function createAdvancePayment({
+  supplierName,
+  amount,
+  bankAccountId,
+  purchaseId,
+  paymentDate,
+  userId,
+  eventTimestamp
+}) {
+  if (!supplierName) {
+    throw createHttpError(400, 'Supplier is required when paying an advance amount');
+  }
+
+  if (!bankAccountId) {
+    throw createHttpError(400, 'Select a bank account for the advance payment');
+  }
+
+  const account = await getRow('SELECT * FROM bank_accounts WHERE id = ? AND is_active = 1', [bankAccountId]);
+  if (!account) {
+    throw createHttpError(404, 'Bank account not found');
+  }
+
+  if (toNumber(account.balance) < amount) {
+    throw createHttpError(400, 'Insufficient bank balance for the advance payment');
+  }
+
+  await runQuery(
+    'UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
+    [amount, eventTimestamp, bankAccountId]
+  );
+
+  const description = `Advance payment for purchase ${purchaseId}`;
+  const result = await runQuery(
+    `INSERT INTO supplier_payments (
+       supplier_name,
+       amount,
+       payment_mode,
+       bank_account_id,
+       description,
+       payment_date,
+       created_by,
+       created_at
+     ) VALUES (?, ?, 'bank', ?, ?, ?, ?, ?)`,
+    [supplierName, amount, bankAccountId, description, paymentDate, userId, eventTimestamp]
+  );
+
+  return result.id;
+}
 
 // Get all products
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { category, search } = req.query;
-    let query = 'SELECT * FROM products WHERE 1=1';
+    let query = `
+      SELECT p.*
+      FROM products p
+      WHERE NOT (
+        COALESCE(p.quantity_available, 0) <= 0
+        AND EXISTS (
+          SELECT 1
+          FROM purchases pur
+          WHERE pur.product_id = p.id
+            AND COALESCE(pur.purchase_status, 'delivered') = 'ordered'
+        )
+      )`;
     const params = [];
 
     if (category && category !== 'all') {
-      query += ' AND category = ?';
+      query += ' AND p.category = ?';
       params.push(category);
     }
 
     if (search) {
-      query += ' AND (product_name LIKE ? OR variety LIKE ? OR product_id LIKE ?)';
+      query += ' AND (p.product_name LIKE ? OR p.variety LIKE ? OR p.product_id LIKE ?)';
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
 
-    query += ' ORDER BY created_at DESC';
+    query += ' ORDER BY p.created_at DESC';
     
     const products = await getAll(query, params);
     res.json(products);
@@ -87,7 +170,12 @@ router.post('/', [
   body('unit').isIn(['kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes']).withMessage('Invalid unit'),
   body('quantity_available').isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
   body('purchase_price').isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
-  body('selling_price').isFloat({ min: 0 }).withMessage('Selling price must be non-negative')
+  body('selling_price').isFloat({ min: 0 }).withMessage('Selling price must be non-negative'),
+  body('creation_mode').optional().isIn(['inventory', 'order']).withMessage('Invalid creation mode'),
+  body('order_quantity').optional().isFloat({ min: 0.01 }).withMessage('Order quantity must be positive'),
+  body('order_date').optional().trim(),
+  body('advance_amount').optional().isFloat({ min: 0 }).withMessage('Advance amount must be non-negative'),
+  body('bank_account_id').optional({ nullable: true }).isInt({ min: 1 }).withMessage('Invalid bank account')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -104,8 +192,39 @@ router.post('/', [
       unit,
       purchase_price,
       selling_price,
-      supplier
+      supplier,
+      creation_mode,
+      order_quantity,
+      order_date,
+      advance_amount,
+      bank_account_id
     } = req.body;
+
+    const creationMode = creation_mode === PRODUCT_CREATION_MODE.ORDER
+      ? PRODUCT_CREATION_MODE.ORDER
+      : PRODUCT_CREATION_MODE.INVENTORY;
+    const inventoryQuantity = creationMode === PRODUCT_CREATION_MODE.ORDER ? 0 : toNumber(quantity_available);
+    const orderQuantity = creationMode === PRODUCT_CREATION_MODE.ORDER ? toNumber(order_quantity) : 0;
+    const advanceAmount = creationMode === PRODUCT_CREATION_MODE.ORDER ? toNumber(advance_amount) : 0;
+    const bankAccountId = bank_account_id ? Number(bank_account_id) : null;
+    const supplierName = supplier ? String(supplier).trim() : '';
+
+    if (creationMode === PRODUCT_CREATION_MODE.ORDER && orderQuantity <= 0) {
+      return res.status(400).json({ message: 'Enter an order quantity for ordered products' });
+    }
+
+    if (creationMode === PRODUCT_CREATION_MODE.ORDER) {
+      const orderTotal = orderQuantity * toNumber(purchase_price);
+      if (advanceAmount > orderTotal) {
+        return res.status(400).json({ message: 'Advance amount cannot exceed the total order amount' });
+      }
+      if (advanceAmount > 0 && !supplierName) {
+        return res.status(400).json({ message: 'Supplier is required when paying an advance amount' });
+      }
+      if (advanceAmount > 0 && !bankAccountId) {
+        return res.status(400).json({ message: 'Select a bank account for the advance payment' });
+      }
+    }
 
     // Validate category against product_categories table
     const validCategory = await getRow('SELECT id FROM product_categories WHERE name = ?', [category]);
@@ -134,23 +253,117 @@ router.post('/', [
       return res.status(400).json({ message: 'Product ID already exists' });
     }
 
-    const result = await runQuery(
-      `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier]
-    );
+    const eventTimestamp = nowIST();
+    let newProduct;
+    let createdPurchase = null;
 
-    const newProduct = await getRow('SELECT * FROM products WHERE id = ?', [result.id]);
-
-    // Record initial purchase if quantity > 0
-    if (parseFloat(quantity_available) > 0) {
-      const crypto = require('crypto');
-      const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
-      await runQuery(
-        `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, added_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [purchaseId, newProduct.id, quantity_available, purchase_price, quantity_available * purchase_price, supplier || null, req.user.id]
+    await runQuery('BEGIN TRANSACTION');
+    try {
+      const result = await runQuery(
+        `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [product_id, category, product_name, variety, inventoryQuantity, unit, purchase_price, selling_price, supplierName || null]
       );
+
+      newProduct = await getRow('SELECT * FROM products WHERE id = ?', [result.id]);
+
+      if (creationMode === PRODUCT_CREATION_MODE.INVENTORY && inventoryQuantity > 0) {
+        const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
+        const purchaseResult = await runQuery(
+          `INSERT INTO purchases (
+             purchase_id,
+             product_id,
+             quantity,
+             price_per_unit,
+             total_amount,
+             supplier,
+             purchase_date,
+             delivery_date,
+             purchase_status,
+             advance_amount,
+             added_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            purchaseId,
+            newProduct.id,
+            inventoryQuantity,
+            toNumber(purchase_price),
+            inventoryQuantity * toNumber(purchase_price),
+            supplierName || null,
+            eventTimestamp,
+            eventTimestamp,
+            PURCHASE_STATUS.DELIVERED,
+            0,
+            req.user.id
+          ]
+        );
+        createdPurchase = await getRow('SELECT * FROM purchases WHERE id = ?', [purchaseResult.id]);
+      }
+
+      if (creationMode === PRODUCT_CREATION_MODE.ORDER) {
+        const purchaseId = 'PUR' + moment().utcOffset('+05:30').format('YYYYMMDDHHmmss') +
+          crypto.randomBytes(2).toString('hex').toUpperCase();
+        const storedOrderDate = order_date && String(order_date).length === 10
+          ? combineISTDateWithCurrentTime(order_date, eventTimestamp)
+          : eventTimestamp;
+
+        const purchaseResult = await runQuery(
+          `INSERT INTO purchases (
+             purchase_id,
+             product_id,
+             quantity,
+             price_per_unit,
+             total_amount,
+             supplier,
+             purchase_date,
+             delivery_date,
+             purchase_status,
+             advance_amount,
+             added_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            purchaseId,
+            newProduct.id,
+            orderQuantity,
+            toNumber(purchase_price),
+            orderQuantity * toNumber(purchase_price),
+            supplierName || null,
+            storedOrderDate,
+            null,
+            PURCHASE_STATUS.ORDERED,
+            advanceAmount,
+            req.user.id
+          ]
+        );
+
+        if (advanceAmount > 0) {
+          const advancePaymentId = await createAdvancePayment({
+            supplierName,
+            amount: advanceAmount,
+            bankAccountId,
+            purchaseId,
+            paymentDate: String(storedOrderDate).slice(0, 10),
+            userId: req.user.id,
+            eventTimestamp
+          });
+
+          await runQuery(
+            'UPDATE purchases SET advance_payment_id = ? WHERE id = ?',
+            [advancePaymentId, purchaseResult.id]
+          );
+        }
+
+        createdPurchase = await getRow('SELECT * FROM purchases WHERE id = ?', [purchaseResult.id]);
+      }
+
+      await runQuery('COMMIT');
+    } catch (transactionError) {
+      try {
+        await runQuery('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Rollback add product error:', rollbackError);
+      }
+      throw transactionError;
     }
 
     addReviewNotification({
@@ -158,15 +371,21 @@ router.post('/', [
       actorName: req.user.username,
       actorRole: req.user.role,
       type: 'inventory',
-      title: 'Added a new inventory item',
-      description: `${newProduct.product_name} (${newProduct.product_id}) was added under ${newProduct.category}.`,
-      createdAt: nowIST()
+      title: creationMode === PRODUCT_CREATION_MODE.ORDER ? 'Added a new product and placed an order' : 'Added a new inventory item',
+      description: creationMode === PRODUCT_CREATION_MODE.ORDER
+        ? `${newProduct.product_name} (${newProduct.product_id}) was created and ordered for ${orderQuantity} ${newProduct.unit}.`
+        : `${newProduct.product_name} (${newProduct.product_id}) was added under ${newProduct.category}.`,
+      createdAt: eventTimestamp
     });
 
-    res.status(201).json(newProduct);
+    res.status(201).json({
+      ...newProduct,
+      created_purchase: createdPurchase,
+      creation_mode: creationMode
+    });
   } catch (error) {
     console.error('Add product error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(error.status || 500).json({ message: error.message || 'Server error' });
   }
 });
 
@@ -175,10 +394,6 @@ router.put('/:id', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   requireDailySetupForOperatorWrites,
-  body('product_name').optional().notEmpty().withMessage('Product name cannot be empty'),
-  body('unit').optional().isIn(['kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes']).withMessage('Invalid unit'),
-  body('quantity_available').optional().isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
-  body('purchase_price').optional().isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
   body('selling_price').optional().isFloat({ min: 0 }).withMessage('Selling price must be non-negative')
 ], async (req, res) => {
   try {
@@ -194,50 +409,17 @@ router.put('/:id', [
       return res.status(404).json({ message: 'Product not found' });
     }
 
-    const {
-      product_name,
-      variety,
-      quantity_available,
-      unit,
-      purchase_price,
-      selling_price,
-      supplier
-    } = req.body;
-
     const updateFields = [];
     const updateValues = [];
+    const { selling_price } = req.body;
 
-    if (product_name !== undefined) {
-      updateFields.push('product_name = ?');
-      updateValues.push(product_name);
-    }
-    if (variety !== undefined) {
-      updateFields.push('variety = ?');
-      updateValues.push(variety);
-    }
-    if (quantity_available !== undefined) {
-      updateFields.push('quantity_available = ?');
-      updateValues.push(quantity_available);
-    }
-    if (unit !== undefined) {
-      updateFields.push('unit = ?');
-      updateValues.push(unit);
-    }
-    if (purchase_price !== undefined) {
-      updateFields.push('purchase_price = ?');
-      updateValues.push(purchase_price);
-    }
     if (selling_price !== undefined) {
       updateFields.push('selling_price = ?');
       updateValues.push(selling_price);
     }
-    if (supplier !== undefined) {
-      updateFields.push('supplier = ?');
-      updateValues.push(supplier);
-    }
 
     if (updateFields.length === 0) {
-      return res.status(400).json({ message: 'No fields to update' });
+      return res.status(400).json({ message: 'Only selling price can be updated from inventory modify' });
     }
 
     updateFields.push('updated_at = ?');
@@ -357,7 +539,19 @@ router.post('/:id/add-stock', [
 router.get('/alerts/low-stock', authenticateToken, async (req, res) => {
   try {
     const products = await getAll(
-      'SELECT * FROM products WHERE quantity_available <= 10 ORDER BY quantity_available ASC'
+      `SELECT p.*
+       FROM products p
+       WHERE p.quantity_available <= 10
+         AND NOT (
+           COALESCE(p.quantity_available, 0) <= 0
+           AND EXISTS (
+             SELECT 1
+             FROM purchases pur
+             WHERE pur.product_id = p.id
+               AND COALESCE(pur.purchase_status, 'delivered') = 'ordered'
+           )
+         )
+       ORDER BY p.quantity_available ASC`
     );
     res.json(products);
   } catch (error) {

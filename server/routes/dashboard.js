@@ -35,10 +35,19 @@ router.get('/admin', [
 
     // Low stock alerts
     const lowStockItems = await getAll(
-      `SELECT id, product_name, variety, quantity_available, unit
-       FROM products
-       WHERE quantity_available <= 10
-       ORDER BY quantity_available ASC
+      `SELECT p.id, p.product_name, p.variety, p.quantity_available, p.unit
+       FROM products p
+       WHERE p.quantity_available <= 10
+         AND NOT (
+           COALESCE(p.quantity_available, 0) <= 0
+           AND EXISTS (
+             SELECT 1
+             FROM purchases pur
+             WHERE pur.product_id = p.id
+               AND COALESCE(pur.purchase_status, 'delivered') = 'ordered'
+           )
+         )
+       ORDER BY p.quantity_available ASC
        LIMIT 10`
     );
 
@@ -48,6 +57,26 @@ router.get('/admin', [
        FROM sales s
        JOIN products p ON s.product_id = p.id
        ORDER BY s.sale_date DESC
+       LIMIT 5`
+    );
+
+    // Pending purchase orders
+    const orderedItems = await getAll(
+      `SELECT
+         pur.purchase_id,
+         pur.purchase_date,
+         pur.quantity,
+         p.unit,
+         pur.supplier,
+         COALESCE(pur.total_amount, 0) AS total_amount,
+         COALESCE(pur.advance_amount, 0) AS advance_amount,
+         MAX(COALESCE(pur.total_amount, 0) - COALESCE(pur.advance_amount, 0), 0) AS balance_due,
+         p.product_name,
+         p.variety
+       FROM purchases pur
+       JOIN products p ON pur.product_id = p.id
+       WHERE COALESCE(pur.purchase_status, 'delivered') = 'ordered'
+       ORDER BY pur.purchase_date DESC
        LIMIT 5`
     );
 
@@ -96,6 +125,7 @@ router.get('/admin', [
       recent_activity: {
         sales: recentSales
       },
+      ordered_items: orderedItems,
       analytics: {
         week_comparison: weekComparison,
         category_performance: categoryPerformance
@@ -146,6 +176,26 @@ router.get('/operator', [
       [req.user.id]
     );
 
+    // Pending purchase orders across the business
+    const orderedItems = await getAll(
+      `SELECT
+         pur.purchase_id,
+         pur.purchase_date,
+         pur.quantity,
+         p.unit,
+         pur.supplier,
+         COALESCE(pur.total_amount, 0) AS total_amount,
+         COALESCE(pur.advance_amount, 0) AS advance_amount,
+         MAX(COALESCE(pur.total_amount, 0) - COALESCE(pur.advance_amount, 0), 0) AS balance_due,
+         p.product_name,
+         p.variety
+       FROM purchases pur
+       JOIN products p ON pur.product_id = p.id
+       WHERE COALESCE(pur.purchase_status, 'delivered') = 'ordered'
+       ORDER BY pur.purchase_date DESC
+       LIMIT 5`
+    );
+
     // Quick search popular items
     const popularItems = await getAll(
       `SELECT 
@@ -173,6 +223,7 @@ router.get('/operator', [
         revenue: todaySales?.revenue || 0
       },
       recent_sales: recentSales,
+      ordered_items: orderedItems,
       popular_items: popularItems
     });
   } catch (error) {

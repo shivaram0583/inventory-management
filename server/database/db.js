@@ -155,6 +155,7 @@ function initializeDatabase() {
     customer_address TEXT,
     product_name TEXT NOT NULL,
     quantity REAL NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
     sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`, (err) => {
@@ -172,6 +173,13 @@ function initializeDatabase() {
     if (!hasPaymentMode) {
       db.run(`ALTER TABLE customer_sales ADD COLUMN payment_mode TEXT DEFAULT 'cash'`, (e) => {
         if (!e) console.log('Added payment_mode column to customer_sales table');
+      });
+    }
+
+    const hasAmount = columns.some((c) => c.name === 'amount');
+    if (!hasAmount) {
+      db.run(`ALTER TABLE customer_sales ADD COLUMN amount REAL NOT NULL DEFAULT 0`, (e) => {
+        if (!e) console.log('Added amount column to customer_sales table');
       });
     }
   });
@@ -323,6 +331,39 @@ function initializeDatabase() {
       console.error('Error creating purchases table:', err.message);
     } else {
       console.log('Purchases table created successfully');
+    }
+  });
+
+  db.all(`PRAGMA table_info(purchases)`, (err, columns) => {
+    if (err) return;
+
+    const hasPurchaseStatus = columns.some((c) => c.name === 'purchase_status');
+    const hasDeliveryDate = columns.some((c) => c.name === 'delivery_date');
+    const hasAdvanceAmount = columns.some((c) => c.name === 'advance_amount');
+    const hasAdvancePaymentId = columns.some((c) => c.name === 'advance_payment_id');
+
+    if (!hasPurchaseStatus) {
+      db.run(`ALTER TABLE purchases ADD COLUMN purchase_status TEXT NOT NULL DEFAULT 'delivered'`, (e) => {
+        if (!e) console.log('Added purchase_status column to purchases table');
+      });
+    }
+
+    if (!hasDeliveryDate) {
+      db.run(`ALTER TABLE purchases ADD COLUMN delivery_date DATETIME`, (e) => {
+        if (!e) console.log('Added delivery_date column to purchases table');
+      });
+    }
+
+    if (!hasAdvanceAmount) {
+      db.run(`ALTER TABLE purchases ADD COLUMN advance_amount REAL NOT NULL DEFAULT 0`, (e) => {
+        if (!e) console.log('Added advance_amount column to purchases table');
+      });
+    }
+
+    if (!hasAdvancePaymentId) {
+      db.run(`ALTER TABLE purchases ADD COLUMN advance_payment_id INTEGER`, (e) => {
+        if (!e) console.log('Added advance_payment_id column to purchases table');
+      });
     }
   });
 
@@ -576,6 +617,15 @@ function runOneTimeMigration(name, statements) {
 }
 
 async function runTimestampMigrations() {
+  await runOneTimeMigration('purchase-order-status-backfill-v1', [
+    `UPDATE purchases SET purchase_status = 'delivered' WHERE purchase_status IS NULL OR trim(purchase_status) = ''`,
+    `UPDATE purchases SET advance_amount = 0 WHERE advance_amount IS NULL`,
+    `UPDATE purchases
+     SET delivery_date = purchase_date
+     WHERE COALESCE(purchase_status, 'delivered') = 'delivered'
+       AND delivery_date IS NULL`
+  ]);
+
   await runOneTimeMigration('purchase-date-time-backfill-v1', [
     `
       UPDATE purchases

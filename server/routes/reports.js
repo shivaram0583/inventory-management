@@ -6,6 +6,77 @@ const { getDailyBalanceSnapshot, getDailySetupRecord, getISTDateString } = requi
 
 const router = express.Router();
 
+async function getCustomerSalesSelect() {
+  const columns = await getAll('PRAGMA table_info(customer_sales)');
+  const columnNames = new Set((columns || []).map((column) => column.name));
+  const hasAmount = columnNames.has('amount');
+  const hasPaymentMode = columnNames.has('payment_mode');
+
+  const amountExpression = hasAmount
+    ? `COALESCE(
+         NULLIF(cs.amount, 0),
+         (
+           SELECT s.total_amount
+           FROM sales s
+           JOIN products p ON p.id = s.product_id
+           WHERE s.sale_id = cs.sale_id
+             AND p.product_name = cs.product_name
+             AND COALESCE(s.quantity_sold, 0) = COALESCE(cs.quantity, 0)
+           LIMIT 1
+         ),
+         (
+           SELECT s.total_amount
+           FROM sales s
+           JOIN products p ON p.id = s.product_id
+           WHERE s.sale_id = cs.sale_id
+             AND p.product_name = cs.product_name
+           ORDER BY s.id DESC
+           LIMIT 1
+         ),
+         0
+       )`
+    : `COALESCE(
+         (
+           SELECT s.total_amount
+           FROM sales s
+           JOIN products p ON p.id = s.product_id
+           WHERE s.sale_id = cs.sale_id
+             AND p.product_name = cs.product_name
+             AND COALESCE(s.quantity_sold, 0) = COALESCE(cs.quantity, 0)
+           LIMIT 1
+         ),
+         (
+           SELECT s.total_amount
+           FROM sales s
+           JOIN products p ON p.id = s.product_id
+           WHERE s.sale_id = cs.sale_id
+             AND p.product_name = cs.product_name
+           ORDER BY s.id DESC
+           LIMIT 1
+         ),
+         0
+       )`;
+
+  const paymentModeExpression = hasPaymentMode ? 'cs.payment_mode' : `'cash'`;
+
+  return `
+    SELECT
+      cs.id,
+      cs.sale_id,
+      cs.receipt_id,
+      cs.customer_name,
+      cs.customer_mobile,
+      cs.customer_address,
+      cs.product_name,
+      cs.quantity,
+      ${amountExpression} AS amount,
+      ${paymentModeExpression} AS payment_mode,
+      cs.sale_date,
+      cs.created_at
+    FROM customer_sales cs
+  `;
+}
+
 // Daily sales report
 router.get('/daily-sales', authenticateToken, async (req, res) => {
   try {
@@ -38,10 +109,11 @@ router.get('/daily-sales', authenticateToken, async (req, res) => {
       [date]
     );
 
+    const customerSalesSelect = await getCustomerSalesSelect();
     const customerSales = await getAll(
-      `SELECT * FROM customer_sales
-       WHERE DATE(sale_date) = ?
-       ORDER BY sale_date DESC`,
+      `${customerSalesSelect}
+       WHERE DATE(cs.sale_date) = ?
+       ORDER BY cs.sale_date DESC, cs.id DESC`,
       [date]
     );
 
@@ -445,11 +517,15 @@ router.get('/customer-sales', authenticateToken, async (req, res) => {
       params.push(start_date, end_date);
     }
 
+    const filterClause = dateFilter
+      ? dateFilter.replace(/sale_date/g, 'cs.sale_date')
+      : '';
+
+    const customerSalesSelect = await getCustomerSalesSelect();
     const records = await getAll(
-      `SELECT *
-       FROM customer_sales
-       ${dateFilter}
-       ORDER BY sale_date DESC, id DESC`,
+      `${customerSalesSelect}
+       ${filterClause}
+       ORDER BY cs.sale_date DESC, cs.id DESC`,
       params
     );
 
