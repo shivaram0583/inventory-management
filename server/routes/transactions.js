@@ -612,9 +612,12 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
 
     // Daily purchase amounts (stock bought)
     const purchasesByDay = await getAll(`
-      SELECT DATE(purchase_date) as day, SUM(total_amount) as total_purchases
+      SELECT
+        DATE(COALESCE(delivery_date, purchase_date)) as day,
+        SUM(total_amount) as total_purchases
       FROM purchases
-      WHERE DATE(purchase_date) BETWEEN ? AND ?
+      WHERE COALESCE(purchase_status, 'delivered') = 'delivered'
+        AND DATE(COALESCE(delivery_date, purchase_date)) BETWEEN ? AND ?
       GROUP BY day ORDER BY day
     `, [start_date, end_date]);
 

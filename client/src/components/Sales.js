@@ -401,6 +401,7 @@ const Sales = () => {
         onClose={() => setConfirmModalOpen(false)}
         title="Confirm Sale"
         type="warning"
+        theme="sales"
         confirmText={loading ? 'Processing...' : 'Confirm Sale'}
         onConfirm={!loading ? confirmSale : undefined}
       >
@@ -437,6 +438,7 @@ const Sales = () => {
         onClose={() => setReceiptModal({ open: false, saleId: null, receiptNumber: null })}
         title="Receipt Generated"
         type="success"
+        theme="sales"
         confirmText="Close"
       >
         <div className="space-y-3">

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
 import { Download, X, FileText, Loader } from 'lucide-react';
 import CustomSelect from './shared/CustomSelect';
@@ -374,7 +375,7 @@ const ReportDownloader = () => {
         Download Reports
       </button>
 
-      {open && (
+      {open && (typeof document === 'undefined' ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
              style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col" style={{maxHeight:'85vh'}}>
@@ -455,7 +456,86 @@ const ReportDownloader = () => {
             </div>
           </div>
         </div>
-      )}
+      ) : createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+             style={{background:'rgba(15,23,42,0.55)',backdropFilter:'blur(4px)'}}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col" style={{maxHeight:'85vh'}}>
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-gray-100 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-green-600" />
+                <h2 className="text-lg font-bold text-gray-900">Download CSV Report</h2>
+              </div>
+              <button onClick={() => setOpen(false)}
+                className="h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1" style={{scrollbarWidth:'thin'}}>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Report Type</label>
+                <CustomSelect
+                  options={REPORT_TYPES.map(t => ({ value: t.id, label: t.label }))}
+                  value={reportType}
+                  onChange={(val) => setReportType(val)}
+                />
+              </div>
+
+              {selectedType?.needsRange && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">From</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={e => setStartDate(e.target.value)}
+                      className="input-field"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">To</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={e => setEndDate(e.target.value)}
+                      className="input-field"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {error}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 flex justify-end gap-2.5 border-t border-gray-100 flex-shrink-0"
+                 style={{background:'linear-gradient(90deg,#f8faff,#f5f3ff)'}}>
+              <button
+                onClick={() => setOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 active:scale-95 transition-all duration-150"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDownload}
+                disabled={loading}
+                className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50"
+                style={{background:'linear-gradient(135deg,#10b981,#059669)'}}
+              >
+                {loading ? (
+                  <><Loader className="h-4 w-4 animate-spin" /> Generating...</>
+                ) : (
+                  <><Download className="h-4 w-4" /> Download CSV</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      ))}
     </>
   );
 };
