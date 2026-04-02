@@ -212,7 +212,9 @@ const buildTransactionReportRows = (payload, startDate, endDate) => {
     created_by: item.created_by_name || ''
   }));
 
-  const bankTransferRows = (payload.bankTransfers || []).map((item) => ({
+  const bankTransferRows = (payload.bankTransfers || [])
+    .filter((item) => item.source_type !== 'supplier_payment')
+    .map((item) => ({
     row_type: 'detail',
     period_start: startDate,
     period_end: endDate,
@@ -262,7 +264,7 @@ const buildTransactionReportRows = (payload, startDate, endDate) => {
     amount: item.amount,
     payment_mode: item.payment_mode,
     bank_account: formatBankLabel(item.account_name, item.bank_name),
-    credited_to: item.payment_mode === 'bank' ? formatBankLabel(item.account_name, item.bank_name) : '',
+    credited_to: ['bank', 'upi'].includes(item.payment_mode) ? formatBankLabel(item.account_name, item.bank_name) : '',
     reference: `SP-${item.id}`,
     category: '',
     party_name: item.supplier_name || '',

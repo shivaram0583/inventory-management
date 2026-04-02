@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
+import { useReactToPrint } from 'react-to-print';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
 import CustomSelect from './shared/CustomSelect';
@@ -19,7 +20,10 @@ import {
   Building2,
   ChevronDown,
   ChevronUp,
-  RefreshCw
+  RefreshCw,
+  FileText,
+  Printer,
+  Download
 } from 'lucide-react';
 
 const num = (value) => {
@@ -52,6 +56,7 @@ const Transactions = () => {
   const [showBankTransferModal, setShowBankTransferModal] = useState(false);
   const [showSupplierPayModal, setShowSupplierPayModal] = useState(false);
   const [showBankAccModal, setShowBankAccModal] = useState(false);
+  const [statementModal, setStatementModal] = useState({ open: false, account: null, data: null, loading: false });
   const [actionModal, setActionModal] = useState({ open: false, title: '', message: '', type: 'success' });
   const [deleteModal, setDeleteModal] = useState({ open: false, type: '', id: null, label: '' });
 
@@ -63,8 +68,10 @@ const Transactions = () => {
 
   // Expanded day rows
   const [expandedDay, setExpandedDay] = useState(null);
+  const statementRef = React.useRef(null);
 
   const showMsg = (title, message, type = 'success') => setActionModal({ open: true, title, message, type });
+  const isSupplierPaymentBankBacked = supplierPayForm.payment_mode === 'bank' || supplierPayForm.payment_mode === 'upi';
 
   // Fetch functions
   const fetchBankAccounts = useCallback(async () => {
@@ -124,6 +131,26 @@ const Transactions = () => {
 
   useEffect(() => { refreshAll(); }, [refreshAll]);
 
+  const handlePrintStatement = useReactToPrint({
+    content: () => statementRef.current,
+    documentTitle: statementModal.account
+      ? `${statementModal.account.account_name}_${startDate}_to_${endDate}_statement`
+      : `bank_statement_${startDate}_to_${endDate}`
+  });
+
+  const openStatement = async (account) => {
+    setStatementModal({ open: true, account, data: null, loading: true });
+    try {
+      const res = await axios.get(`/api/transactions/bank-accounts/${account.id}/statement`, {
+        params: { start_date: startDate, end_date: endDate }
+      });
+      setStatementModal({ open: true, account, data: res.data, loading: false });
+    } catch (err) {
+      setStatementModal({ open: false, account: null, data: null, loading: false });
+      showMsg('Error', err.response?.data?.message || 'Failed to load bank statement', 'error');
+    }
+  };
+
   // Handlers
   const handleAddExpenditure = async (e) => {
     e.preventDefault();
@@ -162,7 +189,9 @@ const Transactions = () => {
       const payload = {
         ...supplierPayForm,
         amount: num(supplierPayForm.amount),
-        bank_account_id: supplierPayForm.payment_mode === 'bank' ? Number(supplierPayForm.bank_account_id) : null
+        bank_account_id: isSupplierPaymentBankBacked && supplierPayForm.bank_account_id
+          ? Number(supplierPayForm.bank_account_id)
+          : null
       };
       await axios.post('/api/transactions/supplier-payments', payload);
       setShowSupplierPayModal(false);
@@ -319,6 +348,7 @@ const Transactions = () => {
           onDeleteAccount={(id, label) => setDeleteModal({ open: true, type: 'bank-accounts', id, label })}
           onDeleteTransfer={(id) => setDeleteModal({ open: true, type: 'bank-transfers', id, label: 'this transfer' })}
           onSetDefaultBank={handleSetDefaultBank}
+          onViewStatement={openStatement}
         />
       )}
 
@@ -468,9 +498,9 @@ const Transactions = () => {
                 />
               </div>
             </div>
-            {supplierPayForm.payment_mode === 'bank' && (
+            {isSupplierPaymentBankBacked && (
               <div>
-                <label className="label-sm">Bank Account</label>
+                <label className="label-sm">{supplierPayForm.payment_mode === 'upi' ? 'UPI Linked Bank Account' : 'Bank Account'}</label>
                 <CustomSelect
                   required
                   options={bankAccounts.map(a => ({ value: String(a.id), label: `${a.account_name} - ${a.bank_name} (₹${fmt(a.balance)})` }))}
@@ -534,6 +564,19 @@ const Transactions = () => {
             </div>
           </form>
         </FormModal>
+      )}
+
+      {statementModal.open && (
+        <StatementModal
+          statementRef={statementRef}
+          account={statementModal.account}
+          statement={statementModal.data}
+          loading={statementModal.loading}
+          startDate={startDate}
+          endDate={endDate}
+          onClose={() => setStatementModal({ open: false, account: null, data: null, loading: false })}
+          onDownload={handlePrintStatement}
+        />
       )}
 
       {/* Delete Confirmation */}
@@ -714,7 +757,8 @@ const BankTab = ({
   onAddTransfer,
   onDeleteAccount,
   onDeleteTransfer,
-  onSetDefaultBank
+  onSetDefaultBank,
+  onViewStatement
 }) => (
   <div className="space-y-6">
     <div>
@@ -755,31 +799,41 @@ const BankTab = ({
                 <p className={`mt-2 text-xs font-medium ${isDefault ? 'text-violet-700' : 'text-gray-500'}`}>
                   {isDefault ? 'This is the default bank selected for today.' : 'Available to set as the default bank for today.'}
                 </p>
-                {isAdmin && (
-                  <div className="mt-4 flex items-center gap-2">
-                    {isDefault ? (
-                      <span className="inline-flex items-center rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-700">
-                        Default Bank Selected
-                      </span>
-                    ) : (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onViewStatement?.(acc)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-200 transition-colors"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    Statement
+                  </button>
+                  {isAdmin && (
+                    <>
+                      {isDefault ? (
+                        <span className="inline-flex items-center rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-700">
+                          Default Bank Selected
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onSetDefaultBank?.(acc.id)}
+                          className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700 transition-colors"
+                        >
+                          Set As Default
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => onSetDefaultBank?.(acc.id)}
-                        className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700 transition-colors"
+                        onClick={() => onDeleteAccount?.(acc.id, `${acc.account_name} (${acc.bank_name})`)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 transition-colors"
                       >
-                        Set As Default
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onDeleteAccount?.(acc.id, `${acc.account_name} (${acc.bank_name})`)}
-                      className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100 transition-colors"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Remove
-                    </button>
-                  </div>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -789,7 +843,7 @@ const BankTab = ({
 
     <div>
       <div className="flex justify-between items-center mb-3">
-        <h3 className="text-lg font-bold text-gray-800">Transfers</h3>
+        <h3 className="text-lg font-bold text-gray-800">Bank Ledger</h3>
         {isAdmin && bankAccounts.length > 0 && (
           <button onClick={onAddTransfer} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 shadow transition-all">
             <ArrowLeftRight className="h-4 w-4" /> New Transfer
@@ -802,8 +856,8 @@ const BankTab = ({
             <thead>
               <tr>
                 <th>Timestamp</th>
-                <th>Type</th>
-                <th>Credited To</th>
+                <th>Entry</th>
+                <th>Bank Account</th>
                 <th>Source</th>
                 <th>Description</th>
                 <th className="text-right">Amount</th>
@@ -812,22 +866,26 @@ const BankTab = ({
             </thead>
             <tbody>
               {bankTransfers.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 7 : 6} className="text-center text-gray-400 py-8">No transfers found</td></tr>
+                <tr><td colSpan={isAdmin ? 7 : 6} className="text-center text-gray-400 py-8">No bank transactions found</td></tr>
               ) : bankTransfers.map(bt => (
                 <tr key={bt.id}>
                   <td className="font-medium">{formatAuditTimestamp(bt.created_at, bt.transfer_date)}</td>
                   <td>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${bt.transfer_type === 'deposit' ? 'bg-blue-100 text-blue-700' : 'bg-cyan-100 text-cyan-700'}`}>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getBankEntryBadgeClass(bt)}`}>
                       {bt.transfer_type === 'deposit' ? '↑ Deposit' : '↓ Withdrawal'}
                     </span>
                   </td>
-                  <td className="text-sm text-gray-700">{formatCreditedTo(bt)}</td>
+                  <td className="text-sm text-gray-700">{formatBankAccountLabel(bt.account_name, bt.bank_name)}</td>
                   <td className="text-sm text-gray-500">{formatTransferSource(bt)}</td>
                   <td className="text-sm text-gray-500">{bt.description || '-'}</td>
                   <td className={`text-right font-bold ${bt.transfer_type === 'deposit' ? 'text-blue-600' : 'text-cyan-600'}`}>₹{fmt(bt.amount)}</td>
                   {isAdmin && (
                     <td>
-                      <button onClick={() => onDeleteTransfer(bt.id)} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>
+                      {canDeleteBankEntry(bt) ? (
+                        <button onClick={() => onDeleteTransfer(bt.id)} className="text-red-500 hover:text-red-700"><Trash2 className="h-4 w-4" /></button>
+                      ) : (
+                        <span className="text-xs font-medium text-gray-400">Locked</span>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -841,6 +899,117 @@ const BankTab = ({
 );
 
 // ─── SUPPLIER TAB ───────────────────────────────────────────────────────────
+
+const StatementModal = ({ statementRef, account, statement, loading, startDate, endDate, onClose, onDownload }) => (
+  <FormModal title={`Bank Statement${account ? ` - ${account.account_name}` : ''}`} onClose={onClose}>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
+        <div>
+          <p className="text-sm font-bold text-slate-800">{account?.account_name || 'Bank Statement'}</p>
+          <p className="text-xs text-slate-500">
+            {account?.bank_name || '-'}
+            {account?.account_number ? ` · ${account.account_number}` : ''}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">Range: {formatDisplayDate(startDate)} to {formatDisplayDate(endDate)}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={loading || !statement}
+          className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download PDF
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-slate-700" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div ref={statementRef} className="space-y-4 bg-white text-slate-900">
+            <div className="rounded-xl border border-slate-200 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xl font-bold">{statement?.account?.account_name}</p>
+                  <p className="text-sm text-slate-500">{statement?.account?.bank_name}</p>
+                  <p className="text-sm text-slate-500">{statement?.account?.account_number || 'Account number not added'}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Statement Period</p>
+                  <p className="text-sm font-semibold">{formatDisplayDate(startDate)} to {formatDisplayDate(endDate)}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <SummaryCard label="Opening Balance" value={statement?.opening_balance} icon={Wallet} color="blue" />
+              <SummaryCard label="Money In" value={statement?.total_credits} icon={ArrowUpToLine} color="emerald" />
+              <SummaryCard label="Money Out" value={statement?.total_debits} icon={TrendingDown} color="red" />
+              <SummaryCard label="Closing Balance" value={statement?.closing_balance} icon={Landmark} color="violet" />
+            </div>
+
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-sm font-bold text-slate-800">Transactions</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Timestamp</th>
+                      <th className="px-4 py-3 text-left">Entry</th>
+                      <th className="px-4 py-3 text-left">Source</th>
+                      <th className="px-4 py-3 text-left">Description</th>
+                      <th className="px-4 py-3 text-right">Amount</th>
+                      <th className="px-4 py-3 text-right">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(statement?.transactions || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-slate-400">No transactions found in this range.</td>
+                      </tr>
+                    ) : (statement?.transactions || []).map((entry) => (
+                      <tr key={entry.id} className="border-t border-slate-100">
+                        <td className="px-4 py-3">{formatAuditTimestamp(entry.created_at, entry.transfer_date)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${getBankEntryBadgeClass(entry)}`}>
+                            {getBankEntryLabel(entry)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{formatTransferSource(entry)}</td>
+                        <td className="px-4 py-3 text-slate-600">{entry.description || '-'}</td>
+                        <td className={`px-4 py-3 text-right font-bold ${entry.transfer_type === 'deposit' ? 'text-emerald-600' : 'text-orange-600'}`}>
+                          {entry.source_type === 'opening_balance' ? '' : entry.transfer_type === 'deposit' ? '+' : '-'}₹{fmt(entry.amount)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-700">₹{fmt(entry.balance_after)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onDownload}
+              disabled={!statement}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Printer className="h-4 w-4" />
+              Print / Save as PDF
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  </FormModal>
+);
 
 const SupplierTab = ({ supplierBalances, supplierPayments, bankAccounts, isAdmin, onAdd, onDelete }) => (
   <div className="space-y-6">
@@ -993,9 +1162,18 @@ const FormModal = ({ title, children, onClose }) => (
 );
 
 function formatTransferSource(transfer) {
+  if (transfer?.source_type === 'opening_balance') {
+    return 'Opening balance';
+  }
+
   if (transfer?.source_type === 'sale') {
     const mode = transfer.payment_mode ? transfer.payment_mode.toUpperCase() : 'SALE';
     return `${mode} sale${transfer.source_reference ? ` · ${transfer.source_reference}` : ''}`;
+  }
+
+  if (transfer?.source_type === 'supplier_payment') {
+    const mode = transfer.payment_mode ? transfer.payment_mode.toUpperCase() : 'BANK';
+    return `${mode} supplier payment`;
   }
 
   if (transfer?.source_type === 'manual') {
@@ -1005,18 +1183,32 @@ function formatTransferSource(transfer) {
   return transfer?.source_reference || '-';
 }
 
-function formatCreditedTo(transfer) {
-  if (!transfer) return '-';
-
-  if (transfer.transfer_type === 'withdrawal') {
-    return 'Cash Drawer';
+function formatBankAccountLabel(accountName, bankName) {
+  if (accountName && bankName) {
+    return `${accountName} (${bankName})`;
   }
 
-  if (transfer.account_name && transfer.bank_name) {
-    return `${transfer.account_name} (${transfer.bank_name})`;
+  return accountName || bankName || '-';
+}
+
+function getBankEntryLabel(entry) {
+  if (entry?.source_type === 'opening_balance') {
+    return 'Opening Balance';
   }
 
-  return transfer.account_name || transfer.bank_name || '-';
+  return entry?.transfer_type === 'deposit' ? 'Deposit' : 'Withdrawal';
+}
+
+function getBankEntryBadgeClass(entry) {
+  if (entry?.source_type === 'opening_balance') {
+    return 'bg-slate-100 text-slate-700';
+  }
+
+  return entry?.transfer_type === 'deposit' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700';
+}
+
+function canDeleteBankEntry(entry) {
+  return !entry?.source_type || entry.source_type === 'manual';
 }
 
 function formatDisplayDate(dateStr) {
