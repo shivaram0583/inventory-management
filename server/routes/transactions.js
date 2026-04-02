@@ -6,6 +6,11 @@ const { getRow, runQuery, getAll, nowIST } = require('../database/db');
 const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
 const {
+  isBankTrackedSupplierPaymentMode,
+  createSupplierPaymentRecord,
+  reverseSupplierPaymentBankEffects
+} = require('../services/bankLedger');
+const {
   getDailyBalanceSnapshot,
   getDailySetupStatus,
   upsertSelectedBank,
@@ -27,6 +32,131 @@ router.get('/bank-accounts', authenticateToken, async (req, res) => {
     res.json(accounts);
   } catch (error) {
     console.error('Get bank accounts error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/bank-accounts/:id/statement', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const startDate = moment(start_date, 'YYYY-MM-DD', true);
+    const endDate = moment(end_date, 'YYYY-MM-DD', true);
+
+    if (!startDate.isValid() || !endDate.isValid() || endDate.isBefore(startDate)) {
+      return res.status(400).json({ message: 'A valid start_date and end_date are required' });
+    }
+
+    const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [req.params.id]);
+    if (!account) {
+      return res.status(404).json({ message: 'Bank account not found' });
+    }
+
+    const createdDate = String(account.created_at || '').slice(0, 10);
+    if (createdDate && end_date < createdDate) {
+      return res.json({
+        account,
+        range: { start_date, end_date },
+        opening_balance: 0,
+        closing_balance: 0,
+        total_credits: 0,
+        total_debits: 0,
+        transaction_count: 0,
+        transactions: []
+      });
+    }
+
+    const [allTotals, beforeTotals, rangeTotals, transferRows] = await Promise.all([
+      getRow(`
+        SELECT
+          COALESCE(SUM(CASE WHEN transfer_type = 'deposit' THEN amount ELSE 0 END), 0) AS total_credits,
+          COALESCE(SUM(CASE WHEN transfer_type = 'withdrawal' THEN amount ELSE 0 END), 0) AS total_debits
+        FROM bank_transfers
+        WHERE bank_account_id = ?
+      `, [req.params.id]),
+      getRow(`
+        SELECT
+          COALESCE(SUM(CASE WHEN transfer_type = 'deposit' THEN amount ELSE 0 END), 0) AS total_credits,
+          COALESCE(SUM(CASE WHEN transfer_type = 'withdrawal' THEN amount ELSE 0 END), 0) AS total_debits
+        FROM bank_transfers
+        WHERE bank_account_id = ?
+          AND transfer_date < ?
+      `, [req.params.id, start_date]),
+      getRow(`
+        SELECT
+          COALESCE(SUM(CASE WHEN transfer_type = 'deposit' THEN amount ELSE 0 END), 0) AS total_credits,
+          COALESCE(SUM(CASE WHEN transfer_type = 'withdrawal' THEN amount ELSE 0 END), 0) AS total_debits
+        FROM bank_transfers
+        WHERE bank_account_id = ?
+          AND transfer_date BETWEEN ? AND ?
+      `, [req.params.id, start_date, end_date]),
+      getAll(`
+        SELECT bt.*, u.username AS created_by_name
+        FROM bank_transfers bt
+        LEFT JOIN users u ON u.id = bt.created_by
+        WHERE bt.bank_account_id = ?
+          AND bt.transfer_date BETWEEN ? AND ?
+        ORDER BY bt.transfer_date ASC, bt.created_at ASC, bt.id ASC
+      `, [req.params.id, start_date, end_date])
+    ]);
+
+    const totalCreditsAll = toNumber(allTotals?.total_credits);
+    const totalDebitsAll = toNumber(allTotals?.total_debits);
+    const initialBalance = toNumber(account.balance) - (totalCreditsAll - totalDebitsAll);
+    const accountCreatedInRange = Boolean(createdDate && createdDate >= start_date && createdDate <= end_date);
+
+    let openingBalance = 0;
+    if (createdDate && createdDate < start_date) {
+      openingBalance = initialBalance
+        + toNumber(beforeTotals?.total_credits)
+        - toNumber(beforeTotals?.total_debits);
+    }
+
+    let runningBalance = openingBalance;
+    const transactions = [];
+
+    if (accountCreatedInRange && Math.abs(initialBalance) > 0.0001) {
+      runningBalance += initialBalance;
+      transactions.push({
+        id: `opening-${account.id}`,
+        transfer_type: 'deposit',
+        source_type: 'opening_balance',
+        source_reference: `opening-balance:${account.id}`,
+        payment_mode: null,
+        description: 'Opening balance',
+        transfer_date: createdDate,
+        created_at: account.created_at,
+        created_by_name: null,
+        amount: initialBalance,
+        balance_after: runningBalance
+      });
+    }
+
+    for (const row of transferRows) {
+      const delta = row.transfer_type === 'deposit' ? toNumber(row.amount) : -toNumber(row.amount);
+      runningBalance += delta;
+      transactions.push({
+        ...row,
+        balance_after: runningBalance
+      });
+    }
+
+    const closingBalance = openingBalance
+      + (accountCreatedInRange ? initialBalance : 0)
+      + toNumber(rangeTotals?.total_credits)
+      - toNumber(rangeTotals?.total_debits);
+
+    res.json({
+      account,
+      range: { start_date, end_date },
+      opening_balance: openingBalance,
+      closing_balance: closingBalance,
+      total_credits: toNumber(rangeTotals?.total_credits),
+      total_debits: toNumber(rangeTotals?.total_debits),
+      transaction_count: transferRows.length,
+      transactions
+    });
+  } catch (error) {
+    console.error('Get bank statement error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -380,6 +510,12 @@ router.delete('/bank-transfers/:id', [authenticateToken, authorizeRole(['admin']
     const transfer = await getRow('SELECT * FROM bank_transfers WHERE id = ?', [req.params.id]);
     if (!transfer) return res.status(404).json({ message: 'Not found' });
 
+    if (transfer.source_type && transfer.source_type !== 'manual') {
+      return res.status(400).json({
+        message: 'This bank entry is linked to another transaction. Delete it from the original sales or supplier payment record.'
+      });
+    }
+
     // Reverse the balance change
     const sign = transfer.transfer_type === 'deposit' ? -1 : 1;
     await runQuery('UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
@@ -450,22 +586,22 @@ router.post('/supplier-payments', [
     const paymentAmount = toNumber(amount);
     const accountId = bank_account_id ? Number(bank_account_id) : null;
     const eventTimestamp = nowIST();
+    const tracksBank = isBankTrackedSupplierPaymentMode(payment_mode);
 
-    // If paying from bank, deduct from bank balance
-    if (payment_mode === 'bank' && accountId) {
-      const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [accountId]);
-      if (!account) return res.status(404).json({ message: 'Bank account not found' });
-      if (toNumber(account.balance) < paymentAmount) {
-        return res.status(400).json({ message: 'Insufficient bank balance' });
-      }
-      await runQuery('UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
-        [paymentAmount, eventTimestamp, accountId]);
+    if (tracksBank && !accountId) {
+      return res.status(400).json({ message: 'Select a bank account for this payment' });
     }
 
-    const result = await runQuery(
-      'INSERT INTO supplier_payments (supplier_name, amount, payment_mode, bank_account_id, description, payment_date, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [supplier_name, paymentAmount, payment_mode, accountId || null, description || null, payment_date, req.user.id, eventTimestamp]
-    );
+    const result = await createSupplierPaymentRecord({
+      supplierName: supplier_name,
+      amount: paymentAmount,
+      paymentMode: payment_mode,
+      bankAccountId: accountId,
+      description,
+      paymentDate: payment_date,
+      userId: req.user.id,
+      eventTimestamp
+    });
 
     const payment = await getRow(
       `SELECT sp.*, ba.account_name, ba.bank_name, u.username as created_by_name
@@ -498,10 +634,7 @@ router.delete('/supplier-payments/:id', [authenticateToken, authorizeRole(['admi
     const payment = await getRow('SELECT * FROM supplier_payments WHERE id = ?', [req.params.id]);
     if (!payment) return res.status(404).json({ message: 'Not found' });
 
-    if (payment.payment_mode === 'bank' && payment.bank_account_id) {
-      await runQuery('UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
-        [payment.amount, nowIST(), payment.bank_account_id]);
-    }
+    await reverseSupplierPaymentBankEffects(payment, nowIST());
     await runQuery('DELETE FROM supplier_payments WHERE id = ?', [req.params.id]);
     res.json({ message: 'Supplier payment deleted' });
   } catch (error) {

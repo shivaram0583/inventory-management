@@ -663,6 +663,41 @@ async function runTimestampMigrations() {
   await runOneTimeMigration('supplier-payments-created-at-ist-v1', [
     `UPDATE supplier_payments SET created_at = datetime(created_at, '+5 hours', '+30 minutes') WHERE created_at IS NOT NULL`
   ]);
+
+  await runOneTimeMigration('supplier-payments-bank-ledger-backfill-v1', [
+    `INSERT INTO bank_transfers (
+       bank_account_id,
+       amount,
+       transfer_type,
+       source_type,
+       source_reference,
+       payment_mode,
+       description,
+       transfer_date,
+       created_by,
+       created_at
+     )
+     SELECT
+       sp.bank_account_id,
+       sp.amount,
+       'withdrawal',
+       'supplier_payment',
+       'supplier-payment:' || sp.id,
+       sp.payment_mode,
+       COALESCE(sp.description, 'Supplier payment to ' || sp.supplier_name),
+       sp.payment_date,
+       sp.created_by,
+       COALESCE(sp.created_at, CURRENT_TIMESTAMP)
+     FROM supplier_payments sp
+     WHERE sp.bank_account_id IS NOT NULL
+       AND sp.payment_mode IN ('bank', 'upi')
+       AND NOT EXISTS (
+         SELECT 1
+         FROM bank_transfers bt
+         WHERE bt.source_type = 'supplier_payment'
+           AND bt.source_reference = 'supplier-payment:' || sp.id
+       )`
+  ]);
 }
 
 // Helper function to run queries with promises
