@@ -61,7 +61,8 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = `
       SELECT p.*
       FROM products p
-      WHERE NOT (
+      WHERE COALESCE(p.is_deleted, 0) = 0
+      AND NOT (
         COALESCE(p.quantity_available, 0) <= 0
         AND EXISTS (
           SELECT 1
@@ -143,11 +144,11 @@ router.post('/', [
   body('product_name').notEmpty().withMessage('Product name is required'),
   body('category').notEmpty().withMessage('Category is required'),
   body('unit').isIn(['kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes']).withMessage('Invalid unit'),
-  body('quantity_available').isFloat({ min: 0 }).withMessage('Quantity must be non-negative'),
+  body('quantity_available').isInt({ min: 0 }).withMessage('Quantity must be a non-negative whole number'),
   body('purchase_price').isFloat({ min: 0 }).withMessage('Purchase price must be non-negative'),
   body('selling_price').isFloat({ min: 0 }).withMessage('Selling price must be non-negative'),
   body('creation_mode').optional().isIn(['inventory', 'order']).withMessage('Invalid creation mode'),
-  body('order_quantity').optional().isFloat({ min: 0.01 }).withMessage('Order quantity must be positive'),
+  body('order_quantity').optional().isInt({ min: 1 }).withMessage('Order quantity must be a positive whole number'),
   body('order_date').optional().trim(),
   body('advance_amount').optional().isFloat({ min: 0 }).withMessage('Advance amount must be non-negative'),
   body('bank_account_id').optional({ nullable: true }).isInt({ min: 1 }).withMessage('Invalid bank account')
@@ -444,6 +445,13 @@ router.delete('/:id', [
       return res.status(400).json({ message: 'Cannot delete product with sales records' });
     }
 
+    // Check if product has purchase history — soft-delete to preserve history
+    const purchaseCount = await getRow('SELECT COUNT(*) as count FROM purchases WHERE product_id = ?', [productId]);
+    if (purchaseCount.count > 0) {
+      await runQuery('UPDATE products SET is_deleted = 1, quantity_available = 0 WHERE id = ?', [productId]);
+      return res.json({ message: 'Product removed from inventory. Purchase history preserved.' });
+    }
+
     await runQuery('DELETE FROM products WHERE id = ?', [productId]);
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
@@ -457,7 +465,7 @@ router.post('/:id/add-stock', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   requireDailySetupForOperatorWrites,
-  body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive')
+  body('quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive whole number')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);

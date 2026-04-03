@@ -326,10 +326,10 @@ const Sales = () => {
                             type="number"
                             min="1"
                             max={item.max_quantity}
-                            step="any"
+                            step="1"
                             value={item.quantity}
                             onChange={(e) => {
-                              const val = parseFloat(e.target.value);
+                              const val = parseInt(e.target.value);
                               if (!isNaN(val) && val > 0) updateCartItemQuantity(item.product_id, val);
                             }}
                             className="w-16 text-center text-xs font-bold text-gray-800 border border-indigo-200 rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"

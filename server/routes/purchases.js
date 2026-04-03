@@ -31,13 +31,14 @@ const purchaseSelect = `
     COALESCE(pur.purchase_status, 'delivered') AS purchase_status,
     COALESCE(pur.advance_amount, 0) AS advance_amount,
     MAX(COALESCE(pur.total_amount, 0) - COALESCE(pur.advance_amount, 0), 0) AS balance_due,
-    p.product_name,
+    COALESCE(p.product_name, '[Deleted Product]') AS product_name,
     p.variety,
     p.unit,
     p.category,
+    COALESCE(p.is_deleted, 0) AS product_deleted,
     u.username AS added_by_name
   FROM purchases pur
-  JOIN products p ON pur.product_id = p.id
+  LEFT JOIN products p ON pur.product_id = p.id
   LEFT JOIN users u ON pur.added_by = u.id
 `;
 
@@ -180,7 +181,7 @@ router.post('/', [
   authorizeRole(['admin', 'operator']),
   requireDailySetupForOperatorWrites,
   body('product_id').isInt({ min: 1 }).withMessage('Valid product ID is required'),
-  body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
+  body('quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive whole number'),
   body('price_per_unit').isFloat({ min: 0 }).withMessage('Price must be non-negative'),
   body('purchase_status').optional().isIn(['ordered', 'delivered']).withMessage('Invalid purchase status'),
   body('advance_amount').optional().isFloat({ min: 0 }).withMessage('Advance amount must be non-negative'),
@@ -339,7 +340,7 @@ router.put('/:id', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   requireDailySetupForOperatorWrites,
-  body('quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
+  body('quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive whole number'),
   body('price_per_unit').isFloat({ min: 0 }).withMessage('Price must be non-negative')
 ], async (req, res) => {
   try {

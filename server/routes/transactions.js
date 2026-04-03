@@ -449,16 +449,22 @@ router.post('/bank-transfers', [
   body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be positive'),
   body('transfer_type').isIn(['deposit', 'withdrawal']).withMessage('Type must be deposit or withdrawal'),
   body('transfer_date').notEmpty().withMessage('Date is required'),
-  body('description').optional().trim()
+  body('description').optional().trim(),
+  body('withdrawal_purpose').optional().isIn(['cash_registry', 'business_expense', 'personal']).withMessage('Invalid withdrawal purpose')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { bank_account_id, amount, transfer_type, transfer_date, description } = req.body;
+    const { bank_account_id, amount, transfer_type, transfer_date, description, withdrawal_purpose } = req.body;
     const accountId = Number(bank_account_id);
     const transferAmount = toNumber(amount);
     const eventTimestamp = nowIST();
+
+    // Resolve withdrawal_purpose: only relevant for withdrawals
+    const resolvedPurpose = transfer_type === 'withdrawal'
+      ? (withdrawal_purpose || 'cash_registry')
+      : null;
 
     const account = await getRow('SELECT * FROM bank_accounts WHERE id = ?', [accountId]);
     if (!account) return res.status(404).json({ message: 'Bank account not found' });
@@ -486,10 +492,27 @@ router.post('/bank-transfers', [
          description,
          transfer_date,
          created_by,
-         created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [accountId, transferAmount, transfer_type, 'manual', null, null, description || null, transfer_date, req.user.id, eventTimestamp]
+         created_at,
+         withdrawal_purpose
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [accountId, transferAmount, transfer_type, 'manual', null, null, description || null, transfer_date, req.user.id, eventTimestamp, resolvedPurpose]
     );
+
+    // If withdrawal for business expense, also create an expenditure record
+    if (resolvedPurpose === 'business_expense') {
+      await runQuery(
+        `INSERT INTO expenditures (amount, description, category, expense_date, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          transferAmount,
+          description || 'Bank withdrawal for business expense',
+          'bank_withdrawal',
+          transfer_date,
+          req.user.id,
+          eventTimestamp
+        ]
+      );
+    }
 
     const transfer = await getRow(
       `SELECT bt.*, ba.account_name, ba.bank_name, u.username as created_by_name
@@ -520,6 +543,19 @@ router.delete('/bank-transfers/:id', [authenticateToken, authorizeRole(['admin']
     const sign = transfer.transfer_type === 'deposit' ? -1 : 1;
     await runQuery('UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
       [sign * transfer.amount, nowIST(), transfer.bank_account_id]);
+
+    // If this withdrawal had created a linked expenditure, remove it too
+    if (transfer.withdrawal_purpose === 'business_expense') {
+      await runQuery(
+        `DELETE FROM expenditures
+         WHERE category = 'bank_withdrawal'
+           AND amount = ?
+           AND expense_date = ?
+           AND created_by = ?`,
+        [transfer.amount, transfer.transfer_date, transfer.created_by]
+      );
+    }
+
     await runQuery('DELETE FROM bank_transfers WHERE id = ?', [req.params.id]);
     res.json({ message: 'Transfer deleted and balance reversed' });
   } catch (error) {
@@ -722,11 +758,14 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
       GROUP BY transfer_date ORDER BY transfer_date
     `, [start_date, end_date]);
 
-    // Daily bank withdrawals
+    // Daily bank withdrawals (only cash_registry – money returned to cash register)
     const withdrawalsByDay = await getAll(`
       SELECT transfer_date as day, SUM(amount) as total_withdrawals
       FROM bank_transfers
-      WHERE transfer_type = 'withdrawal' AND transfer_date BETWEEN ? AND ?
+      WHERE transfer_type = 'withdrawal'
+        AND source_type != 'supplier_payment'
+        AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
+        AND transfer_date BETWEEN ? AND ?
       GROUP BY transfer_date ORDER BY transfer_date
     `, [start_date, end_date]);
 
@@ -819,7 +858,10 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
     `, [start_date]);
     const priorWithdrawals = await getRow(`
       SELECT COALESCE(SUM(amount), 0) as total FROM bank_transfers
-      WHERE transfer_type = 'withdrawal' AND transfer_date < ?
+      WHERE transfer_type = 'withdrawal'
+        AND source_type != 'supplier_payment'
+        AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
+        AND transfer_date < ?
     `, [start_date]);
     const priorSupplierCash = await getRow(`
       SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments

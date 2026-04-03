@@ -62,7 +62,7 @@ const Transactions = () => {
 
   // Forms
   const [expForm, setExpForm] = useState({ amount: '', description: '', category: 'general', expense_date: today });
-  const [bankTransferForm, setBankTransferForm] = useState({ bank_account_id: '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today });
+  const [bankTransferForm, setBankTransferForm] = useState({ bank_account_id: '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today, withdrawal_purpose: 'cash_registry' });
   const [supplierPayForm, setSupplierPayForm] = useState({ supplier_name: '', amount: '', payment_mode: 'bank', bank_account_id: '', description: '', payment_date: today });
   const [bankAccForm, setBankAccForm] = useState({ account_name: '', bank_name: '', account_number: '', balance: '' });
 
@@ -171,11 +171,12 @@ const Transactions = () => {
       const payload = {
         ...bankTransferForm,
         bank_account_id: Number(bankTransferForm.bank_account_id),
-        amount: num(bankTransferForm.amount)
+        amount: num(bankTransferForm.amount),
+        withdrawal_purpose: bankTransferForm.transfer_type === 'withdrawal' ? bankTransferForm.withdrawal_purpose : undefined
       };
       await axios.post('/api/transactions/bank-transfers', payload);
       setShowBankTransferModal(false);
-      setBankTransferForm({ bank_account_id: bankAccounts[0]?.id || '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today });
+      setBankTransferForm({ bank_account_id: bankAccounts[0]?.id || '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today, withdrawal_purpose: 'cash_registry' });
       refreshAll();
       showMsg('Transfer Recorded', `₹${fmt(payload.amount)} ${payload.transfer_type} recorded`);
     } catch (err) {
@@ -344,7 +345,7 @@ const Transactions = () => {
           isAdmin={isAdmin}
           selectedBankAccountId={dailySetupStatus?.selectedBankAccountId || null}
           onAddAccount={() => { setBankAccForm({ account_name: '', bank_name: '', account_number: '', balance: '' }); setShowBankAccModal(true); }}
-          onAddTransfer={() => { setBankTransferForm({ bank_account_id: bankAccounts[0]?.id || '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today }); setShowBankTransferModal(true); }}
+          onAddTransfer={() => { setBankTransferForm({ bank_account_id: bankAccounts[0]?.id || '', amount: '', transfer_type: 'deposit', description: '', transfer_date: today, withdrawal_purpose: 'cash_registry' }); setShowBankTransferModal(true); }}
           onDeleteAccount={(id, label) => setDeleteModal({ open: true, type: 'bank-accounts', id, label })}
           onDeleteTransfer={(id) => setDeleteModal({ open: true, type: 'bank-transfers', id, label: 'this transfer' })}
           onSetDefaultBank={handleSetDefaultBank}
@@ -434,10 +435,10 @@ const Transactions = () => {
                   required
                   options={[
                     { value: 'deposit', label: 'Deposit (Cash → Bank)' },
-                    { value: 'withdrawal', label: 'Withdrawal (Bank → Cash)' },
+                    { value: 'withdrawal', label: 'Withdrawal (Bank →)' },
                   ]}
                   value={bankTransferForm.transfer_type}
-                  onChange={(val) => setBankTransferForm({...bankTransferForm, transfer_type: val})}
+                  onChange={(val) => setBankTransferForm({...bankTransferForm, transfer_type: val, withdrawal_purpose: val === 'withdrawal' ? 'cash_registry' : undefined})}
                 />
               </div>
               <div>
@@ -446,6 +447,21 @@ const Transactions = () => {
                   onChange={(e) => setBankTransferForm({...bankTransferForm, amount: e.target.value})} />
               </div>
             </div>
+            {bankTransferForm.transfer_type === 'withdrawal' && (
+              <div>
+                <label className="label-sm">Purpose of Withdrawal</label>
+                <CustomSelect
+                  required
+                  options={[
+                    { value: 'cash_registry', label: 'To Cash Registry' },
+                    { value: 'business_expense', label: 'Business Expense (adds to expenditure)' },
+                    { value: 'personal', label: 'Personal Use' },
+                  ]}
+                  value={bankTransferForm.withdrawal_purpose}
+                  onChange={(val) => setBankTransferForm({...bankTransferForm, withdrawal_purpose: val})}
+                />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label-sm">Date</label>
@@ -857,6 +873,7 @@ const BankTab = ({
               <tr>
                 <th>Timestamp</th>
                 <th>Entry</th>
+                <th>Purpose</th>
                 <th>Bank Account</th>
                 <th>Source</th>
                 <th>Description</th>
@@ -866,15 +883,16 @@ const BankTab = ({
             </thead>
             <tbody>
               {bankTransfers.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 7 : 6} className="text-center text-gray-400 py-8">No bank transactions found</td></tr>
+                <tr><td colSpan={isAdmin ? 8 : 7} className="text-center text-gray-400 py-8">No bank transactions found</td></tr>
               ) : bankTransfers.map(bt => (
                 <tr key={bt.id}>
                   <td className="font-medium">{formatAuditTimestamp(bt.created_at, bt.transfer_date)}</td>
                   <td>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getBankEntryBadgeClass(bt)}`}>
-                      {bt.transfer_type === 'deposit' ? '↑ Deposit' : '↓ Withdrawal'}
+                      {getBankEntryLabel(bt)}
                     </span>
                   </td>
+                  <td className="text-sm text-gray-500">{formatEntryPurpose(bt)}</td>
                   <td className="text-sm text-gray-700">{formatBankAccountLabel(bt.account_name, bt.bank_name)}</td>
                   <td className="text-sm text-gray-500">{formatTransferSource(bt)}</td>
                   <td className="text-sm text-gray-500">{bt.description || '-'}</td>
@@ -1183,6 +1201,28 @@ function formatTransferSource(transfer) {
   return transfer?.source_reference || '-';
 }
 
+function formatWithdrawalPurpose(transfer) {
+  if (transfer?.transfer_type !== 'withdrawal') return '-';
+  if (transfer?.source_type === 'supplier_payment') return 'Supplier Payment';
+  switch (transfer.withdrawal_purpose) {
+    case 'cash_registry': return 'To Cash Registry';
+    case 'business_expense': return 'Business Expense';
+    case 'personal': return 'Personal Use';
+    default: return 'To Cash Registry';
+  }
+}
+
+function formatEntryPurpose(transfer) {
+  if (transfer?.source_type === 'sale') return 'Sale Credited';
+  if (transfer?.source_type === 'opening_balance') return 'Opening Balance';
+  if (transfer?.source_type === 'supplier_payment') return 'Supplier Payment';
+  if (transfer?.transfer_type === 'withdrawal') {
+    return formatWithdrawalPurpose(transfer);
+  }
+  if (transfer?.transfer_type === 'deposit') return 'Cash Deposit';
+  return '-';
+}
+
 function formatBankAccountLabel(accountName, bankName) {
   if (accountName && bankName) {
     return `${accountName} (${bankName})`;
@@ -1193,15 +1233,42 @@ function formatBankAccountLabel(accountName, bankName) {
 
 function getBankEntryLabel(entry) {
   if (entry?.source_type === 'opening_balance') {
-    return 'Opening Balance';
+    return '↑ Opening Balance';
   }
 
-  return entry?.transfer_type === 'deposit' ? 'Deposit' : 'Withdrawal';
+  if (entry?.source_type === 'sale') {
+    const mode = String(entry.payment_mode || '').toLowerCase();
+    if (mode === 'upi') return '↑ UPI Received';
+    if (mode === 'card') return '↑ Card Payment';
+    if (mode === 'bank') return '↑ Bank Received';
+    return '↑ Sale Credited';
+  }
+
+  if (entry?.source_type === 'supplier_payment') {
+    const mode = String(entry.payment_mode || '').toLowerCase();
+    if (mode === 'upi') return '↓ UPI Sent';
+    if (mode === 'bank') return '↓ Bank Transfer';
+    return '↓ Supplier Payment';
+  }
+
+  if (entry?.transfer_type === 'deposit') return '↑ Deposit';
+  return '↓ Withdrawal';
 }
 
 function getBankEntryBadgeClass(entry) {
   if (entry?.source_type === 'opening_balance') {
     return 'bg-slate-100 text-slate-700';
+  }
+
+  if (entry?.source_type === 'sale') {
+    const mode = String(entry.payment_mode || '').toLowerCase();
+    if (mode === 'upi') return 'bg-purple-100 text-purple-700';
+    if (mode === 'card') return 'bg-indigo-100 text-indigo-700';
+    return 'bg-emerald-100 text-emerald-700';
+  }
+
+  if (entry?.source_type === 'supplier_payment') {
+    return 'bg-amber-100 text-amber-700';
   }
 
   return entry?.transfer_type === 'deposit' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700';
