@@ -19,7 +19,13 @@ import {
   ArrowLeftRight,
   Bell,
   Trash2,
-  Clock3
+  Clock3,
+  UserCheck,
+  RotateCcw,
+  ClipboardCheck,
+  ScrollText,
+  Database,
+  Warehouse
 } from 'lucide-react';
 
 const Layout = () => {
@@ -123,6 +129,42 @@ const Layout = () => {
       current: isActive('/sales')
     },
     {
+      name: 'Customers',
+      href: '/customers',
+      icon: UserCheck,
+      current: isActive('/customers')
+    },
+    {
+      name: 'Quotations',
+      href: '/quotations',
+      icon: FileText,
+      current: isActive('/quotations')
+    },
+    {
+      name: 'Returns',
+      href: '/returns',
+      icon: RotateCcw,
+      current: isActive('/returns')
+    },
+    {
+      name: 'Stock Adjust',
+      href: '/stock-adjustments',
+      icon: ClipboardCheck,
+      current: isActive('/stock-adjustments')
+    },
+    {
+      name: 'Warehouses',
+      href: '/warehouses',
+      icon: Warehouse,
+      current: isActive('/warehouses')
+    },
+    {
+      name: 'Suppliers',
+      href: '/suppliers',
+      icon: Store,
+      current: isActive('/suppliers')
+    },
+    {
       name: 'Transactions',
       href: '/transactions',
       icon: ArrowLeftRight,
@@ -142,6 +184,18 @@ const Layout = () => {
       href: '/users',
       icon: Users,
       current: isActive('/users')
+    });
+    navigation.push({
+      name: 'Audit Log',
+      href: '/audit-log',
+      icon: ScrollText,
+      current: isActive('/audit-log')
+    });
+    navigation.push({
+      name: 'Backup',
+      href: '/backup',
+      icon: Database,
+      current: isActive('/backup')
     });
   }
 

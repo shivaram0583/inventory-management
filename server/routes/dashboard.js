@@ -52,6 +52,18 @@ router.get('/admin', [
        LIMIT 10`
     );
 
+    // Expiry alerts - products expiring within 30 days
+    const expiringItems = await getAll(
+      `SELECT p.id, p.product_name, p.variety, p.quantity_available, p.unit, p.expiry_date
+       FROM products p
+       WHERE p.expiry_date IS NOT NULL
+         AND p.expiry_date <= date('now', '+30 days')
+         AND p.quantity_available > 0
+         AND COALESCE(p.is_deleted, 0) = 0
+       ORDER BY p.expiry_date ASC
+       LIMIT 10`
+    );
+
     // Recent sales (last 5)
     const recentSales = await getAll(
       `SELECT s.sale_id, s.total_amount, s.sale_date, p.product_name
@@ -121,7 +133,8 @@ router.get('/admin', [
         low_stock_count: lowStockItems.length
       },
       alerts: {
-        low_stock_items: lowStockItems
+        low_stock_items: lowStockItems,
+        expiring_items: expiringItems
       },
       recent_activity: {
         sales: recentSales

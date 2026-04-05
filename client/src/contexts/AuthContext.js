@@ -104,6 +104,28 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const changePassword = async (currentPassword, newPassword) => {
+    try {
+      await axios.put('/api/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword
+      });
+
+      setUser((currentUser) => (
+        currentUser
+          ? { ...currentUser, force_password_change: false }
+          : currentUser
+      ));
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to change password'
+      };
+    }
+  };
+
   const logout = useCallback(async (isSessionExpired = false) => {
     if (logoutInProgressRef.current) return;
     logoutInProgressRef.current = true;
@@ -193,6 +215,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user,
     login,
+    changePassword,
     logout,
     loading,
     sessionExpired,

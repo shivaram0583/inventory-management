@@ -3,9 +3,11 @@ import { fmtDate, fmtTime } from '../utils/dateUtils';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
 import axios from 'axios';
+import SharedModal from './shared/Modal';
 import {
   ArrowLeft,
   Printer,
+  Send,
   Store,
   Phone,
   Mail,
@@ -21,7 +23,26 @@ const Receipt = () => {
   const [saleData, setSaleData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deliveryCapabilities, setDeliveryCapabilities] = useState({ emailEnabled: false, smsEnabled: false });
+  const [sendModal, setSendModal] = useState({
+    open: false,
+    email: '',
+    mobile: '',
+    sendEmail: true,
+    sendSms: false,
+    submitting: false
+  });
+  const [deliveryMessage, setDeliveryMessage] = useState('');
   const receiptRef = React.useRef();
+
+  const fetchDeliveryCapabilities = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/delivery/capabilities');
+      setDeliveryCapabilities(response.data || { emailEnabled: false, smsEnabled: false });
+    } catch {
+      setDeliveryCapabilities({ emailEnabled: false, smsEnabled: false });
+    }
+  }, []);
 
   const fetchSaleData = useCallback(async () => {
     try {
@@ -38,6 +59,10 @@ const Receipt = () => {
   useEffect(() => {
     fetchSaleData();
   }, [fetchSaleData]);
+
+  useEffect(() => {
+    fetchDeliveryCapabilities();
+  }, [fetchDeliveryCapabilities]);
 
   const handlePrint = useReactToPrint({
     content: () => receiptRef.current,
@@ -81,6 +106,41 @@ const Receipt = () => {
   const formatAmount = (value) =>
     `Rs. ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  const sendReceipt = async () => {
+    const channels = [];
+    if (sendModal.sendEmail) channels.push('email');
+    if (sendModal.sendSms) channels.push('sms');
+
+    if (channels.length === 0) {
+      setError('Select at least one delivery channel');
+      return;
+    }
+
+    if (sendModal.sendEmail && !sendModal.email.trim()) {
+      setError('Enter an email address to send the receipt');
+      return;
+    }
+
+    if (sendModal.sendSms && !sendModal.mobile.trim()) {
+      setError('Enter a mobile number to send the receipt');
+      return;
+    }
+
+    setSendModal((current) => ({ ...current, submitting: true }));
+    try {
+      const response = await axios.post(`/api/delivery/receipts/${saleId}`, {
+        channels,
+        email: sendModal.email.trim() || undefined,
+        mobile: sendModal.mobile.trim() || undefined
+      });
+      setSendModal({ open: false, email: '', mobile: '', sendEmail: true, sendSms: false, submitting: false });
+      setDeliveryMessage(response.data?.message || 'Receipt sent successfully');
+    } catch (deliveryError) {
+      setError(deliveryError.response?.data?.message || 'Failed to send receipt');
+      setSendModal((current) => ({ ...current, submitting: false }));
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -91,14 +151,37 @@ const Receipt = () => {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Sales
         </button>
-        <button
-          onClick={handlePrint}
-          className="btn-primary no-print"
-        >
-          <Printer className="h-4 w-4 mr-2" />
-          Print Receipt
-        </button>
+        <div className="flex items-center gap-3 no-print">
+          <button
+            type="button"
+            onClick={() => setSendModal({
+              open: true,
+              email: '',
+              mobile: receipt.customer_mobile || '',
+              sendEmail: deliveryCapabilities.emailEnabled,
+              sendSms: deliveryCapabilities.smsEnabled && Boolean(receipt.customer_mobile),
+              submitting: false
+            })}
+            className="btn-secondary"
+          >
+            <Send className="h-4 w-4 mr-2" />
+            Send Receipt
+          </button>
+          <button
+            onClick={handlePrint}
+            className="btn-primary no-print"
+          >
+            <Printer className="h-4 w-4 mr-2" />
+            Print Receipt
+          </button>
+        </div>
       </div>
+
+      {deliveryMessage && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 no-print">
+          {deliveryMessage}
+        </div>
+      )}
 
       <div className="flex justify-center">
         <div ref={receiptRef} className="receipt-sheet bg-white">
@@ -147,6 +230,18 @@ const Receipt = () => {
                   <span>Sale ID</span>
                   <span className="text-gray-900">{saleId}</span>
                 </div>
+                {receipt.payment_gateway && (
+                  <div className="receipt-keyval-row">
+                    <span>Gateway</span>
+                    <span className="text-gray-900 capitalize">{receipt.payment_gateway}</span>
+                  </div>
+                )}
+                {receipt.payment_reference && (
+                  <div className="receipt-keyval-row">
+                    <span>Reference</span>
+                    <span className="text-gray-900">{receipt.payment_reference}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -238,6 +333,19 @@ const Receipt = () => {
             </div>
           </div>
 
+          {saleData.receipt_qr?.data_url && (
+            <div className="receipt-section">
+              <div className="receipt-section-title">Receipt Verification QR</div>
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <img src={saleData.receipt_qr.data_url} alt="Receipt verification QR" className="h-36 w-36 border border-gray-200 rounded-xl p-2" />
+                <div className="text-sm text-gray-600">
+                  <p className="font-medium text-gray-900">Scan to verify this receipt</p>
+                  <p className="mt-1 break-all">{saleData.receipt_qr.verification_link}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="receipt-footer">
             <p className="receipt-footer-message">Thank you for your business. Please visit again.</p>
             <p className="receipt-footer-note">This is a computer generated receipt. No signature required.</p>
@@ -260,6 +368,56 @@ const Receipt = () => {
           Print Again
         </button>
       </div>
+
+      <SharedModal
+        isOpen={sendModal.open}
+        onClose={() => setSendModal({ open: false, email: '', mobile: '', sendEmail: true, sendSms: false, submitting: false })}
+        title={`Send ${receipt.receipt_number}`}
+        type="info"
+        confirmText={sendModal.submitting ? 'Sending...' : 'Send'}
+        onConfirm={!sendModal.submitting ? sendReceipt : undefined}
+      >
+        <div className="space-y-4 text-sm">
+          <div className="space-y-2">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={sendModal.sendEmail}
+                disabled={!deliveryCapabilities.emailEnabled}
+                onChange={(event) => setSendModal((current) => ({ ...current, sendEmail: event.target.checked }))}
+              />
+              <span>Email delivery {deliveryCapabilities.emailEnabled ? '' : '(not configured)'}</span>
+            </label>
+            <input
+              type="email"
+              value={sendModal.email}
+              onChange={(event) => setSendModal((current) => ({ ...current, email: event.target.value }))}
+              placeholder="Customer email"
+              disabled={!sendModal.sendEmail}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={sendModal.sendSms}
+                disabled={!deliveryCapabilities.smsEnabled}
+                onChange={(event) => setSendModal((current) => ({ ...current, sendSms: event.target.checked }))}
+              />
+              <span>SMS delivery {deliveryCapabilities.smsEnabled ? '' : '(not configured)'}</span>
+            </label>
+            <input
+              type="text"
+              value={sendModal.mobile}
+              onChange={(event) => setSendModal((current) => ({ ...current, mobile: event.target.value }))}
+              placeholder="Customer mobile number"
+              disabled={!sendModal.sendSms}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2"
+            />
+          </div>
+        </div>
+      </SharedModal>
     </div>
   );
 };

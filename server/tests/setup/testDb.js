@@ -49,7 +49,31 @@ function createTestDb() {
       db.close((err) => (err ? reject(err) : resolve()));
     });
 
-  return { db, runQuery, getRow, getAll, nowIST, combineISTDateWithCurrentTime, close };
+  const runTransaction = (callback) =>
+    new Promise((resolve, reject) => {
+      db.run('BEGIN TRANSACTION', async (beginError) => {
+        if (beginError) {
+          reject(beginError);
+          return;
+        }
+
+        try {
+          const result = await callback({ runQuery, getRow, getAll });
+          db.run('COMMIT', (commitError) => {
+            if (commitError) {
+              reject(commitError);
+              return;
+            }
+
+            resolve(result);
+          });
+        } catch (error) {
+          db.run('ROLLBACK', () => reject(error));
+        }
+      });
+    });
+
+  return { db, runQuery, getRow, getAll, nowIST, combineISTDateWithCurrentTime, runTransaction, close };
 }
 
 /**
@@ -64,6 +88,8 @@ async function initializeTestSchema(testDb) {
     password TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'operator')),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    force_password_change INTEGER NOT NULL DEFAULT 0 CHECK (force_password_change IN (0, 1)),
+    password_changed_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
@@ -79,6 +105,15 @@ async function initializeTestSchema(testDb) {
     selling_price REAL NOT NULL DEFAULT 0,
     supplier TEXT,
     is_deleted INTEGER NOT NULL DEFAULT 0,
+    gst_percent REAL NOT NULL DEFAULT 0,
+    hsn_code TEXT,
+    reorder_point REAL NOT NULL DEFAULT 10,
+    reorder_quantity REAL NOT NULL DEFAULT 0,
+    barcode TEXT,
+    expiry_date DATE,
+    batch_number TEXT,
+    manufacturing_date DATE,
+    supplier_id INTEGER,
     date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -91,6 +126,11 @@ async function initializeTestSchema(testDb) {
     quantity_sold REAL NOT NULL,
     price_per_unit REAL NOT NULL,
     total_amount REAL NOT NULL,
+    discount_amount REAL NOT NULL DEFAULT 0,
+    tax_amount REAL NOT NULL DEFAULT 0,
+    gst_percent REAL NOT NULL DEFAULT 0,
+    pricing_rule_type TEXT,
+    pricing_rule_label TEXT,
     sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     operator_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -106,7 +146,14 @@ async function initializeTestSchema(testDb) {
     customer_mobile TEXT,
     customer_address TEXT,
     payment_mode TEXT DEFAULT 'cash',
+    payment_gateway TEXT,
+    payment_reference TEXT,
+    gateway_order_id TEXT,
     total_amount REAL NOT NULL,
+    discount_amount REAL NOT NULL DEFAULT 0,
+    tax_amount REAL NOT NULL DEFAULT 0,
+    payment_status TEXT DEFAULT 'paid',
+    customer_id INTEGER,
     receipt_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     printed BOOLEAN DEFAULT FALSE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -151,8 +198,10 @@ async function initializeTestSchema(testDb) {
     purchase_status TEXT NOT NULL DEFAULT 'delivered',
     advance_amount REAL NOT NULL DEFAULT 0,
     advance_payment_id INTEGER,
+    quantity_delivered REAL NOT NULL DEFAULT 0,
     added_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME,
     FOREIGN KEY (product_id) REFERENCES products (id),
     FOREIGN KEY (added_by) REFERENCES users (id)
   )`);
@@ -227,6 +276,218 @@ async function initializeTestSchema(testDb) {
     FOREIGN KEY (created_by) REFERENCES users (id)
   )`);
 
+  await runQuery(`CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact_person TEXT,
+    mobile TEXT,
+    email TEXT,
+    address TEXT,
+    gstin TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    mobile TEXT,
+    email TEXT,
+    address TEXT,
+    gstin TEXT,
+    credit_limit REAL NOT NULL DEFAULT 0,
+    outstanding_balance REAL NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS customer_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    payment_mode TEXT NOT NULL DEFAULT 'cash' CHECK (payment_mode IN ('cash', 'bank', 'upi')),
+    bank_account_id INTEGER,
+    reference_note TEXT,
+    payment_date DATETIME NOT NULL,
+    collected_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers (id),
+    FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id),
+    FOREIGN KEY (collected_by) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS sales_returns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id TEXT UNIQUE NOT NULL,
+    sale_id TEXT NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity_returned REAL NOT NULL,
+    price_per_unit REAL NOT NULL,
+    refund_amount REAL NOT NULL,
+    refund_mode TEXT NOT NULL DEFAULT 'cash' CHECK (refund_mode IN ('cash', 'credit', 'bank')),
+    bank_account_id INTEGER,
+    reason TEXT,
+    returned_by INTEGER,
+    return_date DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id),
+    FOREIGN KEY (returned_by) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS quotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_number TEXT UNIQUE NOT NULL,
+    customer_id INTEGER,
+    customer_name TEXT,
+    customer_mobile TEXT,
+    customer_address TEXT,
+    total_amount REAL NOT NULL DEFAULT 0,
+    discount_amount REAL NOT NULL DEFAULT 0,
+    tax_amount REAL NOT NULL DEFAULT 0,
+    net_amount REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'accepted', 'rejected', 'converted', 'expired')),
+    valid_until DATE,
+    notes TEXT,
+    converted_sale_id TEXT,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers (id),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS quotation_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity REAL NOT NULL,
+    price_per_unit REAL NOT NULL,
+    discount_percent REAL NOT NULL DEFAULT 0,
+    tax_percent REAL NOT NULL DEFAULT 0,
+    pricing_rule_type TEXT,
+    pricing_rule_label TEXT,
+    total_amount REAL NOT NULL,
+    FOREIGN KEY (quotation_id) REFERENCES quotations (id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS price_tiers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    min_quantity REAL NOT NULL,
+    price_per_unit REAL NOT NULL,
+    label TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS product_promotions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    promotional_price REAL NOT NULL,
+    start_date DATE,
+    end_date DATE,
+    label TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS customer_pricing (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    price_per_unit REAL NOT NULL,
+    start_date DATE,
+    end_date DATE,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS stock_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    adjustment_type TEXT NOT NULL CHECK (adjustment_type IN ('damage', 'theft', 'spoilage', 'counting_error', 'other')),
+    quantity_adjusted REAL NOT NULL,
+    quantity_before REAL NOT NULL,
+    quantity_after REAL NOT NULL,
+    reason TEXT NOT NULL,
+    adjusted_by INTEGER NOT NULL,
+    adjustment_date DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (adjusted_by) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT,
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    details TEXT,
+    ip TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id INTEGER,
+    actor_name TEXT,
+    actor_role TEXT,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (actor_id) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS warehouses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    address TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS warehouse_stock (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    warehouse_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses (id),
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    UNIQUE(warehouse_id, product_id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS warehouse_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_warehouse_id INTEGER NOT NULL,
+    to_warehouse_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    notes TEXT,
+    transferred_by INTEGER,
+    transferred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (from_warehouse_id) REFERENCES warehouses (id),
+    FOREIGN KEY (to_warehouse_id) REFERENCES warehouses (id),
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (transferred_by) REFERENCES users (id)
+  )`);
+
   await runQuery(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
@@ -255,13 +516,13 @@ async function seedTestUsers(testDb) {
 
   const adminPassword = bcrypt.hashSync('admin123', 10);
   await runQuery(
-    `INSERT OR IGNORE INTO users (username, password, role, is_active) VALUES (?, ?, 'admin', 1)`,
+    `INSERT OR IGNORE INTO users (username, password, role, is_active, force_password_change) VALUES (?, ?, 'admin', 1, 1)`,
     ['admin', adminPassword]
   );
 
   const operatorPassword = bcrypt.hashSync('operator123', 10);
   await runQuery(
-    `INSERT OR IGNORE INTO users (username, password, role, is_active) VALUES (?, ?, 'operator', 1)`,
+    `INSERT OR IGNORE INTO users (username, password, role, is_active, force_password_change) VALUES (?, ?, 'operator', 1, 1)`,
     ['operator', operatorPassword]
   );
 }

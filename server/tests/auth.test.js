@@ -28,7 +28,8 @@ describe('Authentication', () => {
       expect(res.body).toHaveProperty('token');
       expect(res.body.user).toMatchObject({
         username: 'admin',
-        role: 'admin'
+        role: 'admin',
+        force_password_change: true
       });
     });
 
@@ -158,7 +159,7 @@ describe('User Management', () => {
       const res = await request(app)
         .post('/api/auth/users')
         .set('Authorization', `Bearer ${adminAuth.token}`)
-        .send({ username: 'newoperator', password: 'pass123', role: 'operator' });
+        .send({ username: 'newoperator', password: 'Pass123!', role: 'operator' });
 
       expect(res.status).toBe(201);
       expect(res.body.username).toBe('newoperator');
@@ -169,7 +170,7 @@ describe('User Management', () => {
       const res = await request(app)
         .post('/api/auth/users')
         .set('Authorization', `Bearer ${adminAuth.token}`)
-        .send({ username: 'admin2', password: 'pass123', role: 'admin' });
+        .send({ username: 'admin2', password: 'Pass123!', role: 'admin' });
 
       expect(res.status).toBe(201);
       expect(res.body.role).toBe('admin');
@@ -179,7 +180,7 @@ describe('User Management', () => {
       const res = await request(app)
         .post('/api/auth/users')
         .set('Authorization', `Bearer ${adminAuth.token}`)
-        .send({ username: 'admin', password: 'pass123', role: 'operator' });
+        .send({ username: 'admin', password: 'Pass123!', role: 'operator' });
 
       expect(res.status).toBe(400);
       expect(res.body.message).toBe('Username already exists');
@@ -189,12 +190,12 @@ describe('User Management', () => {
       const res = await request(app)
         .post('/api/auth/users')
         .set('Authorization', `Bearer ${adminAuth.token}`)
-        .send({ username: 'ab', password: 'pass123', role: 'operator' });
+        .send({ username: 'ab', password: 'Pass123!', role: 'operator' });
 
       expect(res.status).toBe(400);
     });
 
-    test('should reject short password', async () => {
+    test('should reject weak password', async () => {
       const res = await request(app)
         .post('/api/auth/users')
         .set('Authorization', `Bearer ${adminAuth.token}`)
@@ -216,9 +217,20 @@ describe('User Management', () => {
       const res = await request(app)
         .post('/api/auth/users')
         .set('Authorization', `Bearer ${operatorAuth.token}`)
-        .send({ username: 'tryuser', password: 'pass123', role: 'operator' });
+        .send({ username: 'tryuser', password: 'Pass123!', role: 'operator' });
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe('PUT /api/auth/change-password', () => {
+    test('should enforce strong passwords when changing password', async () => {
+      const res = await request(app)
+        .put('/api/auth/change-password')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({ current_password: 'admin123', new_password: 'weak' });
+
+      expect(res.status).toBe(400);
     });
   });
 

@@ -218,6 +218,14 @@ const Reports = () => {
           url = '/api/reports/transactions';
           params = { start_date: startDate, end_date: endDate };
           break;
+        case 'gst':
+          url = '/api/reports/daily-sales';
+          params = startDate === endDate ? { date: endDate } : { start_date: startDate, end_date: endDate };
+          break;
+        case 'profitLoss':
+          url = '/api/reports/profit-loss';
+          params = { start_date: startDate, end_date: endDate };
+          break;
         default:
           url = '/api/reports/daily-sales';
           params = { date: endDate };
@@ -1873,12 +1881,166 @@ const Reports = () => {
         return renderAuditReport();
       case 'transactions':
         return renderTransactionsReport();
+      case 'gst':
+        return renderGSTReport();
+      case 'profitLoss':
+        return renderProfitLossReport();
       default:
         return null;
     }
   };
 
-  const tabHasFilters = ['daily', 'performance', 'purchases', 'customerSales', 'suppliers', 'audit', 'transactions'].includes(activeTab);
+  const renderGSTReport = () => {
+    const sales = data?.sales || data?.dailySales || [];
+    const gstMap = {};
+    sales.forEach(s => {
+      const rate = s.gst_percent || 0;
+      if (!gstMap[rate]) gstMap[rate] = { rate, taxable: 0, cgst: 0, sgst: 0, total_tax: 0, count: 0 };
+      const taxable = (s.total_amount || 0) - (s.tax_amount || 0);
+      gstMap[rate].taxable += taxable;
+      gstMap[rate].cgst += (s.tax_amount || 0) / 2;
+      gstMap[rate].sgst += (s.tax_amount || 0) / 2;
+      gstMap[rate].total_tax += (s.tax_amount || 0);
+      gstMap[rate].count++;
+    });
+    const gstRows = Object.values(gstMap).sort((a, b) => a.rate - b.rate);
+    const totals = gstRows.reduce((acc, r) => ({ taxable: acc.taxable + r.taxable, cgst: acc.cgst + r.cgst, sgst: acc.sgst + r.sgst, total_tax: acc.total_tax + r.total_tax }), { taxable: 0, cgst: 0, sgst: 0, total_tax: 0 });
+
+    return (
+      <div className="space-y-6">
+        <div className="card">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">GST Summary</h3>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>GST Rate</th>
+                  <th className="text-right">Taxable Amount</th>
+                  <th className="text-right">CGST</th>
+                  <th className="text-right">SGST</th>
+                  <th className="text-right">Total Tax</th>
+                  <th className="text-right">Transactions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gstRows.map(r => (
+                  <tr key={r.rate}>
+                    <td className="font-medium">{r.rate}%</td>
+                    <td className="text-right">₹{formatCurrency(r.taxable)}</td>
+                    <td className="text-right">₹{formatCurrency(r.cgst)}</td>
+                    <td className="text-right">₹{formatCurrency(r.sgst)}</td>
+                    <td className="text-right font-medium">₹{formatCurrency(r.total_tax)}</td>
+                    <td className="text-right">{r.count}</td>
+                  </tr>
+                ))}
+                {gstRows.length === 0 && <tr><td colSpan="6" className="text-center text-gray-400 py-8">No GST data for selected period</td></tr>}
+              </tbody>
+              {gstRows.length > 0 && (
+                <tfoot className="bg-gray-50 font-semibold">
+                  <tr>
+                    <td>Total</td>
+                    <td className="text-right">₹{formatCurrency(totals.taxable)}</td>
+                    <td className="text-right">₹{formatCurrency(totals.cgst)}</td>
+                    <td className="text-right">₹{formatCurrency(totals.sgst)}</td>
+                    <td className="text-right">₹{formatCurrency(totals.total_tax)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderProfitLossReport = () => {
+    if (!data) return <div className="text-center py-12 text-gray-400">Select a date range and load the report</div>;
+    const fmt = (v) => formatCurrency(v);
+    const marginClass = (v) => Number(v) >= 0 ? 'text-green-600' : 'text-red-600';
+
+    return (
+      <div className="space-y-6">
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="card !py-4">
+            <p className="text-xs text-gray-500 uppercase">Revenue</p>
+            <p className="text-xl font-bold text-gray-900">₹{fmt(data.revenue?.total_revenue)}</p>
+            <p className="text-xs text-gray-400">{data.revenue?.total_transactions} transactions</p>
+          </div>
+          <div className="card !py-4">
+            <p className="text-xs text-gray-500 uppercase">COGS</p>
+            <p className="text-xl font-bold text-gray-900">₹{fmt(data.cost_of_goods_sold)}</p>
+          </div>
+          <div className="card !py-4">
+            <p className="text-xs text-gray-500 uppercase">Gross Profit</p>
+            <p className={`text-xl font-bold ${marginClass(data.gross_profit)}`}>₹{fmt(data.gross_profit)}</p>
+            <p className="text-xs text-gray-400">{data.gross_margin_percent}% margin</p>
+          </div>
+          <div className="card !py-4">
+            <p className="text-xs text-gray-500 uppercase">Net Profit</p>
+            <p className={`text-xl font-bold ${marginClass(data.net_profit)}`}>₹{fmt(data.net_profit)}</p>
+            <p className="text-xs text-gray-400">{data.net_margin_percent}% margin</p>
+          </div>
+        </div>
+
+        {/* P&L Statement */}
+        <div className="card">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Profit & Loss Statement</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between py-2 border-b"><span>Total Revenue</span><span className="font-medium">₹{fmt(data.revenue?.total_revenue)}</span></div>
+            <div className="flex justify-between py-2 border-b text-gray-500 pl-4"><span>Less: Discounts</span><span>₹{fmt(data.revenue?.total_discounts)}</span></div>
+            <div className="flex justify-between py-2 border-b text-gray-500 pl-4"><span>Tax Collected</span><span>₹{fmt(data.revenue?.total_tax_collected)}</span></div>
+            <div className="flex justify-between py-2 border-b"><span>Cost of Goods Sold</span><span className="font-medium">₹{fmt(data.cost_of_goods_sold)}</span></div>
+            <div className={`flex justify-between py-2 border-b font-semibold ${marginClass(data.gross_profit)}`}><span>Gross Profit</span><span>₹{fmt(data.gross_profit)} ({data.gross_margin_percent}%)</span></div>
+            <div className="flex justify-between py-2 border-b"><span>Operating Expenses</span><span className="font-medium">₹{fmt(data.operating_expenses?.total)}</span></div>
+            {data.operating_expenses?.breakdown?.map(exp => (
+              <div key={exp.category} className="flex justify-between py-1 text-gray-500 pl-4"><span>{exp.category} ({exp.count})</span><span>₹{fmt(exp.total)}</span></div>
+            ))}
+            <div className="flex justify-between py-2 border-b"><span>Sales Returns / Refunds</span><span className="font-medium">₹{fmt(data.returns?.total_refunds)} ({data.returns?.return_count})</span></div>
+            <div className={`flex justify-between py-3 text-lg font-bold ${marginClass(data.net_profit)}`}><span>Net Profit</span><span>₹{fmt(data.net_profit)} ({data.net_margin_percent}%)</span></div>
+          </div>
+        </div>
+
+        {/* Product Margins */}
+        {data.product_margins?.length > 0 && (
+          <div className="card">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Product-wise Margins</h3>
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th className="text-right">Qty Sold</th>
+                    <th className="text-right">Revenue</th>
+                    <th className="text-right">Cost</th>
+                    <th className="text-right">Profit</th>
+                    <th className="text-right">Margin %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.product_margins.map(p => (
+                    <tr key={p.id}>
+                      <td className="font-medium">{p.product_name}{p.variety ? ` (${p.variety})` : ''}</td>
+                      <td className="capitalize">{p.category}</td>
+                      <td className="text-right">{p.quantity_sold} {p.unit}</td>
+                      <td className="text-right">₹{fmt(p.revenue)}</td>
+                      <td className="text-right">₹{fmt(p.cost)}</td>
+                      <td className={`text-right font-medium ${marginClass(p.profit)}`}>₹{fmt(p.profit)}</td>
+                      <td className={`text-right font-medium ${marginClass(p.margin_percent)}`}>{p.margin_percent}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const tabHasFilters = ['daily', 'performance', 'purchases', 'customerSales', 'suppliers', 'audit', 'transactions', 'gst', 'profitLoss'].includes(activeTab);
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -1905,7 +2067,9 @@ const Reports = () => {
             { id: 'customerSales', label: 'Sales Archive', icon: Users },
             { id: 'suppliers', label: 'Suppliers', icon: Truck },
             { id: 'transactions', label: 'Transactions', icon: ClipboardList },
-            { id: 'audit', label: 'Audit', icon: Shield }
+            { id: 'audit', label: 'Audit', icon: Shield },
+            { id: 'gst', label: 'GST', icon: IndianRupee },
+            { id: 'profitLoss', label: 'P&L', icon: TrendingUp }
           ].map((tab) => (
             <button
               key={tab.id}

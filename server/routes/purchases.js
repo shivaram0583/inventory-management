@@ -7,7 +7,8 @@ const {
   runQuery,
   getAll,
   nowIST,
-  combineISTDateWithCurrentTime
+  combineISTDateWithCurrentTime,
+  paginate
 } = require('../database/db');
 const crypto = require('crypto');
 const moment = require('moment');
@@ -15,8 +16,10 @@ const { addReviewNotification } = require('../services/reviewNotifications');
 const {
   isBankTrackedSupplierPaymentMode,
   getSupplierPaymentTransferReference,
-  createSupplierPaymentRecord
+  createSupplierPaymentRecord,
+  reverseSupplierPaymentBankEffects
 } = require('../services/bankLedger');
+const { logAudit } = require('../middleware/auditLog');
 
 const router = express.Router();
 
@@ -145,7 +148,7 @@ router.delete('/categories/:id', [
 // GET all purchases with product info
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { start_date, end_date, product_id, status } = req.query;
+    const { start_date, end_date, product_id, status, page, limit } = req.query;
     let query = `${purchaseSelect} WHERE 1=1`;
     const params = [];
 
@@ -161,12 +164,18 @@ router.get('/', authenticateToken, async (req, res) => {
       query += ' AND pur.product_id = ?';
       params.push(product_id);
     }
-    if (status && ['ordered', 'delivered'].includes(String(status).toLowerCase())) {
+    if (status && ['ordered', 'delivered', 'cancelled'].includes(String(status).toLowerCase())) {
       query += ' AND COALESCE(pur.purchase_status, ?) = ?';
-      params.push(PURCHASE_STATUS.DELIVERED, normalizePurchaseStatus(status));
+      params.push(PURCHASE_STATUS.DELIVERED, String(status).toLowerCase());
     }
 
     query += ' ORDER BY pur.purchase_date DESC';
+
+    if (page) {
+      const result = await paginate(query, params, page, limit || 50);
+      return res.json(result);
+    }
+
     const purchases = await getAll(query, params);
     res.json(purchases);
   } catch (error) {
@@ -776,6 +785,169 @@ router.delete('/suppliers/:name', [
     }
   } catch (error) {
     console.error('Delete supplier error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// POST cancel a pending purchase order
+router.post('/:id/cancel', [
+  authenticateToken,
+  authorizeRole(['admin']),
+], async (req, res) => {
+  try {
+    const purchase = await getRow('SELECT * FROM purchases WHERE id = ?', [req.params.id]);
+    if (!purchase) return res.status(404).json({ message: 'Purchase not found' });
+
+    if (normalizePurchaseStatus(purchase.purchase_status) === PURCHASE_STATUS.DELIVERED) {
+      return res.status(400).json({ message: 'Cannot cancel a delivered purchase' });
+    }
+
+    const eventTimestamp = nowIST();
+
+    await runQuery('BEGIN TRANSACTION');
+    try {
+      // Reverse advance payment if any
+      if (purchase.advance_payment_id) {
+        const advancePayment = await getRow('SELECT * FROM supplier_payments WHERE id = ?', [purchase.advance_payment_id]);
+        if (advancePayment && advancePayment.bank_account_id) {
+          await runQuery(
+            'UPDATE bank_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+            [toNumber(advancePayment.amount), eventTimestamp, advancePayment.bank_account_id]
+          );
+          await runQuery(
+            `DELETE FROM bank_transfers WHERE source_type = 'supplier_payment' AND source_reference = ?`,
+            [getSupplierPaymentTransferReference(advancePayment.id)]
+          );
+        }
+        await runQuery('DELETE FROM supplier_payments WHERE id = ?', [purchase.advance_payment_id]);
+      }
+
+      await runQuery(
+        'UPDATE purchases SET purchase_status = ?, updated_at = ? WHERE id = ?',
+        ['cancelled', eventTimestamp, req.params.id]
+      );
+
+      await runQuery('COMMIT');
+    } catch (txErr) {
+      try { await runQuery('ROLLBACK'); } catch (e) { /* ignore */ }
+      throw txErr;
+    }
+
+    const updated = await fetchPurchaseById(req.params.id);
+    await logAudit(req, 'cancel', 'purchase', purchase.purchase_id, {
+      advance_reversed: toNumber(purchase.advance_amount)
+    });
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'purchase',
+      title: 'Cancelled a purchase order',
+      description: `Purchase order ${purchase.purchase_id} for ${updated.product_name} was cancelled.`,
+      createdAt: eventTimestamp
+    });
+
+    res.json({ ...updated, message: 'Purchase order cancelled successfully' });
+  } catch (error) {
+    console.error('Cancel purchase error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// POST partial delivery of a pending purchase order
+router.post('/:id/partial-delivery', [
+  authenticateToken,
+  authorizeRole(['admin', 'operator']),
+  requireDailySetupForOperatorWrites,
+  body('quantity_delivered').isInt({ min: 1 }).withMessage('Quantity delivered must be a positive whole number'),
+  body('delivery_date').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const purchase = await getRow('SELECT * FROM purchases WHERE id = ?', [req.params.id]);
+    if (!purchase) return res.status(404).json({ message: 'Purchase not found' });
+
+    if (normalizePurchaseStatus(purchase.purchase_status) !== PURCHASE_STATUS.ORDERED) {
+      return res.status(400).json({ message: 'Partial delivery is only available for pending orders' });
+    }
+
+    const quantityDelivered = toNumber(req.body.quantity_delivered);
+    const totalQuantity = toNumber(purchase.quantity);
+    const alreadyDelivered = toNumber(purchase.quantity_delivered || 0);
+    const remaining = totalQuantity - alreadyDelivered;
+
+    if (quantityDelivered > remaining) {
+      return res.status(400).json({
+        message: `Cannot deliver ${quantityDelivered}. Only ${remaining} units remaining.`
+      });
+    }
+
+    const eventTimestamp = nowIST();
+    const suppliedDate = req.body.delivery_date;
+    const deliveryDate = suppliedDate && String(suppliedDate).length === 10
+      ? combineISTDateWithCurrentTime(suppliedDate, eventTimestamp)
+      : eventTimestamp;
+
+    const newDelivered = alreadyDelivered + quantityDelivered;
+    const isFullyDelivered = newDelivered >= totalQuantity;
+
+    await runQuery('BEGIN TRANSACTION');
+    try {
+      // Update inventory
+      await runQuery(
+        `UPDATE products SET
+           quantity_available = quantity_available + ?,
+           purchase_price = ?,
+           supplier = COALESCE(?, supplier),
+           updated_at = ?
+         WHERE id = ?`,
+        [quantityDelivered, toNumber(purchase.price_per_unit), purchase.supplier || null, eventTimestamp, purchase.product_id]
+      );
+
+      await runQuery(
+        `UPDATE purchases SET
+           quantity_delivered = ?,
+           purchase_status = ?,
+           delivery_date = ?
+         WHERE id = ?`,
+        [newDelivered, isFullyDelivered ? PURCHASE_STATUS.DELIVERED : PURCHASE_STATUS.ORDERED,
+         deliveryDate, req.params.id]
+      );
+
+      await runQuery('COMMIT');
+    } catch (txErr) {
+      try { await runQuery('ROLLBACK'); } catch (e) { /* ignore */ }
+      throw txErr;
+    }
+
+    const updated = await fetchPurchaseById(req.params.id);
+    await logAudit(req, 'partial_delivery', 'purchase', purchase.purchase_id, {
+      quantity_delivered: quantityDelivered,
+      total_delivered: newDelivered,
+      fully_delivered: isFullyDelivered
+    });
+
+    addReviewNotification({
+      actorId: req.user.id,
+      actorName: req.user.username,
+      actorRole: req.user.role,
+      type: 'purchase',
+      title: 'Recorded partial delivery',
+      description: `${quantityDelivered} ${updated.unit} of ${updated.product_name} received (${newDelivered}/${totalQuantity} total).`,
+      createdAt: eventTimestamp
+    });
+
+    res.json({
+      ...updated,
+      message: isFullyDelivered
+        ? 'Final delivery recorded. Order fully received.'
+        : `Partial delivery recorded. ${totalQuantity - newDelivered} units remaining.`
+    });
+  } catch (error) {
+    console.error('Partial delivery error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

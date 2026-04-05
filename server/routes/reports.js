@@ -967,4 +967,161 @@ router.delete('/customer-sales/:id', authenticateToken, authorizeRole(['admin'])
   }
 });
 
+// Profit & Loss Report
+router.get('/profit-loss', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    if (!start_date || !end_date) {
+      return res.status(400).json({ message: 'Start date and end date are required' });
+    }
+
+    // Revenue from sales
+    const revenue = await getRow(`
+      SELECT
+        COALESCE(SUM(total_amount), 0) AS total_revenue,
+        COALESCE(SUM(discount_amount), 0) AS total_discounts,
+        COALESCE(SUM(tax_amount), 0) AS total_tax_collected,
+        COUNT(DISTINCT sale_id) AS total_transactions
+      FROM sales
+      WHERE DATE(sale_date) BETWEEN ? AND ?
+    `, [start_date, end_date]);
+
+    // Cost of goods sold (using purchase_price at time of sale)
+    const cogs = await getRow(`
+      SELECT
+        COALESCE(SUM(s.quantity_sold * p.purchase_price), 0) AS total_cogs
+      FROM sales s
+      JOIN products p ON s.product_id = p.id
+      WHERE DATE(s.sale_date) BETWEEN ? AND ?
+    `, [start_date, end_date]);
+
+    // Operating expenses
+    const expenses = await getRow(`
+      SELECT COALESCE(SUM(amount), 0) AS total_expenses
+      FROM expenditures
+      WHERE expense_date BETWEEN ? AND ?
+    `, [start_date, end_date]);
+
+    // Expense breakdown by category
+    const expenseBreakdown = await getAll(`
+      SELECT category, SUM(amount) AS total, COUNT(*) AS count
+      FROM expenditures
+      WHERE expense_date BETWEEN ? AND ?
+      GROUP BY category
+      ORDER BY total DESC
+    `, [start_date, end_date]);
+
+    // Product-wise margins
+    const productMargins = await getAll(`
+      SELECT
+        p.id,
+        p.product_name,
+        p.variety,
+        p.category,
+        p.unit,
+        SUM(s.quantity_sold) AS quantity_sold,
+        SUM(s.total_amount) AS revenue,
+        SUM(s.quantity_sold * p.purchase_price) AS cost,
+        SUM(s.total_amount) - SUM(s.quantity_sold * p.purchase_price) AS profit,
+        CASE WHEN SUM(s.total_amount) > 0
+          THEN ROUND((SUM(s.total_amount) - SUM(s.quantity_sold * p.purchase_price)) * 100.0 / SUM(s.total_amount), 2)
+          ELSE 0
+        END AS margin_percent
+      FROM sales s
+      JOIN products p ON s.product_id = p.id
+      WHERE DATE(s.sale_date) BETWEEN ? AND ?
+      GROUP BY p.id, p.product_name, p.variety, p.category, p.unit
+      ORDER BY profit DESC
+    `, [start_date, end_date]);
+
+    // Returns impact
+    const returns = await getRow(`
+      SELECT
+        COALESCE(SUM(refund_amount), 0) AS total_refunds,
+        COUNT(*) AS return_count
+      FROM sales_returns
+      WHERE DATE(return_date) BETWEEN ? AND ?
+    `, [start_date, end_date]);
+
+    const grossProfit = (revenue?.total_revenue || 0) - (cogs?.total_cogs || 0);
+    const netProfit = grossProfit - (expenses?.total_expenses || 0) - (returns?.total_refunds || 0);
+
+    res.json({
+      period: { start_date, end_date },
+      revenue: {
+        total_revenue: revenue?.total_revenue || 0,
+        total_discounts: revenue?.total_discounts || 0,
+        total_tax_collected: revenue?.total_tax_collected || 0,
+        total_transactions: revenue?.total_transactions || 0
+      },
+      cost_of_goods_sold: cogs?.total_cogs || 0,
+      gross_profit: grossProfit,
+      gross_margin_percent: revenue?.total_revenue > 0
+        ? Math.round(grossProfit * 10000 / revenue.total_revenue) / 100
+        : 0,
+      operating_expenses: {
+        total: expenses?.total_expenses || 0,
+        breakdown: expenseBreakdown
+      },
+      returns: {
+        total_refunds: returns?.total_refunds || 0,
+        return_count: returns?.return_count || 0
+      },
+      net_profit: netProfit,
+      net_margin_percent: revenue?.total_revenue > 0
+        ? Math.round(netProfit * 10000 / revenue.total_revenue) / 100
+        : 0,
+      product_margins: productMargins
+    });
+  } catch (error) {
+    console.error('Profit & Loss report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Daily P&L trend
+router.get('/profit-loss/daily', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    if (!start_date || !end_date) {
+      return res.status(400).json({ message: 'Start date and end date are required' });
+    }
+
+    const dailyPL = await getAll(`
+      SELECT
+        DATE(s.sale_date) AS date,
+        SUM(s.total_amount) AS revenue,
+        SUM(s.quantity_sold * p.purchase_price) AS cogs,
+        SUM(s.total_amount) - SUM(s.quantity_sold * p.purchase_price) AS gross_profit
+      FROM sales s
+      JOIN products p ON s.product_id = p.id
+      WHERE DATE(s.sale_date) BETWEEN ? AND ?
+      GROUP BY DATE(s.sale_date)
+      ORDER BY date
+    `, [start_date, end_date]);
+
+    // Attach daily expenses
+    const dailyExpenses = await getAll(`
+      SELECT expense_date AS date, SUM(amount) AS expenses
+      FROM expenditures
+      WHERE expense_date BETWEEN ? AND ?
+      GROUP BY expense_date
+    `, [start_date, end_date]);
+
+    const expenseMap = {};
+    dailyExpenses.forEach(e => { expenseMap[e.date] = e.expenses; });
+
+    const trend = dailyPL.map(day => ({
+      ...day,
+      expenses: expenseMap[day.date] || 0,
+      net_profit: (day.gross_profit || 0) - (expenseMap[day.date] || 0)
+    }));
+
+    res.json({ period: { start_date, end_date }, trend });
+  } catch (error) {
+    console.error('Daily P&L trend error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;

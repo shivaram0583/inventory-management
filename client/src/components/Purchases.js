@@ -40,7 +40,8 @@ const UNIT_OPTIONS = [
 
 const PURCHASE_STATUS = {
   ORDERED: 'ordered',
-  DELIVERED: 'delivered'
+  DELIVERED: 'delivered',
+  CANCELLED: 'cancelled'
 };
 
 const PRODUCT_CREATION_MODE = {
@@ -72,6 +73,14 @@ const getPurchaseStatusMeta = (status, productDeleted) => {
       label: 'Ordered',
       badgeClass: 'bg-amber-100 text-amber-700',
       helperText: 'Inventory will update only after you mark this order as delivered.'
+    };
+  }
+
+  if (normalized === PURCHASE_STATUS.CANCELLED) {
+    return {
+      label: 'Cancelled',
+      badgeClass: 'bg-red-100 text-red-700',
+      helperText: 'This order was cancelled.'
     };
   }
 
@@ -134,6 +143,10 @@ const Purchases = () => {
   const [editSubmitting] = useState(false);
   const [deliverModal, setDeliverModal] = useState({ open: false, purchase: null, delivery_date: getISTDateString() });
   const [deliverSubmitting, setDeliverSubmitting] = useState(false);
+  const [cancelModal, setCancelModal] = useState({ open: false, purchase: null });
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [partialModal, setPartialModal] = useState({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() });
+  const [partialSubmitting, setPartialSubmitting] = useState(false);
 
   const [showNewProductModal, setShowNewProductModal] = useState(false);
   const [newProductForm, setNewProductForm] = useState(getEmptyNewProductForm());
@@ -301,7 +314,8 @@ const Purchases = () => {
   const { sortedItems: sortedSupProducts, sortConfig: supProductsSort, requestSort: sortSupProducts } = useSortableData(supplierDetail?.products || [], { key: 'total_spent', direction: 'desc' });
   const { sortedItems: sortedSupHistory, sortConfig: supHistorySort, requestSort: sortSupHistory } = useSortableData(supplierDetail?.history || [], { key: 'purchase_date', direction: 'desc' });
   const [supHistoryStatusFilter, setSupHistoryStatusFilter] = useState('all');
-  const showHistoryActions = canManagePurchases && historyStatusFilter === PURCHASE_STATUS.ORDERED;
+  const hasPendingOrders = purchases.some(p => String(p.purchase_status).toLowerCase() === PURCHASE_STATUS.ORDERED);
+  const showHistoryActions = canManagePurchases && (historyStatusFilter === PURCHASE_STATUS.ORDERED || (historyStatusFilter === 'all' && hasPendingOrders));
 
   const handleRecordPurchase = (event) => {
     event.preventDefault();
@@ -407,6 +421,44 @@ const Purchases = () => {
       setError(e.response?.data?.message || 'Failed to mark purchase as delivered');
     } finally {
       setDeliverSubmitting(false);
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!cancelModal.purchase) return;
+    setCancelSubmitting(true);
+    setError('');
+    try {
+      await axios.post(`/api/purchases/${cancelModal.purchase.id}/cancel`);
+      setCancelModal({ open: false, purchase: null });
+      setSuccess('Purchase order cancelled successfully');
+      await fetchAll();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError(e.response?.data?.message || 'Failed to cancel order');
+    } finally {
+      setCancelSubmitting(false);
+    }
+  };
+
+  const handlePartialDelivery = async (event) => {
+    event.preventDefault();
+    if (!partialModal.purchase || !partialModal.quantity) return;
+    setPartialSubmitting(true);
+    setError('');
+    try {
+      await axios.post(`/api/purchases/${partialModal.purchase.id}/partial-delivery`, {
+        quantity_delivered: Number(partialModal.quantity),
+        delivery_date: partialModal.delivery_date
+      });
+      setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() });
+      setSuccess('Partial delivery recorded and inventory updated');
+      await fetchAll();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (e) {
+      setError(e.response?.data?.message || 'Failed to record partial delivery');
+    } finally {
+      setPartialSubmitting(false);
     }
   };
 
@@ -976,16 +1028,36 @@ const Purchases = () => {
                         </td>
                         {showHistoryActions && (
                           <td>
-                            <div className="flex items-center justify-end">
+                            {isPending && (
+                            <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => openDeliverPurchaseModal(purchase)}
                                 className="inline-flex items-center gap-1 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100"
                               >
                                 <CheckCircle className="h-3.5 w-3.5" />
-                                Mark Delivered
+                                Deliver
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => setPartialModal({ open: true, purchase, quantity: '', delivery_date: getISTDateString() })}
+                                className="inline-flex items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100"
+                              >
+                                <Package className="h-3.5 w-3.5" />
+                                Partial
+                              </button>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => setCancelModal({ open: true, purchase })}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-100 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-100"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                  Cancel
+                                </button>
+                              )}
                             </div>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -1324,7 +1396,7 @@ const Purchases = () => {
               </div>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1" style={{ scrollbarWidth: 'thin' }}>
               <div className="rounded-2xl p-4 space-y-3" style={{ background: 'linear-gradient(135deg,#f8faff,#f5f3ff)' }}>
                 <div className="flex justify-between items-start">
                   <div>
@@ -1399,11 +1471,11 @@ const Purchases = () => {
               </p>
             </div>
 
-            <div className="px-6 py-4 border-t border-indigo-100 flex gap-3" style={{ background: 'linear-gradient(90deg,#f8faff,#f5f3ff)' }}>
-              <button onClick={() => setConfirmModal({ open: false, data: null })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+            <div className="px-6 py-4 border-t border-indigo-100 flex gap-3 flex-shrink-0" style={{ background: 'linear-gradient(90deg,#f8faff,#f5f3ff)' }}>
+              <button type="button" onClick={() => setConfirmModal({ open: false, data: null })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
                 Cancel
               </button>
-              <button onClick={handleConfirmPurchase} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
+              <button type="button" onClick={handleConfirmPurchase} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
                 {confirmModal.data.purchase_status === PURCHASE_STATUS.ORDERED ? 'Confirm Order' : 'Confirm Purchase'}
               </button>
             </div>
@@ -1545,6 +1617,92 @@ const Purchases = () => {
                 </button>
                 <button type="submit" disabled={deliverSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
                   {deliverSubmitting ? 'Updating...' : 'Confirm Delivery'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {cancelModal.open && cancelModal.purchase && renderPortalModal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col border border-red-100/80 overflow-hidden">
+            <div className="px-6 py-4 border-b border-red-100" style={{ background: 'linear-gradient(135deg,#fef2f2,#fff1f2)' }}>
+              <div className="flex items-center gap-3">
+                <span className="h-9 w-9 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow">
+                  <AlertTriangle className="h-5 w-5 text-white" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">Cancel Order</h3>
+                  <p className="text-xs text-gray-500 font-mono">{cancelModal.purchase.purchase_id}</p>
+                </div>
+                <button onClick={() => setCancelModal({ open: false, purchase: null })} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-red-300 hover:text-red-700 hover:bg-white/80 transition-all">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <p className="font-bold">{cancelModal.purchase.product_name}</p>
+                <p className="mt-1">{cancelModal.purchase.quantity} {cancelModal.purchase.unit} @ {fmtMoney(cancelModal.purchase.price_per_unit)}</p>
+                {num(cancelModal.purchase.advance_amount) > 0 && (
+                  <p className="mt-1 text-xs">Advance of {fmtMoney(cancelModal.purchase.advance_amount)} will be reversed.</p>
+                )}
+              </div>
+              <div className="rounded-2xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-700">
+                This action cannot be undone. The order will be cancelled and any advance payment will be refunded to the bank account.
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setCancelModal({ open: false, purchase: null })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                  Keep Order
+                </button>
+                <button type="button" onClick={handleCancelOrder} disabled={cancelSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  {cancelSubmitting ? 'Cancelling...' : 'Cancel Order'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {partialModal.open && partialModal.purchase && renderPortalModal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md animate-scale-in flex flex-col border border-blue-100/80 overflow-hidden">
+            <div className="px-6 py-4 border-b border-blue-100" style={{ background: 'linear-gradient(135deg,#eff6ff,#dbeafe)' }}>
+              <div className="flex items-center gap-3">
+                <span className="h-9 w-9 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow">
+                  <Package className="h-5 w-5 text-white" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">Partial Delivery</h3>
+                  <p className="text-xs text-gray-500 font-mono">{partialModal.purchase.purchase_id}</p>
+                </div>
+                <button onClick={() => setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() })} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-blue-300 hover:text-blue-700 hover:bg-white/80 transition-all">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <form onSubmit={handlePartialDelivery} className="p-6 space-y-4">
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                <p className="font-bold">{partialModal.purchase.product_name}</p>
+                <p className="mt-1">Ordered: {partialModal.purchase.quantity} {partialModal.purchase.unit}</p>
+                <p>Already delivered: {num(partialModal.purchase.quantity_delivered || 0)} {partialModal.purchase.unit}</p>
+                <p className="font-semibold">Remaining: {partialModal.purchase.quantity - num(partialModal.purchase.quantity_delivered || 0)} {partialModal.purchase.unit}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Quantity to Deliver *</label>
+                <input type="number" min="1" max={partialModal.purchase.quantity - num(partialModal.purchase.quantity_delivered || 0)} className="input-field !text-sm !rounded-2xl" placeholder="Enter quantity" value={partialModal.quantity} onChange={(e) => setPartialModal(prev => ({ ...prev, quantity: e.target.value }))} required />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Delivery Date</label>
+                <input type="date" className="input-field !text-sm !rounded-2xl" value={partialModal.delivery_date} onChange={(e) => setPartialModal(prev => ({ ...prev, delivery_date: e.target.value }))} required />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+                <button type="submit" disabled={partialSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
+                  {partialSubmitting ? 'Processing...' : 'Confirm Delivery'}
                 </button>
               </div>
             </form>

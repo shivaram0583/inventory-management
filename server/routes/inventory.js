@@ -5,6 +5,7 @@ const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup
 const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = require('../database/db');
 const { addReviewNotification } = require('../services/reviewNotifications');
 const { createSupplierPaymentRecord } = require('../services/bankLedger');
+const { logAudit } = require('../middleware/auditLog');
 const crypto = require('crypto');
 const moment = require('moment');
 
@@ -151,7 +152,15 @@ router.post('/', [
   body('order_quantity').optional().isInt({ min: 1 }).withMessage('Order quantity must be a positive whole number'),
   body('order_date').optional().trim(),
   body('advance_amount').optional().isFloat({ min: 0 }).withMessage('Advance amount must be non-negative'),
-  body('bank_account_id').optional({ nullable: true }).isInt({ min: 1 }).withMessage('Invalid bank account')
+  body('bank_account_id').optional({ nullable: true }).isInt({ min: 1 }).withMessage('Invalid bank account'),
+  body('gst_percent').optional().isFloat({ min: 0, max: 28 }).withMessage('GST must be 0-28%'),
+  body('hsn_code').optional().isString(),
+  body('reorder_point').optional().isFloat({ min: 0 }),
+  body('reorder_quantity').optional().isFloat({ min: 0 }),
+  body('barcode').optional().isString(),
+  body('expiry_date').optional().isString(),
+  body('batch_number').optional().isString(),
+  body('manufacturing_date').optional().isString()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -173,7 +182,15 @@ router.post('/', [
       order_quantity,
       order_date,
       advance_amount,
-      bank_account_id
+      bank_account_id,
+      gst_percent,
+      hsn_code,
+      reorder_point,
+      reorder_quantity,
+      barcode,
+      expiry_date,
+      batch_number,
+      manufacturing_date
     } = req.body;
 
     const creationMode = creation_mode === PRODUCT_CREATION_MODE.ORDER
@@ -236,9 +253,10 @@ router.post('/', [
     await runQuery('BEGIN TRANSACTION');
     try {
       const result = await runQuery(
-        `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [product_id, category, product_name, variety, inventoryQuantity, unit, purchase_price, selling_price, supplierName || null]
+        `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier, gst_percent, hsn_code, reorder_point, reorder_quantity, barcode, expiry_date, batch_number, manufacturing_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [product_id, category, product_name, variety, inventoryQuantity, unit, purchase_price, selling_price, supplierName || null,
+         toNumber(gst_percent), hsn_code || null, toNumber(reorder_point) || 10, toNumber(reorder_quantity), barcode || null, expiry_date || null, batch_number || null, manufacturing_date || null]
       );
 
       newProduct = await getRow('SELECT * FROM products WHERE id = ?', [result.id]);
@@ -370,7 +388,15 @@ router.put('/:id', [
   authenticateToken,
   authorizeRole(['admin', 'operator']),
   requireDailySetupForOperatorWrites,
-  body('selling_price').optional().isFloat({ min: 0 }).withMessage('Selling price must be non-negative')
+  body('selling_price').optional().isFloat({ min: 0 }).withMessage('Selling price must be non-negative'),
+  body('gst_percent').optional().isFloat({ min: 0, max: 28 }),
+  body('hsn_code').optional().isString(),
+  body('reorder_point').optional().isFloat({ min: 0 }),
+  body('reorder_quantity').optional().isFloat({ min: 0 }),
+  body('barcode').optional().isString(),
+  body('expiry_date').optional().isString(),
+  body('batch_number').optional().isString(),
+  body('manufacturing_date').optional().isString()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -387,15 +413,20 @@ router.put('/:id', [
 
     const updateFields = [];
     const updateValues = [];
-    const { selling_price } = req.body;
+    const { selling_price, gst_percent, hsn_code, reorder_point, reorder_quantity, barcode, expiry_date, batch_number, manufacturing_date } = req.body;
 
-    if (selling_price !== undefined) {
-      updateFields.push('selling_price = ?');
-      updateValues.push(selling_price);
-    }
+    if (selling_price !== undefined) { updateFields.push('selling_price = ?'); updateValues.push(selling_price); }
+    if (gst_percent !== undefined) { updateFields.push('gst_percent = ?'); updateValues.push(gst_percent); }
+    if (hsn_code !== undefined) { updateFields.push('hsn_code = ?'); updateValues.push(hsn_code); }
+    if (reorder_point !== undefined) { updateFields.push('reorder_point = ?'); updateValues.push(reorder_point); }
+    if (reorder_quantity !== undefined) { updateFields.push('reorder_quantity = ?'); updateValues.push(reorder_quantity); }
+    if (barcode !== undefined) { updateFields.push('barcode = ?'); updateValues.push(barcode); }
+    if (expiry_date !== undefined) { updateFields.push('expiry_date = ?'); updateValues.push(expiry_date || null); }
+    if (batch_number !== undefined) { updateFields.push('batch_number = ?'); updateValues.push(batch_number || null); }
+    if (manufacturing_date !== undefined) { updateFields.push('manufacturing_date = ?'); updateValues.push(manufacturing_date || null); }
 
     if (updateFields.length === 0) {
-      return res.status(400).json({ message: 'Only selling price can be updated from inventory modify' });
+      return res.status(400).json({ message: 'No valid fields to update' });
     }
 
     updateFields.push('updated_at = ?');
@@ -518,13 +549,14 @@ router.post('/:id/add-stock', [
   }
 });
 
-// Get low stock items
+// Get low stock items (using configurable reorder_point per product)
 router.get('/alerts/low-stock', authenticateToken, async (req, res) => {
   try {
     const products = await getAll(
       `SELECT p.*
        FROM products p
-       WHERE p.quantity_available <= 10
+       WHERE p.quantity_available <= COALESCE(p.reorder_point, 10)
+         AND COALESCE(p.is_deleted, 0) = 0
          AND NOT (
            COALESCE(p.quantity_available, 0) <= 0
            AND EXISTS (
@@ -539,6 +571,39 @@ router.get('/alerts/low-stock', authenticateToken, async (req, res) => {
     res.json(products);
   } catch (error) {
     console.error('Get low stock error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get expiring products
+router.get('/alerts/expiring', authenticateToken, async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const products = await getAll(
+      `SELECT * FROM products
+       WHERE expiry_date IS NOT NULL
+         AND DATE(expiry_date) <= DATE('now', '+' || ? || ' days')
+         AND COALESCE(is_deleted, 0) = 0
+       ORDER BY expiry_date ASC`,
+      [parseInt(days)]
+    );
+    res.json(products);
+  } catch (error) {
+    console.error('Get expiring products error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Lookup product by barcode
+router.get('/lookup/barcode', authenticateToken, async (req, res) => {
+  try {
+    const { code } = req.query;
+    if (!code) return res.status(400).json({ message: 'Barcode required' });
+    const product = await getRow('SELECT * FROM products WHERE barcode = ? AND COALESCE(is_deleted, 0) = 0', [code]);
+    if (!product) return res.status(404).json({ message: 'Product not found for this barcode' });
+    res.json(product);
+  } catch (error) {
+    console.error('Barcode lookup error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

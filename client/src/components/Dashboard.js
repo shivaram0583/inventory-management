@@ -255,6 +255,39 @@ const Dashboard = () => {
           </div>
         )}
 
+        {/* Expiry Alerts (Admin) */}
+        {isAdmin && dashboardData.alerts?.expiring_items?.length > 0 && (
+          <div className="card animate-fade-in-up stagger-3">
+            <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="h-7 w-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-sm">
+                <AlertTriangle className="h-4 w-4 text-white" />
+              </span>
+              Expiry Alerts
+            </h3>
+            <div className="space-y-2">
+              {dashboardData.alerts.expiring_items.map((item, index) => {
+                const daysLeft = Math.ceil((new Date(item.expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                const isExpired = daysLeft <= 0;
+                return (
+                  <div key={index} className="flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 hover:shadow-sm cursor-default"
+                       style={{background: isExpired ? 'linear-gradient(90deg,#fff5f5,#fef2f2)' : 'linear-gradient(90deg,#fffbeb,#fefce8)'}}>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">{item.product_name}</p>
+                      {item.variety && <p className="text-xs text-gray-400">{item.variety}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-bold ${isExpired ? 'text-red-600' : 'text-amber-600'}`}>
+                        {isExpired ? 'Expired' : `${daysLeft} days left`}
+                      </p>
+                      <p className="text-xs text-gray-400">{item.expiry_date}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Popular Items (Operator) */}
         {!isAdmin && dashboardData.popular_items && (
           <div className="card animate-fade-in-up stagger-2">

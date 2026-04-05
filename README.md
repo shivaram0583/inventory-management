@@ -37,6 +37,10 @@ and business analytics for an agricultural inputs trading business (seeds & fert
 | moment | ^2.29.4 | Date/time formatting (IST UTC+5:30) |
 | dotenv | ^16.3.1 | Environment variable loading |
 | cors | ^2.8.5 | Cross-origin request handling |
+| Razorpay | latest | Online payment gateway checkout |
+| Nodemailer | latest | SMTP email delivery for quotations & receipts |
+| Twilio | latest | SMS delivery for quotations & receipts |
+| qrcode | latest | Receipt QR generation |
 | nodemon | ^3.0.1 | Dev auto-restart |
 
 ### Frontend (`client/`)
@@ -649,6 +653,27 @@ cd server && node index.js      # Express serves API + static React build
 ---
 
 ## Environment Variables
+
+Core:
+`PORT`, `CORS_ORIGIN`, `SQLITE_DB_PATH`, `FRONTEND_BASE_URL`, `PUBLIC_API_BASE_URL`
+
+Payment gateway:
+`PAYMENT_GATEWAY_PROVIDER=razorpay`
+`RAZORPAY_KEY_ID`
+`RAZORPAY_KEY_SECRET`
+
+Email delivery:
+`SMTP_HOST`
+`SMTP_PORT`
+`SMTP_SECURE`
+`SMTP_USER`
+`SMTP_PASS`
+`SMTP_FROM`
+
+SMS delivery:
+`TWILIO_ACCOUNT_SID`
+`TWILIO_AUTH_TOKEN`
+`TWILIO_FROM_NUMBER`
 
 | Variable | Default | Description |
 |---|---|---|

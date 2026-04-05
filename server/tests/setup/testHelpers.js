@@ -16,7 +16,8 @@ function createTestApp(testDb) {
     runQuery: testDb.runQuery,
     getAll: testDb.getAll,
     nowIST: testDb.nowIST,
-    combineISTDateWithCurrentTime: testDb.combineISTDateWithCurrentTime
+    combineISTDateWithCurrentTime: testDb.combineISTDateWithCurrentTime,
+    runTransaction: testDb.runTransaction
   });
 
   // Set JWT secret for test environment
@@ -34,6 +35,10 @@ function createTestApp(testDb) {
   const dashboardRoutes = require('../../routes/dashboard');
   const reportsRoutes = require('../../routes/reports');
   const notificationsRoutes = require('../../routes/notifications');
+  const customersRoutes = require('../../routes/customers');
+  const quotationsRoutes = require('../../routes/quotations');
+  const pricingRoutes = require('../../routes/pricing');
+  const publicPagesRoutes = require('../../routes/publicPages');
 
   app.use('/api/auth', authRoutes);
   app.use('/api/inventory', inventoryRoutes);
@@ -43,6 +48,10 @@ function createTestApp(testDb) {
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/reports', reportsRoutes);
   app.use('/api/notifications', notificationsRoutes);
+  app.use('/api/customers', customersRoutes);
+  app.use('/api/quotations', quotationsRoutes);
+  app.use('/api/pricing', pricingRoutes);
+  app.use('/', publicPagesRoutes);
 
   return app;
 }

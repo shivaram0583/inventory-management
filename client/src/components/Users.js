@@ -6,6 +6,10 @@ import CustomSelect from './shared/CustomSelect';
 import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
 
+const STRONG_PASSWORD_HINT = 'Use at least 8 characters with uppercase, lowercase, number, and special character';
+
+const isStrongPassword = (password) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(String(password || ''));
+
 const Users = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState([]);
@@ -20,6 +24,15 @@ const Users = () => {
   const [newRole, setNewRole] = useState('operator');
   const [creating, setCreating] = useState(false);
   const [deleteConfirmModal, setDeleteConfirmModal] = useState({ open: false, user: null });
+
+  const [changePasswordModal, setChangePasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newChangePassword, setNewChangePassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const [resetPasswordModal, setResetPasswordModal] = useState({ open: false, targetUser: null });
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   const canManage = useMemo(() => user?.role === 'admin', [user]);
   const { sortedItems: sortedUsers, sortConfig: usersSort, requestSort: sortUsers } = useSortableData(users, { key: 'id', direction: 'desc' });
@@ -60,12 +73,19 @@ const Users = () => {
   }, [canManage, fetchLoginLogs]);
 
   const handleCreate = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     if (!canManage) return;
 
     setCreating(true);
     setActionError('');
     setSuccess('');
+
+    if (!isStrongPassword(newPassword)) {
+      setActionError(STRONG_PASSWORD_HINT);
+      setCreating(false);
+      return;
+    }
+
     try {
       await axios.post('/api/auth/users', {
         username: newUsername,
@@ -120,6 +140,55 @@ const Users = () => {
     }
   };
 
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (!isStrongPassword(newChangePassword)) {
+      setActionError(STRONG_PASSWORD_HINT);
+      return;
+    }
+    setChangingPassword(true);
+    setActionError('');
+    setSuccess('');
+    try {
+      await axios.put('/api/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newChangePassword
+      });
+      setChangePasswordModal(false);
+      setCurrentPassword('');
+      setNewChangePassword('');
+      setSuccess('Password changed successfully');
+    } catch (e2) {
+      setActionError(e2.response?.data?.message || 'Failed to change password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!resetPasswordModal.targetUser) return;
+    if (!isStrongPassword(resetNewPassword)) {
+      setActionError(STRONG_PASSWORD_HINT);
+      return;
+    }
+    setResettingPassword(true);
+    setActionError('');
+    setSuccess('');
+    try {
+      await axios.put(`/api/auth/users/${resetPasswordModal.targetUser.id}/reset-password`, {
+        new_password: resetNewPassword
+      });
+      setResetPasswordModal({ open: false, targetUser: null });
+      setResetNewPassword('');
+      setSuccess(`Password reset for ${resetPasswordModal.targetUser.username}`);
+    } catch (e2) {
+      setActionError(e2.response?.data?.message || 'Failed to reset password');
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in-up">
       {/* Header banner */}
@@ -131,8 +200,14 @@ const Users = () => {
           <h1 className="text-2xl font-extrabold text-white tracking-tight">✦ User Management</h1>
           <p className="mt-0.5 text-sm text-purple-200">Create accounts, manage access and view login history</p>
         </div>
-        <div className="h-12 w-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => setChangePasswordModal(true)}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-white/10 border border-white/20 hover:bg-white/20 transition-all">
+            Change Password
+          </button>
+          <div className="h-12 w-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center">
           <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          </div>
         </div>
       </div>
 
@@ -162,7 +237,8 @@ const Users = () => {
           <div>
             <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Password</label>
             <input type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
-              className="input-field" placeholder="password" disabled={!canManage || creating} />
+              className="input-field" placeholder="Strong password" disabled={!canManage || creating} />
+            <p className="mt-1 text-xs text-gray-500">{STRONG_PASSWORD_HINT}</p>
           </div>
           <div>
             <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Role</label>
@@ -254,6 +330,13 @@ const Users = () => {
                           disabled={!canManage || u.id === user?.id}>
                           Delete
                         </button>
+                        {canManage && u.id !== user?.id && (
+                          <button type="button"
+                            className="px-3 py-1 text-xs rounded-lg font-medium border border-amber-200 text-amber-600 hover:bg-amber-50 transition-all duration-150"
+                            onClick={() => { setResetPasswordModal({ open: true, targetUser: u }); setResetNewPassword(''); }}>
+                            Reset Pwd
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -328,6 +411,49 @@ const Users = () => {
       >
         <p>Are you sure you want to delete user <strong>"{deleteConfirmModal.user?.username}"</strong>?</p>
         <p className="mt-2">This action cannot be undone.</p>
+      </SharedModal>
+
+      {/* Change My Password Modal */}
+      <SharedModal
+        isOpen={changePasswordModal}
+        onClose={() => { setChangePasswordModal(false); setCurrentPassword(''); setNewChangePassword(''); }}
+        title="Change Password"
+      >
+        <form onSubmit={handleChangePassword} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Current Password</label>
+            <input type="password" required className="input-field" placeholder="Enter current password"
+              value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">New Password</label>
+            <input type="password" required minLength={8} className="input-field" placeholder="Enter strong new password"
+              value={newChangePassword} onChange={(e) => setNewChangePassword(e.target.value)} />
+            <p className="mt-1 text-xs text-gray-500">{STRONG_PASSWORD_HINT}</p>
+          </div>
+          <button type="submit" disabled={changingPassword} className="btn-primary w-full disabled:opacity-50">
+            {changingPassword ? 'Changing...' : 'Change Password'}
+          </button>
+        </form>
+      </SharedModal>
+
+      {/* Admin Reset Password Modal */}
+      <SharedModal
+        isOpen={resetPasswordModal.open}
+        onClose={() => { setResetPasswordModal({ open: false, targetUser: null }); setResetNewPassword(''); }}
+        title={`Reset Password for ${resetPasswordModal.targetUser?.username || ''}`}
+      >
+        <form onSubmit={handleResetPassword} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">New Password</label>
+            <input type="password" required minLength={8} className="input-field" placeholder="Enter strong new password"
+              value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} />
+            <p className="mt-1 text-xs text-gray-500">{STRONG_PASSWORD_HINT}</p>
+          </div>
+          <button type="submit" disabled={resettingPassword} className="btn-primary w-full disabled:opacity-50">
+            {resettingPassword ? 'Resetting...' : 'Reset Password'}
+          </button>
+        </form>
       </SharedModal>
     </div>
   );

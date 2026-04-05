@@ -34,7 +34,10 @@ const authenticateToken = async (req, res, next) => {
 
     await runQuery('UPDATE sessions SET last_activity = CURRENT_TIMESTAMP WHERE id = ?', [decoded.sessionId]);
 
-    const user = await getRow('SELECT id, username, role, is_active FROM users WHERE id = ?', [decoded.userId]);
+    const user = await getRow(
+      'SELECT id, username, role, is_active, force_password_change FROM users WHERE id = ?',
+      [decoded.userId]
+    );
     
     if (!user) {
       return res.status(401).json({ message: 'Invalid token' });
