@@ -1,6 +1,11 @@
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
 
+function hasRealValue(value) {
+  const normalized = String(value || '').trim();
+  return Boolean(normalized) && !/^your[_-]/i.test(normalized);
+}
+
 function getGatewayProvider() {
   return (process.env.PAYMENT_GATEWAY_PROVIDER || 'razorpay').toLowerCase();
 }
@@ -19,7 +24,7 @@ function isGatewayEnabled() {
   }
 
   const credentials = getRazorpayCredentials();
-  return Boolean(credentials.keyId && credentials.keySecret);
+  return hasRealValue(credentials.keyId) && hasRealValue(credentials.keySecret);
 }
 
 function getGatewayPublicConfig() {

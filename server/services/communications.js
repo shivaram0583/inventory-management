@@ -1,6 +1,11 @@
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
 
+function hasRealValue(value) {
+  const normalized = String(value || '').trim();
+  return Boolean(normalized) && !/^your[_-]/i.test(normalized);
+}
+
 function getFrontendBaseUrl() {
   return (process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
@@ -11,19 +16,19 @@ function getPublicApiBaseUrl() {
 
 function hasEmailDelivery() {
   return Boolean(
-    process.env.SMTP_HOST &&
-    process.env.SMTP_PORT &&
-    process.env.SMTP_USER &&
-    process.env.SMTP_PASS &&
-    process.env.SMTP_FROM
+    hasRealValue(process.env.SMTP_HOST) &&
+    hasRealValue(process.env.SMTP_PORT) &&
+    hasRealValue(process.env.SMTP_USER) &&
+    hasRealValue(process.env.SMTP_PASS) &&
+    hasRealValue(process.env.SMTP_FROM)
   );
 }
 
 function hasSmsDelivery() {
   return Boolean(
-    process.env.TWILIO_ACCOUNT_SID &&
-    process.env.TWILIO_AUTH_TOKEN &&
-    process.env.TWILIO_FROM_NUMBER
+    hasRealValue(process.env.TWILIO_ACCOUNT_SID) &&
+    hasRealValue(process.env.TWILIO_AUTH_TOKEN) &&
+    hasRealValue(process.env.TWILIO_FROM_NUMBER)
   );
 }
 
