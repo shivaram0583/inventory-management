@@ -638,6 +638,319 @@ router.get('/transactions', authenticateToken, async (req, res) => {
   }
 });
 
+// Audit report
+router.get('/audit', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    if (!start_date || !end_date) {
+      return res.status(400).json({ message: 'Start date and end date are required' });
+    }
+
+    // ── 1. Cash-flow summary (day-wise) ──
+    const dailyRows = [];
+    const startD = new Date(`${start_date}T00:00:00+05:30`);
+    const endD = new Date(`${end_date}T00:00:00+05:30`);
+    if (Number.isNaN(startD.getTime()) || Number.isNaN(endD.getTime()) || startD > endD) {
+      return res.status(400).json({ message: 'Invalid date range' });
+    }
+    for (let cursor = new Date(startD); cursor <= endD; cursor.setDate(cursor.getDate() + 1)) {
+      const bd = getISTDateString(cursor);
+      const [balance, setup] = await Promise.all([
+        getDailyBalanceSnapshot(bd),
+        getDailySetupRecord(bd)
+      ]);
+      dailyRows.push({
+        business_date: bd,
+        opening_balance: balance.openingBalance,
+        sales: balance.sales,
+        expenditure: balance.expenditure,
+        bank_deposits: balance.bankDeposits,
+        bank_withdrawals: balance.bankWithdrawals,
+        supplier_payments_cash: balance.supplierPaymentsCash,
+        closing_balance: balance.closingBalance,
+        reviewed: !!setup?.balance_reviewed_at,
+        reviewed_by: setup?.balance_reviewed_by_name || null,
+        opening_snapshot: setup?.opening_balance_snapshot ?? null,
+        closing_snapshot: setup?.closing_balance_snapshot ?? null,
+        variance: setup?.closing_balance_snapshot != null
+          ? Number(setup.closing_balance_snapshot) - balance.closingBalance
+          : null
+      });
+    }
+
+    // ── 2. Payment-mode breakdown ──
+    const salesByMode = await getAll(`
+      SELECT
+        COALESCE(r.payment_mode, 'cash') AS payment_mode,
+        COUNT(DISTINCT s.sale_id) AS transaction_count,
+        SUM(s.total_amount) AS total_amount
+      FROM sales s
+      LEFT JOIN receipts r ON r.sale_id = s.sale_id
+      WHERE DATE(s.sale_date) BETWEEN ? AND ?
+      GROUP BY COALESCE(r.payment_mode, 'cash')
+      ORDER BY total_amount DESC
+    `, [start_date, end_date]);
+
+    // Bank deposits from sales (should match UPI+Card sales above)
+    const bankDepositsFromSales = await getAll(`
+      SELECT
+        payment_mode,
+        SUM(amount) AS total_amount,
+        COUNT(*) AS entry_count
+      FROM bank_transfers
+      WHERE source_type = 'sale'
+        AND transfer_date BETWEEN ? AND ?
+      GROUP BY payment_mode
+    `, [start_date, end_date]);
+
+    // Manual deposits
+    const manualDeposits = await getRow(`
+      SELECT SUM(amount) AS total_amount, COUNT(*) AS entry_count
+      FROM bank_transfers
+      WHERE source_type = 'manual' AND transfer_type = 'deposit'
+        AND transfer_date BETWEEN ? AND ?
+    `, [start_date, end_date]);
+
+    // Payment mode cross-verification
+    const crossVerification = [];
+    for (const mode of ['upi', 'card']) {
+      const saleTotal = (salesByMode.find(s => s.payment_mode === mode) || {}).total_amount || 0;
+      const bankTotal = (bankDepositsFromSales.find(b => b.payment_mode === mode) || {}).total_amount || 0;
+      crossVerification.push({
+        mode,
+        sales_total: saleTotal,
+        bank_deposits: bankTotal,
+        difference: saleTotal - bankTotal,
+        matched: Math.abs(saleTotal - bankTotal) < 0.01
+      });
+    }
+
+    // ── 3. Expenditure audit ──
+    const expendituresByCategory = await getAll(`
+      SELECT
+        category,
+        COUNT(*) AS entry_count,
+        SUM(amount) AS total_amount
+      FROM expenditures
+      WHERE expense_date BETWEEN ? AND ?
+      GROUP BY category
+      ORDER BY total_amount DESC
+    `, [start_date, end_date]);
+
+    const expenditureDetails = await getAll(`
+      SELECT e.id, e.amount, e.description, e.category, e.expense_date,
+             u.username AS created_by_name, e.created_at
+      FROM expenditures e
+      LEFT JOIN users u ON u.id = e.created_by
+      WHERE e.expense_date BETWEEN ? AND ?
+      ORDER BY e.expense_date DESC, e.created_at DESC
+    `, [start_date, end_date]);
+
+    // ── 4. Supplier advances & balances ──
+    const supplierBalances = await getAll(`
+      SELECT
+        pu.supplier,
+        SUM(pu.total_amount) AS total_purchases,
+        COALESCE(sp_agg.total_paid, 0) AS total_paid,
+        SUM(pu.total_amount) - COALESCE(sp_agg.total_paid, 0) AS remaining_balance,
+        COUNT(DISTINCT pu.id) AS purchase_count,
+        COALESCE(sp_agg.payment_count, 0) AS payment_count
+      FROM purchases pu
+      LEFT JOIN (
+        SELECT supplier_name,
+          SUM(amount) AS total_paid,
+          COUNT(*) AS payment_count
+        FROM supplier_payments
+        GROUP BY supplier_name
+      ) sp_agg ON sp_agg.supplier_name = pu.supplier
+      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
+      GROUP BY pu.supplier
+      ORDER BY remaining_balance DESC
+    `);
+
+    // Supplier payment mode breakdown
+    const supplierPaymentModes = await getAll(`
+      SELECT
+        supplier_name,
+        payment_mode,
+        SUM(amount) AS total_amount,
+        COUNT(*) AS payment_count
+      FROM supplier_payments
+      WHERE payment_date BETWEEN ? AND ?
+      GROUP BY supplier_name, payment_mode
+      ORDER BY supplier_name, total_amount DESC
+    `, [start_date, end_date]);
+
+    // Advance payments (purchases with status 'ordered' that have advance_amount > 0)
+    const advancePayments = await getAll(`
+      SELECT
+        pu.purchase_id,
+        p.product_name,
+        p.variety,
+        pu.supplier,
+        pu.total_amount,
+        pu.advance_amount,
+        pu.total_amount - pu.advance_amount AS balance_due,
+        pu.purchase_status,
+        pu.purchase_date
+      FROM purchases pu
+      JOIN products p ON pu.product_id = p.id
+      WHERE pu.advance_amount > 0
+        AND pu.purchase_date BETWEEN ? AND ?
+      ORDER BY pu.purchase_date DESC
+    `, [start_date, end_date]);
+
+    // ── 5. Bank reconciliation ──
+    const bankReconciliation = await getAll(`
+      SELECT
+        ba.id AS bank_account_id,
+        ba.account_name,
+        ba.bank_name,
+        ba.balance AS current_balance,
+        COALESCE(dep.total, 0) AS total_deposits,
+        COALESCE(wth.total, 0) AS total_withdrawals,
+        COALESCE(dep.total, 0) - COALESCE(wth.total, 0) AS net_flow,
+        COALESCE(sale_dep.total, 0) AS sale_deposits,
+        COALESCE(manual_dep.total, 0) AS manual_deposits,
+        COALESCE(cr_wth.total, 0) AS cash_registry_withdrawals,
+        COALESCE(be_wth.total, 0) AS business_expense_withdrawals,
+        COALESCE(per_wth.total, 0) AS personal_withdrawals,
+        COALESCE(sp_wth.total, 0) AS supplier_payment_withdrawals
+      FROM bank_accounts ba
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='deposit' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) dep ON dep.bank_account_id = ba.id
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='withdrawal' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) wth ON wth.bank_account_id = ba.id
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='deposit' AND source_type='sale' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) sale_dep ON sale_dep.bank_account_id = ba.id
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='deposit' AND source_type='manual' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) manual_dep ON manual_dep.bank_account_id = ba.id
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='withdrawal' AND COALESCE(withdrawal_purpose,'cash_registry')='cash_registry' AND source_type != 'supplier_payment' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) cr_wth ON cr_wth.bank_account_id = ba.id
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='withdrawal' AND withdrawal_purpose='business_expense' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) be_wth ON be_wth.bank_account_id = ba.id
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='withdrawal' AND withdrawal_purpose='personal' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) per_wth ON per_wth.bank_account_id = ba.id
+      LEFT JOIN (
+        SELECT bank_account_id, SUM(amount) AS total
+        FROM bank_transfers WHERE transfer_type='withdrawal' AND source_type='supplier_payment' AND transfer_date BETWEEN ? AND ?
+        GROUP BY bank_account_id
+      ) sp_wth ON sp_wth.bank_account_id = ba.id
+      WHERE ba.is_active = 1
+      ORDER BY ba.account_name
+    `, [
+      start_date, end_date, start_date, end_date,
+      start_date, end_date, start_date, end_date,
+      start_date, end_date, start_date, end_date,
+      start_date, end_date, start_date, end_date
+    ]);
+
+    // ── Aggregate summary ──
+    const cashFlowSummary = dailyRows.reduce((acc, r) => ({
+      total_sales: acc.total_sales + Number(r.sales || 0),
+      total_expenditure: acc.total_expenditure + Number(r.expenditure || 0),
+      total_bank_deposits: acc.total_bank_deposits + Number(r.bank_deposits || 0),
+      total_bank_withdrawals: acc.total_bank_withdrawals + Number(r.bank_withdrawals || 0),
+      total_supplier_cash: acc.total_supplier_cash + Number(r.supplier_payments_cash || 0),
+      days_reviewed: acc.days_reviewed + (r.reviewed ? 1 : 0),
+      days_with_variance: acc.days_with_variance + (r.variance && Math.abs(r.variance) >= 1 ? 1 : 0)
+    }), {
+      total_sales: 0, total_expenditure: 0, total_bank_deposits: 0,
+      total_bank_withdrawals: 0, total_supplier_cash: 0,
+      days_reviewed: 0, days_with_variance: 0
+    });
+    cashFlowSummary.total_days = dailyRows.length;
+
+    res.json({
+      range: { start_date, end_date },
+      cashFlow: { summary: cashFlowSummary, daily: dailyRows },
+      paymentModes: { salesByMode, bankDepositsFromSales, manualDeposits, crossVerification },
+      expenditures: { byCategory: expendituresByCategory, details: expenditureDetails },
+      suppliers: { balances: supplierBalances, paymentModes: supplierPaymentModes, advances: advancePayments },
+      bankReconciliation
+    });
+  } catch (error) {
+    console.error('Audit report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Search customer-sales archive
+router.get('/customer-sales/search', authenticateToken, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({ message: 'Search query must be at least 2 characters' });
+    }
+    const term = `%${q.trim()}%`;
+    const customerSalesSelect = await getCustomerSalesSelect();
+    const records = await getAll(
+      `${customerSalesSelect}
+       WHERE cs.sale_id LIKE ? OR cs.receipt_id LIKE ?
+         OR cs.customer_name LIKE ? OR cs.customer_mobile LIKE ?
+         OR cs.product_name LIKE ?
+       ORDER BY cs.sale_date DESC, cs.id DESC
+       LIMIT 200`,
+      [term, term, term, term, term]
+    );
+    res.json({ records });
+  } catch (error) {
+    console.error('Customer sales search error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Search purchases
+router.get('/purchases/search', authenticateToken, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({ message: 'Search query must be at least 2 characters' });
+    }
+    const term = `%${q.trim()}%`;
+    const purchases = await getAll(
+      `SELECT
+        pu.id, pu.purchase_id, p.product_id AS product_code,
+        p.product_name, p.variety, p.unit, p.category,
+        pu.quantity, pu.price_per_unit, pu.total_amount,
+        pu.supplier, pu.purchase_date, u.username AS added_by
+       FROM purchases pu
+       JOIN products p ON pu.product_id = p.id
+       LEFT JOIN users u ON pu.added_by = u.id
+       WHERE pu.purchase_id LIKE ? OR p.product_name LIKE ?
+         OR p.product_id LIKE ? OR pu.supplier LIKE ?
+       ORDER BY pu.purchase_date DESC
+       LIMIT 200`,
+      [term, term, term, term]
+    );
+    res.json({ purchases });
+  } catch (error) {
+    console.error('Purchases search error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Delete customer sales record (admin only)
 router.delete('/customer-sales/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
   try {

@@ -101,8 +101,9 @@ async function createSupplierPaymentRecord({
          description,
          transfer_date,
          created_by,
-         created_at
-       ) VALUES (?, ?, 'withdrawal', ?, ?, ?, ?, ?, ?, ?)`,
+         created_at,
+         withdrawal_purpose
+       ) VALUES (?, ?, 'withdrawal', ?, ?, ?, ?, ?, ?, ?, 'supplier_payment')`,
       [
         accountId,
         paymentAmount,

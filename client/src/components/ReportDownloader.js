@@ -11,10 +11,12 @@ const REPORT_TYPES = [
   { id: 'today-sales', label: "Today's Sales", needsRange: false },
   { id: 'sales-range', label: 'Sales by Date Range', needsRange: true },
   { id: 'purchases', label: 'Purchases by Date Range', needsRange: true },
-  { id: 'customer-sales', label: 'Customer Sales by Date Range', needsRange: true },
-  { id: 'transactions', label: 'Transactions Audit Report', needsRange: true },
-  { id: 'suppliers', label: 'Supplier Report', needsRange: true },
+  { id: 'customer-sales', label: 'Customer Sales Archive', needsRange: true },
+  { id: 'transactions', label: 'Transactions Report', needsRange: true },
+  { id: 'suppliers', label: 'Supplier Summary', needsRange: true },
   { id: 'supplier-details', label: 'Supplier Items Breakdown', needsRange: true },
+  { id: 'audit', label: 'Audit Report', needsRange: true },
+  { id: 'bank-accounts', label: 'Bank Account Details', needsRange: false },
 ];
 
 const COLUMNS = {
@@ -116,6 +118,24 @@ const COLUMNS = {
     { key: 'total_spent', label: 'Total Spent (₹)' },
     { key: 'purchase_count', label: 'Purchases' },
     { key: 'last_purchase_fmt', label: 'Last Purchase (IST)' },
+  ],
+  audit: [
+    { key: 'section', label: 'Section' },
+    { key: 'label', label: 'Label' },
+    { key: 'date', label: 'Date' },
+    { key: 'description', label: 'Description' },
+    { key: 'category', label: 'Category' },
+    { key: 'payment_mode', label: 'Payment Mode' },
+    { key: 'amount', label: 'Amount (₹)' },
+    { key: 'status', label: 'Status' },
+    { key: 'details', label: 'Details' },
+  ],
+  'bank-accounts': [
+    { key: 'account_name', label: 'Account Name' },
+    { key: 'bank_name', label: 'Bank Name' },
+    { key: 'account_number', label: 'Account Number' },
+    { key: 'balance', label: 'Balance (₹)' },
+    { key: 'status', label: 'Status' },
   ],
 };
 
@@ -275,6 +295,73 @@ const buildTransactionReportRows = (payload, startDate, endDate) => {
   return [summaryRow, ...dailyRows, ...expenditureRows, ...bankTransferRows, ...supplierPaymentRows];
 };
 
+const buildAuditReportRows = (payload) => {
+  const rows = [];
+  const cf = payload.cashFlow || {};
+  const pm = payload.paymentModes || {};
+  const exp = payload.expenditures || {};
+  const sup = payload.suppliers || {};
+  const bankRecon = payload.bankReconciliation || [];
+
+  // Cash flow summary
+  const s = cf.summary || {};
+  rows.push({ section: 'Cash Flow Summary', label: 'Total Sales', date: '', description: '', category: '', payment_mode: '', amount: s.total_sales || 0, status: '', details: '' });
+  rows.push({ section: 'Cash Flow Summary', label: 'Total Expenditure', date: '', description: '', category: '', payment_mode: '', amount: s.total_expenditure || 0, status: '', details: '' });
+  rows.push({ section: 'Cash Flow Summary', label: 'Bank Deposits', date: '', description: '', category: '', payment_mode: '', amount: s.total_bank_deposits || 0, status: '', details: '' });
+  rows.push({ section: 'Cash Flow Summary', label: 'Bank Withdrawals', date: '', description: '', category: '', payment_mode: '', amount: s.total_bank_withdrawals || 0, status: '', details: '' });
+  rows.push({ section: 'Cash Flow Summary', label: 'Supplier Cash Payments', date: '', description: '', category: '', payment_mode: '', amount: s.total_supplier_cash || 0, status: '', details: '' });
+  rows.push({ section: 'Cash Flow Summary', label: 'Days Reviewed', date: '', description: '', category: '', payment_mode: '', amount: '', status: `${s.days_reviewed || 0}/${s.total_days || 0}`, details: `${s.days_with_variance || 0} days with variance` });
+
+  // Daily cash flow
+  (cf.daily || []).forEach((d) => {
+    rows.push({
+      section: 'Daily Cash Flow', label: d.business_date, date: d.business_date,
+      description: `Open: ₹${d.opening_balance} | Close: ₹${d.closing_balance}`,
+      category: '', payment_mode: '',
+      amount: d.closing_balance,
+      status: d.reviewed ? (d.variance && Math.abs(d.variance) >= 1 ? `Variance ₹${Math.abs(d.variance)}` : 'Verified') : 'Pending',
+      details: `Sales: ₹${d.sales} | Exp: ₹${d.expenditure} | Deposits: ₹${d.bank_deposits} | Withdrawals: ₹${d.bank_withdrawals}`
+    });
+  });
+
+  // Payment mode sales
+  (pm.salesByMode || []).forEach((m) => {
+    rows.push({ section: 'Sales by Payment Mode', label: m.payment_mode, date: '', description: `${m.transaction_count} transactions`, category: '', payment_mode: m.payment_mode, amount: m.total_amount, status: '', details: '' });
+  });
+
+  // Cross-verification
+  (pm.crossVerification || []).forEach((cv) => {
+    rows.push({ section: 'Payment Verification', label: cv.mode, date: '', description: `Sales: ₹${cv.sales_total} vs Bank: ₹${cv.bank_deposits}`, category: '', payment_mode: cv.mode, amount: cv.difference, status: cv.matched ? 'Matched' : 'Mismatch', details: '' });
+  });
+
+  // Expenditure categories
+  (exp.byCategory || []).forEach((cat) => {
+    rows.push({ section: 'Expenditure by Category', label: cat.category, date: '', description: `${cat.entry_count} entries`, category: cat.category, payment_mode: '', amount: cat.total_amount, status: '', details: '' });
+  });
+
+  // Expenditure details
+  (exp.details || []).forEach((e) => {
+    rows.push({ section: 'Expenditure Detail', label: e.description || '', date: e.expense_date, description: e.description || '', category: e.category || 'general', payment_mode: 'cash', amount: e.amount, status: '', details: `By: ${e.created_by_name || '-'}` });
+  });
+
+  // Supplier balances
+  (sup.balances || []).forEach((sb) => {
+    rows.push({ section: 'Supplier Balance', label: sb.supplier, date: '', description: `Purchases: ₹${sb.total_purchases} | Paid: ₹${sb.total_paid}`, category: '', payment_mode: '', amount: sb.remaining_balance, status: Number(sb.remaining_balance) <= 0 ? 'Settled' : 'Due', details: `${sb.purchase_count} purchases, ${sb.payment_count} payments` });
+  });
+
+  // Advance payments
+  (sup.advances || []).forEach((a) => {
+    rows.push({ section: 'Advance Payment', label: a.purchase_id, date: a.purchase_date, description: `${a.product_name} from ${a.supplier}`, category: '', payment_mode: '', amount: a.advance_amount, status: a.purchase_status, details: `Order: ₹${a.total_amount} | Due: ₹${a.balance_due}` });
+  });
+
+  // Bank reconciliation
+  bankRecon.forEach((bank) => {
+    rows.push({ section: 'Bank Reconciliation', label: `${bank.account_name} (${bank.bank_name})`, date: '', description: `Balance: ₹${bank.current_balance}`, category: '', payment_mode: '', amount: bank.net_flow, status: '', details: `Deposits: ₹${bank.total_deposits} | Withdrawals: ₹${bank.total_withdrawals} | Sales: ₹${bank.sale_deposits} | Manual: ₹${bank.manual_deposits} | Supplier: ₹${bank.supplier_payment_withdrawals}` });
+  });
+
+  return rows;
+};
+
 const ReportDownloader = () => {
   const today = getISTDateString();
   const [open, setOpen] = useState(false);
@@ -345,6 +432,17 @@ const ReportDownloader = () => {
         rows = (res.data?.details || []).map(d => ({
           ...d,
           last_purchase_fmt: fmtDateTime(d.last_purchase),
+        }));
+      } else if (reportType === 'audit') {
+        const res = await axios.get('/api/reports/audit', {
+          params: { start_date: startDate, end_date: endDate }
+        });
+        rows = buildAuditReportRows(res.data || {});
+      } else if (reportType === 'bank-accounts') {
+        const res = await axios.get('/api/transactions/bank-accounts');
+        rows = (res.data || []).map(a => ({
+          ...a,
+          status: a.is_active ? 'Active' : 'Inactive',
         }));
       }
 

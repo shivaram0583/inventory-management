@@ -32,7 +32,10 @@ async function getDailyBalanceSnapshot(date = getISTDateString()) {
   const priorWithdrawals = await getRow(`
     SELECT COALESCE(SUM(amount), 0) as total
     FROM bank_transfers
-    WHERE transfer_type = 'withdrawal' AND transfer_date < ?
+    WHERE transfer_type = 'withdrawal'
+      AND source_type != 'supplier_payment'
+      AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
+      AND transfer_date < ?
   `, [date]);
 
   const priorSupplierCash = await getRow(`
@@ -62,7 +65,10 @@ async function getDailyBalanceSnapshot(date = getISTDateString()) {
   const todayWithdrawals = await getRow(`
     SELECT COALESCE(SUM(amount), 0) as total
     FROM bank_transfers
-    WHERE transfer_type = 'withdrawal' AND transfer_date = ?
+    WHERE transfer_type = 'withdrawal'
+      AND source_type != 'supplier_payment'
+      AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
+      AND transfer_date = ?
   `, [date]);
 
   const todaySupplierCash = await getRow(`

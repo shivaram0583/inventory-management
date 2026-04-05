@@ -58,7 +58,14 @@ const fmtMoney = (value) => `₹${num(value).toLocaleString('en-IN', {
   maximumFractionDigits: 2
 })}`;
 
-const getPurchaseStatusMeta = (status) => {
+const getPurchaseStatusMeta = (status, productDeleted) => {
+  if (productDeleted) {
+    return {
+      label: 'Deleted',
+      badgeClass: 'bg-red-100 text-red-700',
+      helperText: 'This product has been removed from inventory.'
+    };
+  }
   const normalized = String(status || PURCHASE_STATUS.DELIVERED).toLowerCase();
   if (normalized === PURCHASE_STATUS.ORDERED) {
     return {
@@ -148,7 +155,14 @@ const Purchases = () => {
       .filter((purchase) => String(purchase.purchase_status || PURCHASE_STATUS.DELIVERED).toLowerCase() === PURCHASE_STATUS.ORDERED)
       .map((purchase) => String(purchase.product_id))
   );
-  const availableProducts = products.filter((product) => !pendingPurchaseProductIds.has(String(product.id)));
+  const availableProducts = products.filter((product) => {
+    const hasPendingOrder = pendingPurchaseProductIds.has(String(product.id));
+    const hasExistingStock = num(product.quantity_available) > 0;
+    // Only hide products that are newly created with zero stock and have a pending order
+    // Existing products with stock should remain available even with pending orders
+    if (hasPendingOrder && !hasExistingStock) return false;
+    return true;
+  });
   const selectedProduct = availableProducts.find((p) => String(p.id) === String(formProductId));
   const totalCost = num(formQuantity) * num(formPrice);
   const advanceAmount = formStatus === PURCHASE_STATUS.ORDERED ? num(formAdvanceAmount) : 0;
@@ -284,6 +298,9 @@ const Purchases = () => {
     key: 'purchase_date',
     direction: 'desc'
   });
+  const { sortedItems: sortedSupProducts, sortConfig: supProductsSort, requestSort: sortSupProducts } = useSortableData(supplierDetail?.products || [], { key: 'total_spent', direction: 'desc' });
+  const { sortedItems: sortedSupHistory, sortConfig: supHistorySort, requestSort: sortSupHistory } = useSortableData(supplierDetail?.history || [], { key: 'purchase_date', direction: 'desc' });
+  const [supHistoryStatusFilter, setSupHistoryStatusFilter] = useState('all');
   const showHistoryActions = canManagePurchases && historyStatusFilter === PURCHASE_STATUS.ORDERED;
 
   const handleRecordPurchase = (event) => {
@@ -758,7 +775,7 @@ const Purchases = () => {
                 <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center gap-1">
                   <Package className="h-3 w-3" /> Quantity
                 </label>
-                <input type="number" min="0.01" step="0.01" className="input-field !text-sm" placeholder={`e.g. 50 ${selectedProduct?.unit || ''}`} value={formQuantity} onChange={(e) => setFormQuantity(e.target.value)} required />
+                <input type="number" min="1" step="1" className="input-field !text-sm" placeholder={`e.g. 50 ${selectedProduct?.unit || ''}`} value={formQuantity} onChange={(e) => setFormQuantity(e.target.value)} required />
               </div>
 
               <div>
@@ -904,7 +921,7 @@ const Purchases = () => {
                 </thead>
                 <tbody>
                   {sortedPurchases.map((purchase) => {
-                    const statusMeta = getPurchaseStatusMeta(purchase.purchase_status);
+                    const statusMeta = getPurchaseStatusMeta(purchase.purchase_status, purchase.product_deleted);
                     const isPending = String(purchase.purchase_status).toLowerCase() === PURCHASE_STATUS.ORDERED;
                     return (
                       <tr key={purchase.id} className={isPending ? 'bg-amber-50/50' : ''}>
@@ -1093,7 +1110,7 @@ const Purchases = () => {
                       </div>
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
                         <p className="text-xs font-semibold text-gray-500 uppercase">Total Items</p>
-                        <p className="text-2xl font-extrabold text-blue-700">{Number(supplierDetail.summary?.total_items || 0).toFixed(1)}</p>
+                        <p className="text-2xl font-extrabold text-blue-700">{Number(supplierDetail.summary?.total_items || 0)}</p>
                       </div>
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#faf5ff,#f5f3ff)' }}>
                         <p className="text-xs font-semibold text-gray-500 uppercase">Total Cost</p>
@@ -1108,17 +1125,17 @@ const Purchases = () => {
                       <table className="table">
                         <thead>
                           <tr>
-                            <th>Product ID</th>
-                            <th>Product</th>
-                            <th>Category</th>
-                            <th>Total Qty</th>
-                            <th>Total Spent</th>
-                            <th>Purchases</th>
-                            <th>Last Purchase</th>
+                            <SortableHeader label="Product ID" sortKey="product_code" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Product" sortKey="product_name" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Category" sortKey="category" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Total Qty" sortKey="total_quantity" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Total Spent" sortKey="total_spent" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Purchases" sortKey="purchase_count" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Last Purchase" sortKey="last_purchase_date" sortConfig={supProductsSort} onSort={sortSupProducts} />
                           </tr>
                         </thead>
                         <tbody>
-                          {(supplierDetail.products || []).map((product, index) => (
+                          {sortedSupProducts.map((product, index) => (
                             <tr key={index}>
                               <td className="font-mono text-xs">{product.product_code}</td>
                               <td>
@@ -1134,30 +1151,43 @@ const Purchases = () => {
                           ))}
                         </tbody>
                       </table>
-                      {(supplierDetail.products || []).length === 0 && <div className="text-center py-6 text-gray-400 text-sm">No products found</div>}
+                      {sortedSupProducts.length === 0 && <div className="text-center py-6 text-gray-400 text-sm">No products found</div>}
                     </div>
                   </div>
 
                   <div className="card">
-                    <h3 className="text-base font-bold text-gray-800 mb-4">Purchase History</h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-base font-bold text-gray-800">Purchase History</h3>
+                      <select value={supHistoryStatusFilter} onChange={(e) => setSupHistoryStatusFilter(e.target.value)}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                        <option value="all">Status: All</option>
+                        <option value="delivered">Delivered</option>
+                        <option value="ordered">Ordered</option>
+                        <option value="deleted">Deleted</option>
+                      </select>
+                    </div>
                     <div className="table-container">
                       <table className="table">
                         <thead>
                           <tr>
-                            <th>Purchase ID</th>
-                            <th>Product</th>
+                            <SortableHeader label="Purchase ID" sortKey="purchase_id" sortConfig={supHistorySort} onSort={sortSupHistory} />
+                            <SortableHeader label="Product" sortKey="product_name" sortConfig={supHistorySort} onSort={sortSupHistory} />
                             <th>Status</th>
-                            <th>Qty</th>
-                            <th>Total</th>
-                            <th>Advance</th>
-                            <th>Order Date</th>
-                            <th>Delivery Date</th>
-                            <th>Added By</th>
+                            <SortableHeader label="Qty" sortKey="quantity" sortConfig={supHistorySort} onSort={sortSupHistory} />
+                            <SortableHeader label="Total" sortKey="total_amount" sortConfig={supHistorySort} onSort={sortSupHistory} />
+                            <SortableHeader label="Advance" sortKey="advance_amount" sortConfig={supHistorySort} onSort={sortSupHistory} />
+                            <SortableHeader label="Order Date" sortKey="purchase_date" sortConfig={supHistorySort} onSort={sortSupHistory} />
+                            <SortableHeader label="Delivery Date" sortKey="delivery_date" sortConfig={supHistorySort} onSort={sortSupHistory} />
+                            <SortableHeader label="Added By" sortKey="added_by" sortConfig={supHistorySort} onSort={sortSupHistory} />
                           </tr>
                         </thead>
                         <tbody>
-                          {(supplierDetail.history || []).map((history, index) => {
-                            const statusMeta = getPurchaseStatusMeta(history.purchase_status);
+                          {sortedSupHistory.filter(h => {
+                            if (supHistoryStatusFilter === 'all') return true;
+                            if (supHistoryStatusFilter === 'deleted') return h.product_deleted;
+                            return h.purchase_status === supHistoryStatusFilter;
+                          }).map((history, index) => {
+                            const statusMeta = getPurchaseStatusMeta(history.purchase_status, history.product_deleted);
                             return (
                               <tr key={index}>
                                 <td className="font-mono text-xs">{history.purchase_id}</td>
@@ -1183,7 +1213,7 @@ const Purchases = () => {
                           })}
                         </tbody>
                       </table>
-                      {(supplierDetail.history || []).length === 0 && <div className="text-center py-6 text-gray-400 text-sm">No purchase history</div>}
+                      {sortedSupHistory.length === 0 && <div className="text-center py-6 text-gray-400 text-sm">No purchase history</div>}
                     </div>
                   </div>
                 </div>
@@ -1408,8 +1438,8 @@ const Purchases = () => {
                       {editModal.purchase.variety && <p className="text-xs text-gray-400">{editModal.purchase.variety}</p>}
                       <p className="text-xs text-gray-400 mt-0.5 capitalize">{editModal.purchase.category} · {editModal.purchase.unit}</p>
                     </div>
-                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${getPurchaseStatusMeta(editModal.purchase.purchase_status).badgeClass}`}>
-                      {getPurchaseStatusMeta(editModal.purchase.purchase_status).label}
+                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${getPurchaseStatusMeta(editModal.purchase.purchase_status, editModal.purchase.product_deleted).badgeClass}`}>
+                      {getPurchaseStatusMeta(editModal.purchase.purchase_status, editModal.purchase.product_deleted).label}
                     </span>
                   </div>
                 </div>
@@ -1417,7 +1447,7 @@ const Purchases = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Quantity ({editModal.purchase.unit})</label>
-                    <input type="number" min="0.01" step="0.01" required className="input-field !text-sm !rounded-2xl" value={editForm.quantity} onChange={(e) => setEditForm((current) => ({ ...current, quantity: e.target.value }))} />
+                    <input type="number" min="1" step="1" required className="input-field !text-sm !rounded-2xl" value={editForm.quantity} onChange={(e) => setEditForm((current) => ({ ...current, quantity: e.target.value }))} />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Price / Unit (₹)</label>
@@ -1453,7 +1483,7 @@ const Purchases = () => {
                         Stock will be adjusted by{' '}
                         <strong className={num(editForm.quantity) - num(editModal.purchase.quantity) >= 0 ? 'text-green-600' : 'text-red-600'}>
                           {num(editForm.quantity) - num(editModal.purchase.quantity) >= 0 ? '+' : ''}
-                          {(num(editForm.quantity) - num(editModal.purchase.quantity)).toFixed(2)} {editModal.purchase.unit}
+                          {num(editForm.quantity) - num(editModal.purchase.quantity)} {editModal.purchase.unit}
                         </strong>
                       </p>
                     ) : (
@@ -1604,7 +1634,7 @@ const Purchases = () => {
                     <input
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="1"
                       className={`input-field !text-sm !rounded-2xl ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
                       value={newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? '0' : newProductForm.quantity_available}
                       onChange={(e) => setNewProductForm((current) => ({ ...current, quantity_available: e.target.value }))}
@@ -1642,8 +1672,8 @@ const Purchases = () => {
                         <label className="block text-xs font-semibold text-gray-600 mb-1">Order Quantity *</label>
                         <input
                           type="number"
-                          min="0.01"
-                          step="0.01"
+                          min="1"
+                          step="1"
                           className="input-field !text-sm !rounded-2xl"
                           value={newProductForm.order_quantity}
                           onChange={(e) => setNewProductForm((current) => ({ ...current, order_quantity: e.target.value }))}

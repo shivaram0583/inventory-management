@@ -31,7 +31,7 @@ router.post('/', [
   requireDailySetupForOperatorWrites,
   body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
   body('items.*.product_id').isInt({ min: 1 }).withMessage('Valid product ID is required'),
-  body('items.*.quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
+  body('items.*.quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive whole number'),
   body('customer_name').optional().isString().withMessage('Customer name must be a string'),
   body('payment_mode').optional().isIn(['cash', 'card', 'upi']).withMessage('Invalid payment mode')
 ], async (req, res) => {
