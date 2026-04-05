@@ -38,6 +38,7 @@ router.get('/admin', [
       `SELECT p.id, p.product_name, p.variety, p.quantity_available, p.unit
        FROM products p
        WHERE p.quantity_available <= 10
+         AND COALESCE(p.is_deleted, 0) = 0
          AND NOT (
            COALESCE(p.quantity_available, 0) <= 0
            AND EXISTS (

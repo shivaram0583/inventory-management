@@ -473,6 +473,13 @@ function initializeDatabase() {
         if (!e) console.log('Added payment_mode column to bank_transfers table');
       });
     }
+
+    const hasWithdrawalPurpose = columns.some((c) => c.name === 'withdrawal_purpose');
+    if (!hasWithdrawalPurpose) {
+      db.run(`ALTER TABLE bank_transfers ADD COLUMN withdrawal_purpose TEXT`, (e) => {
+        if (!e) console.log('Added withdrawal_purpose column to bank_transfers table');
+      });
+    }
   });
 
   // Create supplier_payments table
@@ -551,6 +558,17 @@ function createDefaultUsers() {
       console.error('Error creating operator user:', err.message);
     } else {
       console.log('Operator user created successfully');
+    }
+  });
+
+  // Add is_deleted column to products (soft delete for purchase history)
+  db.all(`PRAGMA table_info(products)`, (err, columns) => {
+    if (err || !columns) return;
+    const hasIsDeleted = columns.some((c) => c.name === 'is_deleted');
+    if (!hasIsDeleted) {
+      db.run(`ALTER TABLE products ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`, (e) => {
+        if (!e) console.log('Added is_deleted column to products table');
+      });
     }
   });
 

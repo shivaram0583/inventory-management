@@ -6,19 +6,44 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "test": "jest --forceExit --detectOpenHandles --runInBand",
+    "test:coverage": "jest --forceExit --detectOpenHandles --runInBand --coverage",
+    "test:watch": "jest --forceExit --detectOpenHandles --runInBand --watchAll",
+    "test:auth": "jest --forceExit --detectOpenHandles tests/auth.test.js",
+    "test:inventory": "jest --forceExit --detectOpenHandles tests/inventory.test.js",
+    "test:sales": "jest --forceExit --detectOpenHandles tests/sales.test.js",
+    "test:purchases": "jest --forceExit --detectOpenHandles tests/purchases.test.js",
+    "test:transactions": "jest --forceExit --detectOpenHandles tests/transactions.test.js",
+    "test:e2e": "jest --forceExit --detectOpenHandles tests/e2e.test.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "sqlite3": "^5.1.6",
+    "express": "^4.18.2",
     "express-validator": "^7.0.1",
-    "moment": "^2.29.4"
+    "jsonwebtoken": "^9.0.2",
+    "moment": "^2.29.4",
+    "sqlite3": "^5.1.6"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "jest": "^30.3.0",
+    "nodemon": "^3.0.1",
+    "supertest": "^7.2.2"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "testTimeout": 30000,
+    "verbose": true,
+    "collectCoverageFrom": [
+      "routes/**/*.js",
+      "middleware/**/*.js",
+      "services/**/*.js",
+      "!database/db.js"
+    ]
   }
 }

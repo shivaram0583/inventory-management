@@ -517,7 +517,7 @@ const Inventory = () => {
                 </label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="1"
                   required={formData.creation_mode === PRODUCT_CREATION_MODE.INVENTORY}
                   className={`input-field ${formData.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
                   value={formData.creation_mode === PRODUCT_CREATION_MODE.ORDER ? '0' : formData.quantity_available}
@@ -578,8 +578,8 @@ const Inventory = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Order Quantity</label>
                     <input
                       type="number"
-                      step="0.01"
-                      min="0.01"
+                      step="1"
+                      min="1"
                       required={formData.creation_mode === PRODUCT_CREATION_MODE.ORDER}
                       className="input-field"
                       value={formData.order_quantity}
@@ -734,7 +734,7 @@ const Inventory = () => {
               </label>
               <input
                 type="number"
-                step="0.01"
+                step="1"
                 required
                 className="input-field"
                 value={formData.addStock}
@@ -747,7 +747,7 @@ const Inventory = () => {
                 Current Stock: {selectedProduct?.quantity_available} {selectedProduct?.unit}
               </p>
               <p className="text-sm text-gray-600">
-                After Adding: {selectedProduct?.quantity_available + (parseFloat(formData.addStock) || 0)} {selectedProduct?.unit}
+                After Adding: {selectedProduct?.quantity_available + (parseInt(formData.addStock) || 0)} {selectedProduct?.unit}
               </p>
             </div>
             <div className="flex justify-end space-x-3 pt-4">
