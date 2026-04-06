@@ -4,15 +4,18 @@ import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 import SharedModal from './shared/Modal';
 import CustomSelect from './shared/CustomSelect';
+import InventoryFlowPanel from './InventoryFlowPanel';
 import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
 import {
+  Package,
   Plus,
   Search,
   Edit,
   Trash2,
   AlertTriangle,
   IndianRupee,
+  History,
   X
 } from 'lucide-react';
 
@@ -101,6 +104,7 @@ const Inventory = () => {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState('catalog');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -593,111 +597,143 @@ const Inventory = () => {
              style={{background:'linear-gradient(90deg,#fff5f5,#fef2f2)'}}>⚠ {error}</div>
       )}
 
-      {/* Filters */}
-      <div className="card !py-4 relative z-20">
-        <div className="flex flex-col sm:flex-row gap-4 items-center">
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search products..."
-                className="input-field pl-10"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="w-full sm:w-52 flex-shrink-0">
-            <CustomSelect
-              options={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))]}
-              value={categoryFilter}
-              onChange={(val) => setCategoryFilter(val)}
-            />
-          </div>
-        </div>
+      <div className="card !p-2">
+        <nav className="flex gap-1">
+          {[
+            { id: 'catalog', label: 'Inventory', icon: Package },
+            { id: 'flow', label: 'Inventory Flow', icon: History }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === tab.id ? 'text-white shadow-md' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+              }`}
+              style={activeTab === tab.id
+                ? { background: 'linear-gradient(135deg,#0369a1,#0891b2)', boxShadow: '0 2px 8px rgba(8,145,178,0.35)' }
+                : {}}
+            >
+              <tab.icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          ))}
+        </nav>
       </div>
 
-      {/* Products Table */}
-      <div className="card">
-        <div className="table-container">
-          <table className="table">
-            <thead>
-              <tr>
-                <SortableHeader label="Product ID" sortKey="product_id" sortConfig={invSort} onSort={sortInv} />
-                <SortableHeader label="Name" sortKey="product_name" sortConfig={invSort} onSort={sortInv} />
-                <SortableHeader label="Variety" sortKey="variety" sortConfig={invSort} onSort={sortInv} />
-                <SortableHeader label="Category" sortKey="category" sortConfig={invSort} onSort={sortInv} />
-                <SortableHeader label="Stock" sortKey="quantity_available" sortConfig={invSort} onSort={sortInv} />
-                <SortableHeader label="Unit Price" sortKey="selling_price" sortConfig={invSort} onSort={sortInv} />
-                {canEdit && <th>Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedProducts.map((product) => (
-                <tr key={product.id} className={product.quantity_available <= (product.reorder_point || 10) ? 'bg-red-50' : ''}>
-                  <td className="font-medium">{product.product_id}</td>
-                  <td>{product.product_name}</td>
-                  <td>{product.variety || '-'}</td>
-                  <td className="capitalize">{product.category}</td>
-                  <td>
-                    <div className="flex items-center">
-                      {product.quantity_available <= (product.reorder_point || 10) && (
-                        <AlertTriangle className="h-4 w-4 text-red-500 mr-1" />
-                      )}
-                      <span className={product.quantity_available <= (product.reorder_point || 10) ? 'text-red-600 font-medium' : ''}>
-                        {product.quantity_available} {product.unit}
-                      </span>
-                    </div>
-                  </td>
-                  <td>₹{product.selling_price}/{product.unit}</td>
-                  {canEdit && (
-                    <td>
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => openEditModal(product)}
-                          className="text-blue-600 hover:text-blue-800"
-                          title="Edit product"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => openAddStockModal(product)}
-                          className="text-green-600 hover:text-green-800"
-                          title="Add stock"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => openPricingModal(product)}
-                          className="text-amber-600 hover:text-amber-800"
-                          title="Manage pricing rules"
-                        >
-                          <IndianRupee className="h-4 w-4" />
-                        </button>
-                        {isAdmin && (
-                          <button
-                            onClick={() => handleDeleteProduct(product)}
-                            className="text-red-600 hover:text-red-800"
-                            title="Delete product"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filteredProducts.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              No products found
+      {activeTab === 'catalog' && (
+        <>
+          {/* Filters */}
+          <div className="card !py-4 relative z-20">
+            <div className="flex flex-col sm:flex-row gap-4 items-center">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search products..."
+                    className="input-field pl-10"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="w-full sm:w-52 flex-shrink-0">
+                <CustomSelect
+                  options={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.name, label: c.name.charAt(0).toUpperCase() + c.name.slice(1) }))]}
+                  value={categoryFilter}
+                  onChange={(val) => setCategoryFilter(val)}
+                />
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+
+          {/* Products Table */}
+          <div className="card">
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <SortableHeader label="Product ID" sortKey="product_id" sortConfig={invSort} onSort={sortInv} />
+                    <SortableHeader label="Name" sortKey="product_name" sortConfig={invSort} onSort={sortInv} />
+                    <SortableHeader label="Variety" sortKey="variety" sortConfig={invSort} onSort={sortInv} />
+                    <SortableHeader label="Category" sortKey="category" sortConfig={invSort} onSort={sortInv} />
+                    <SortableHeader label="Stock" sortKey="quantity_available" sortConfig={invSort} onSort={sortInv} />
+                    <SortableHeader label="Unit Price" sortKey="selling_price" sortConfig={invSort} onSort={sortInv} />
+                    {canEdit && <th>Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedProducts.map((product) => (
+                    <tr key={product.id} className={product.quantity_available <= (product.reorder_point || 10) ? 'bg-red-50' : ''}>
+                      <td className="font-medium">{product.product_id}</td>
+                      <td>{product.product_name}</td>
+                      <td>{product.variety || '-'}</td>
+                      <td className="capitalize">{product.category}</td>
+                      <td>
+                        <div className="flex items-center">
+                          {product.quantity_available <= (product.reorder_point || 10) && (
+                            <AlertTriangle className="h-4 w-4 text-red-500 mr-1" />
+                          )}
+                          <span className={product.quantity_available <= (product.reorder_point || 10) ? 'text-red-600 font-medium' : ''}>
+                            {product.quantity_available} {product.unit}
+                          </span>
+                        </div>
+                      </td>
+                      <td>₹{product.selling_price}/{product.unit}</td>
+                      {canEdit && (
+                        <td>
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => openEditModal(product)}
+                              className="text-blue-600 hover:text-blue-800"
+                              title="Edit product"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => openAddStockModal(product)}
+                              className="text-green-600 hover:text-green-800"
+                              title="Add stock"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => openPricingModal(product)}
+                              className="text-amber-600 hover:text-amber-800"
+                              title="Manage pricing rules"
+                            >
+                              <IndianRupee className="h-4 w-4" />
+                            </button>
+                            {isAdmin && (
+                              <button
+                                onClick={() => handleDeleteProduct(product)}
+                                className="text-red-600 hover:text-red-800"
+                                title="Delete product"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredProducts.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  No products found
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'flow' && (
+        <InventoryFlowPanel categories={categories} />
+      )}
 
       {/* Add Product Modal */}
       {showAddModal && (

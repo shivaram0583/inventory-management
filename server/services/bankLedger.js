@@ -1,4 +1,5 @@
 const { getRow, runQuery } = require('../database/db');
+const { resolveSupplier } = require('./supplierDirectory');
 
 const SUPPLIER_PAYMENT_BANK_MODES = new Set(['bank', 'upi']);
 
@@ -22,6 +23,7 @@ function getSupplierPaymentTransferReference(paymentId) {
 }
 
 async function createSupplierPaymentRecord({
+  supplierId,
   supplierName,
   amount,
   paymentMode,
@@ -31,9 +33,15 @@ async function createSupplierPaymentRecord({
   userId,
   eventTimestamp
 }) {
-  const normalizedSupplierName = String(supplierName || '').trim();
   const normalizedPaymentMode = String(paymentMode || 'bank').toLowerCase();
   const paymentAmount = toNumber(amount);
+  const supplier = await resolveSupplier({
+    supplierId,
+    supplierName,
+    createIfMissing: true,
+    eventTimestamp
+  });
+  const normalizedSupplierName = String(supplier?.name || supplierName || '').trim();
 
   if (!normalizedSupplierName) {
     throw createHttpError(400, 'Supplier name is required');
@@ -69,6 +77,7 @@ async function createSupplierPaymentRecord({
   const result = await runQuery(
     `INSERT INTO supplier_payments (
        supplier_name,
+       supplier_id,
        amount,
        payment_mode,
        bank_account_id,
@@ -76,9 +85,10 @@ async function createSupplierPaymentRecord({
        payment_date,
        created_by,
        created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       normalizedSupplierName,
+      supplier?.id || null,
       paymentAmount,
       normalizedPaymentMode,
       accountId,
@@ -120,7 +130,9 @@ async function createSupplierPaymentRecord({
 
   return {
     id: result.id,
-    bankAccountId: accountId
+    bankAccountId: accountId,
+    supplierId: supplier?.id || null,
+    supplierName: normalizedSupplierName
   };
 }
 

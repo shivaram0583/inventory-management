@@ -19,6 +19,7 @@ const {
   createSupplierPaymentRecord,
   reverseSupplierPaymentBankEffects
 } = require('../services/bankLedger');
+const { resolveSupplier } = require('../services/supplierDirectory');
 const { logAudit } = require('../middleware/auditLog');
 
 const router = express.Router();
@@ -34,6 +35,7 @@ const purchaseSelect = `
     COALESCE(pur.purchase_status, 'delivered') AS purchase_status,
     COALESCE(pur.advance_amount, 0) AS advance_amount,
     MAX(COALESCE(pur.total_amount, 0) - COALESCE(pur.advance_amount, 0), 0) AS balance_due,
+    p.product_id AS product_code,
     COALESCE(p.product_name, '[Deleted Product]') AS product_name,
     p.variety,
     p.unit,
@@ -67,6 +69,7 @@ async function fetchPurchaseById(id) {
 }
 
 async function createAdvancePayment({
+  supplierId,
   supplierName,
   amount,
   bankAccountId,
@@ -76,6 +79,7 @@ async function createAdvancePayment({
   eventTimestamp
 }) {
   const result = await createSupplierPaymentRecord({
+    supplierId,
     supplierName,
     amount,
     paymentMode: 'bank',
@@ -87,6 +91,45 @@ async function createAdvancePayment({
   });
 
   return result.id;
+}
+
+async function resolveCanonicalSupplier({
+  supplierId,
+  supplierName,
+  eventTimestamp,
+  createIfMissing = false
+}) {
+  const normalizedSupplierName = supplierName ? String(supplierName).trim() : '';
+  const supplierRecord = await resolveSupplier({
+    supplierId,
+    supplierName: normalizedSupplierName,
+    createIfMissing,
+    eventTimestamp
+  });
+
+  return {
+    supplierRecord,
+    supplierId: supplierRecord?.id || null,
+    supplierName: supplierRecord?.name || normalizedSupplierName || null
+  };
+}
+
+function buildSupplierFilter({ alias, nameColumn, idColumn, supplierRecord, supplierName }) {
+  const normalizedSupplierName = supplierName ? String(supplierName).trim() : '';
+  const qualifiedIdColumn = `${alias}.${idColumn}`;
+  const qualifiedNameColumn = `${alias}.${nameColumn}`;
+
+  if (supplierRecord?.id) {
+    return {
+      clause: `(${qualifiedIdColumn} = ? OR (${qualifiedIdColumn} IS NULL AND LOWER(TRIM(${qualifiedNameColumn})) = LOWER(?)))`,
+      params: [supplierRecord.id, normalizedSupplierName]
+    };
+  }
+
+  return {
+    clause: `LOWER(TRIM(${qualifiedNameColumn})) = LOWER(?)`,
+    params: [normalizedSupplierName]
+  };
 }
 
 // GET all categories
@@ -244,6 +287,13 @@ router.post('/', [
       ? combineISTDateWithCurrentTime(purchase_date, eventTimestamp)
       : eventTimestamp;
     const deliveryDate = purchaseStatus === PURCHASE_STATUS.DELIVERED ? storedDate : null;
+    const supplierReference = await resolveCanonicalSupplier({
+      supplierName,
+      eventTimestamp,
+      createIfMissing: Boolean(supplierName)
+    });
+    const canonicalSupplierName = supplierReference.supplierName;
+    const supplierId = supplierReference.supplierId;
 
     await runQuery('BEGIN TRANSACTION');
 
@@ -257,19 +307,21 @@ router.post('/', [
            price_per_unit,
            total_amount,
            supplier,
+           supplier_id,
            purchase_date,
            delivery_date,
            purchase_status,
            advance_amount,
            added_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           purchaseId,
           product_id,
           quantityValue,
           pricePerUnitValue,
           totalAmount,
-          supplierName || null,
+          canonicalSupplierName,
+          supplierId,
           storedDate,
           deliveryDate,
           purchaseStatus,
@@ -281,7 +333,8 @@ router.post('/', [
 
       if (advanceAmount > 0) {
         const advancePaymentId = await createAdvancePayment({
-          supplierName,
+          supplierId,
+          supplierName: canonicalSupplierName,
           amount: advanceAmount,
           bankAccountId,
           purchaseId,
@@ -302,10 +355,16 @@ router.post('/', [
              quantity_available = quantity_available + ?,
              purchase_price = ?,
              supplier = COALESCE(?, supplier),
+             supplier_id = COALESCE(?, supplier_id),
              updated_at = ?
            WHERE id = ?`,
-          [quantityValue, pricePerUnitValue, supplierName || null, eventTimestamp, product_id]
+          [quantityValue, pricePerUnitValue, canonicalSupplierName, supplierId, eventTimestamp, product_id]
         );
+        } else if (canonicalSupplierName) {
+          await runQuery(
+            'UPDATE products SET supplier = ?, supplier_id = ?, updated_at = ? WHERE id = ?',
+            [canonicalSupplierName, supplierId, eventTimestamp, product_id]
+          );
       }
 
       await runQuery('COMMIT');
@@ -382,6 +441,13 @@ router.put('/:id', [
       ? combineISTDateWithCurrentTime(purchase_date, eventTimestamp)
       : purchase.purchase_date;
     const qtyDiff = quantityValue - toNumber(purchase.quantity);
+    const supplierReference = await resolveCanonicalSupplier({
+      supplierName,
+      eventTimestamp,
+      createIfMissing: Boolean(supplierName)
+    });
+    const canonicalSupplierName = supplierReference.supplierName;
+    const supplierId = supplierReference.supplierId;
 
     let nextDeliveryDate = purchase.delivery_date;
     if (
@@ -399,18 +465,24 @@ router.put('/:id', [
              quantity_available = quantity_available + ?,
              purchase_price = ?,
              supplier = COALESCE(?, supplier),
+             supplier_id = COALESCE(?, supplier_id),
              updated_at = ?
            WHERE id = ?`,
-          [qtyDiff, pricePerUnitValue, supplierName || null, eventTimestamp, purchase.product_id]
+          [qtyDiff, pricePerUnitValue, canonicalSupplierName, supplierId, eventTimestamp, purchase.product_id]
         );
+        } else if (canonicalSupplierName) {
+          await runQuery(
+            'UPDATE products SET supplier = ?, supplier_id = ?, updated_at = ? WHERE id = ?',
+            [canonicalSupplierName, supplierId, eventTimestamp, purchase.product_id]
+          );
       }
 
-      if (purchase.advance_payment_id && supplierName) {
+      if (purchase.advance_payment_id && canonicalSupplierName) {
         await runQuery(
           `UPDATE supplier_payments
-           SET supplier_name = ?, description = ?
+           SET supplier_name = ?, supplier_id = ?, description = ?
            WHERE id = ?`,
-          [supplierName, `Advance payment for purchase ${purchase.purchase_id}`, purchase.advance_payment_id]
+          [canonicalSupplierName, supplierId, `Advance payment for purchase ${purchase.purchase_id}`, purchase.advance_payment_id]
         );
       }
 
@@ -420,6 +492,7 @@ router.put('/:id', [
            price_per_unit = ?,
            total_amount = ?,
            supplier = ?,
+           supplier_id = ?,
            purchase_date = ?,
            delivery_date = ?
          WHERE id = ?`,
@@ -427,7 +500,8 @@ router.put('/:id', [
           quantityValue,
           pricePerUnitValue,
           totalAmount,
-          supplierName || null,
+          canonicalSupplierName,
+          supplierId,
           storedDate,
           nextDeliveryDate || null,
           req.params.id
@@ -445,6 +519,20 @@ router.put('/:id', [
     }
 
     const updated = await fetchPurchaseById(req.params.id);
+
+    await logAudit(req, 'update', 'purchase', purchase.purchase_id, {
+      product_id: purchase.product_id,
+      product_code: updated.product_code,
+      product_name: updated.product_name,
+      unit: updated.unit,
+      purchase_status: updated.purchase_status,
+      quantity_before: toNumber(purchase.quantity),
+      quantity_after: quantityValue,
+      price_before: toNumber(purchase.price_per_unit),
+      price_after: pricePerUnitValue,
+      supplier_before: purchase.supplier || null,
+      supplier_after: updated.supplier || null
+    });
 
     addReviewNotification({
       actorId: req.user.id,
@@ -488,6 +576,12 @@ router.post('/:id/mark-delivered', [
     const totalQuantity = toNumber(purchase.quantity);
     const alreadyDelivered = toNumber(purchase.quantity_delivered || 0);
     const remainingQuantity = Math.max(totalQuantity - alreadyDelivered, 0);
+    const supplierReference = await resolveCanonicalSupplier({
+      supplierId: purchase.supplier_id,
+      supplierName: purchase.supplier,
+      eventTimestamp,
+      createIfMissing: Boolean(purchase.supplier)
+    });
 
     if (remainingQuantity <= 0) {
       return res.status(400).json({ message: 'No remaining quantity is pending for delivery' });
@@ -500,12 +594,14 @@ router.post('/:id/mark-delivered', [
            quantity_available = quantity_available + ?,
            purchase_price = ?,
            supplier = COALESCE(?, supplier),
+           supplier_id = COALESCE(?, supplier_id),
            updated_at = ?
          WHERE id = ?`,
         [
           remainingQuantity,
           toNumber(purchase.price_per_unit),
-          purchase.supplier || null,
+          supplierReference.supplierName,
+          supplierReference.supplierId,
           eventTimestamp,
           purchase.product_id
         ]
@@ -513,9 +609,17 @@ router.post('/:id/mark-delivered', [
 
       await runQuery(
         `UPDATE purchases
-         SET purchase_status = ?, quantity_delivered = ?, delivery_date = ?, updated_at = ?
+         SET supplier = ?, supplier_id = ?, purchase_status = ?, quantity_delivered = ?, delivery_date = ?, updated_at = ?
          WHERE id = ?`,
-        [PURCHASE_STATUS.DELIVERED, totalQuantity, deliveryDate, eventTimestamp, req.params.id]
+        [
+          supplierReference.supplierName,
+          supplierReference.supplierId,
+          PURCHASE_STATUS.DELIVERED,
+          totalQuantity,
+          deliveryDate,
+          eventTimestamp,
+          req.params.id
+        ]
       );
 
       await runQuery('COMMIT');
@@ -555,15 +659,17 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
   try {
     const suppliers = await getAll(`
       SELECT
-        pu.supplier,
+        COALESCE(s.id, pu.supplier_id) AS supplier_id,
+        COALESCE(s.name, pu.supplier) AS supplier,
         COUNT(pu.id) AS total_purchases,
         SUM(pu.quantity) AS total_quantity,
         SUM(pu.total_amount) AS total_spent,
         COUNT(DISTINCT pu.product_id) AS products_supplied,
         MAX(pu.purchase_date) AS last_purchase_date
       FROM purchases pu
-      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
-      GROUP BY pu.supplier
+      LEFT JOIN suppliers s ON pu.supplier_id = s.id
+      WHERE COALESCE(TRIM(COALESCE(s.name, pu.supplier)), '') != ''
+      GROUP BY COALESCE(CAST(pu.supplier_id AS TEXT), LOWER(TRIM(pu.supplier))), COALESCE(s.id, pu.supplier_id), COALESCE(s.name, pu.supplier)
       ORDER BY total_spent DESC
     `);
     res.json(suppliers);
@@ -578,9 +684,18 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
   try {
     const supplierName = decodeURIComponent(req.params.name);
     const { start_date, end_date } = req.query;
+    const supplierRecord = await resolveSupplier({ supplierName });
+
+    const productFilter = buildSupplierFilter({
+      alias: 'pu',
+      nameColumn: 'supplier',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
 
     let dateFilter = '';
-    const params = [supplierName];
+    const params = [...productFilter.params];
 
     if (start_date && end_date) {
       dateFilter = 'AND DATE(pu.purchase_date) BETWEEN ? AND ?';
@@ -600,12 +715,19 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
         MAX(pu.purchase_date) AS last_purchase_date
       FROM purchases pu
       JOIN products p ON pu.product_id = p.id
-      WHERE pu.supplier = ? ${dateFilter}
+      WHERE ${productFilter.clause} ${dateFilter}
       GROUP BY p.id, p.product_id, p.product_name, p.variety, p.category, p.unit
       ORDER BY total_spent DESC
     `, params);
 
-    const historyParams = [supplierName];
+    const historyFilter = buildSupplierFilter({
+      alias: 'pu',
+      nameColumn: 'supplier',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+    const historyParams = [...historyFilter.params];
     let historyDateFilter = '';
     if (start_date && end_date) {
       historyDateFilter = 'AND DATE(pu.purchase_date) BETWEEN ? AND ?';
@@ -632,11 +754,18 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
       FROM purchases pu
       JOIN products p ON pu.product_id = p.id
       LEFT JOIN users u ON pu.added_by = u.id
-      WHERE pu.supplier = ? ${historyDateFilter}
+      WHERE ${historyFilter.clause} ${historyDateFilter}
       ORDER BY pu.purchase_date DESC
     `, historyParams);
 
-    const summaryParams = [supplierName];
+    const summaryFilter = buildSupplierFilter({
+      alias: 'purchases',
+      nameColumn: 'supplier',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+    const summaryParams = [...summaryFilter.params];
     let summaryDateFilter = '';
     if (start_date && end_date) {
       summaryDateFilter = 'AND DATE(purchase_date) BETWEEN ? AND ?';
@@ -649,11 +778,12 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
         SUM(quantity) AS total_items,
         SUM(total_amount) AS total_cost
       FROM purchases
-      WHERE supplier = ? ${summaryDateFilter}
+      WHERE ${summaryFilter.clause} ${summaryDateFilter}
     `, summaryParams);
 
     res.json({
-      supplier: supplierName,
+      supplier: supplierRecord?.name || supplierName,
+      supplier_id: supplierRecord?.id || null,
       summary: {
         total_purchases: summary?.total_purchases || 0,
         total_items: summary?.total_items || 0,
@@ -679,24 +809,47 @@ router.delete('/suppliers/:name', [
       return res.status(400).json({ message: 'Supplier name is required' });
     }
 
+    const supplierRecord = await resolveSupplier({ supplierName });
+    const purchaseFilter = buildSupplierFilter({
+      alias: 'purchases',
+      nameColumn: 'supplier',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+    const paymentFilter = buildSupplierFilter({
+      alias: 'supplier_payments',
+      nameColumn: 'supplier_name',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+    const productFilter = buildSupplierFilter({
+      alias: 'products',
+      nameColumn: 'supplier',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+
     const [purchaseSummary, paymentSummary, productSummary] = await Promise.all([
       getRow(
         `SELECT COUNT(*) AS total_purchases, COALESCE(SUM(total_amount), 0) AS total_amount
          FROM purchases
-         WHERE supplier = ?`,
-        [supplierName]
+         WHERE ${purchaseFilter.clause}`,
+        purchaseFilter.params
       ),
       getRow(
         `SELECT COUNT(*) AS total_payments, COALESCE(SUM(amount), 0) AS total_amount
          FROM supplier_payments
-         WHERE supplier_name = ?`,
-        [supplierName]
+         WHERE ${paymentFilter.clause}`,
+        paymentFilter.params
       ),
       getRow(
         `SELECT COUNT(*) AS total_products
          FROM products
-         WHERE supplier = ?`,
-        [supplierName]
+         WHERE ${productFilter.clause}`,
+        productFilter.params
       )
     ]);
 
@@ -709,26 +862,33 @@ router.delete('/suppliers/:name', [
     }
 
     const eventTimestamp = nowIST();
+    const bankPaymentFilter = buildSupplierFilter({
+      alias: 'sp',
+      nameColumn: 'supplier_name',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
 
     await runQuery('BEGIN TRANSACTION');
     try {
       const bankRestorations = await getAll(
         `SELECT bank_account_id, COALESCE(SUM(amount), 0) AS total_amount
-         FROM supplier_payments
-         WHERE supplier_name = ?
+         FROM supplier_payments sp
+         WHERE ${bankPaymentFilter.clause}
            AND payment_mode IN ('bank', 'upi')
            AND bank_account_id IS NOT NULL
          GROUP BY bank_account_id`,
-        [supplierName]
+        bankPaymentFilter.params
       );
 
       const bankTrackedPayments = await getAll(
         `SELECT id, bank_account_id, payment_mode
-         FROM supplier_payments
-         WHERE supplier_name = ?
+         FROM supplier_payments sp
+         WHERE ${bankPaymentFilter.clause}
            AND payment_mode IN ('bank', 'upi')
            AND bank_account_id IS NOT NULL`,
-        [supplierName]
+        bankPaymentFilter.params
       );
 
       let restoredBankAmount = 0;
@@ -757,19 +917,28 @@ router.delete('/suppliers/:name', [
       }
 
       const clearedPurchases = await runQuery(
-        'UPDATE purchases SET supplier = NULL WHERE supplier = ?',
-        [supplierName]
+        `UPDATE purchases
+         SET supplier = NULL, supplier_id = NULL
+         WHERE ${purchaseFilter.clause}`,
+        purchaseFilter.params
       );
 
       const clearedProducts = await runQuery(
-        'UPDATE products SET supplier = NULL, updated_at = ? WHERE supplier = ?',
-        [eventTimestamp, supplierName]
+        `UPDATE products
+         SET supplier = NULL, supplier_id = NULL, updated_at = ?
+         WHERE ${productFilter.clause}`,
+        [eventTimestamp, ...productFilter.params]
       );
 
       const deletedPayments = await runQuery(
-        'DELETE FROM supplier_payments WHERE supplier_name = ?',
-        [supplierName]
+        `DELETE FROM supplier_payments
+         WHERE ${paymentFilter.clause}`,
+        paymentFilter.params
       );
+
+      if (supplierRecord?.id) {
+        await runQuery('DELETE FROM suppliers WHERE id = ?', [supplierRecord.id]);
+      }
 
       await runQuery('COMMIT');
 
@@ -905,6 +1074,12 @@ router.post('/:id/partial-delivery', [
     const closeOrder = markAsCompleted || isFullyDelivered;
     const finalizedQuantity = closeOrder ? newDelivered : totalQuantity;
     const finalizedTotalAmount = finalizedQuantity * toNumber(purchase.price_per_unit);
+    const supplierReference = await resolveCanonicalSupplier({
+      supplierId: purchase.supplier_id,
+      supplierName: purchase.supplier,
+      eventTimestamp,
+      createIfMissing: Boolean(purchase.supplier)
+    });
 
     if (closeOrder && finalizedQuantity <= 0) {
       return res.status(400).json({ message: 'Delivered quantity must be greater than zero to close the order' });
@@ -918,13 +1093,16 @@ router.post('/:id/partial-delivery', [
            quantity_available = quantity_available + ?,
            purchase_price = ?,
            supplier = COALESCE(?, supplier),
+           supplier_id = COALESCE(?, supplier_id),
            updated_at = ?
          WHERE id = ?`,
-        [quantityDelivered, toNumber(purchase.price_per_unit), purchase.supplier || null, eventTimestamp, purchase.product_id]
+        [quantityDelivered, toNumber(purchase.price_per_unit), supplierReference.supplierName, supplierReference.supplierId, eventTimestamp, purchase.product_id]
       );
 
       await runQuery(
         `UPDATE purchases SET
+           supplier = ?,
+           supplier_id = ?,
            quantity = ?,
            total_amount = ?,
            quantity_delivered = ?,
@@ -933,6 +1111,8 @@ router.post('/:id/partial-delivery', [
            updated_at = ?
          WHERE id = ?`,
         [
+          supplierReference.supplierName,
+          supplierReference.supplierId,
           finalizedQuantity,
           finalizedTotalAmount,
           newDelivered,
@@ -951,6 +1131,10 @@ router.post('/:id/partial-delivery', [
 
     const updated = await fetchPurchaseById(req.params.id);
     await logAudit(req, 'partial_delivery', 'purchase', purchase.purchase_id, {
+      product_id: purchase.product_id,
+      product_code: updated.product_code,
+      product_name: updated.product_name,
+      unit: updated.unit,
       quantity_delivered: quantityDelivered,
       total_delivered: newDelivered,
       fully_delivered: isFullyDelivered,

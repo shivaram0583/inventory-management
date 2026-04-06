@@ -71,6 +71,12 @@ describe('Purchase Management', () => {
 
       const newQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
       expect(newQty).toBe(initialQty); // Stock unchanged
+
+      const syncedProduct = await testDb.getRow('SELECT supplier FROM products WHERE id = ?', [testProduct.id]);
+      expect(syncedProduct.supplier).toBe('Order Supplier');
+
+      const supplierRecord = await testDb.getRow('SELECT name FROM suppliers WHERE LOWER(name) = LOWER(?)', ['Order Supplier']);
+      expect(supplierRecord?.name).toBe('Order Supplier');
     });
 
     test('should record purchase with advance payment', async () => {
@@ -324,6 +330,38 @@ describe('Purchase Management', () => {
         });
 
       expect(res.status).toBe(200);
+    });
+
+    test('should sync supplier on the linked product when updating an ordered purchase', async () => {
+      const product = await createTestProduct(testDb, {
+        product_id: 'PUR_SYNC002',
+        product_name: 'Ordered Sync Product',
+        supplier: 'Original Supplier'
+      });
+
+      const purchaseResult = await testDb.runQuery(
+        `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, purchase_status)
+         VALUES ('PURSYNCORDER001', ?, 12, 80, 960, 'Original Supplier', 'ordered')`,
+        [product.id]
+      );
+
+      const res = await request(app)
+        .put(`/api/purchases/${purchaseResult.id}`)
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          quantity: 14,
+          price_per_unit: 82,
+          supplier: 'Renamed Supplier',
+          purchase_date: '2026-04-04'
+        });
+
+      expect(res.status).toBe(200);
+
+      const updatedProduct = await testDb.getRow('SELECT supplier FROM products WHERE id = ?', [product.id]);
+      expect(updatedProduct.supplier).toBe('Renamed Supplier');
+
+      const supplierRecord = await testDb.getRow('SELECT name FROM suppliers WHERE LOWER(name) = LOWER(?)', ['Renamed Supplier']);
+      expect(supplierRecord?.name).toBe('Renamed Supplier');
     });
 
     test('should return 404 for non-existent purchase', async () => {

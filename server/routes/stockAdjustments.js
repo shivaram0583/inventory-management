@@ -8,6 +8,8 @@ const { addReviewNotification } = require('../services/reviewNotifications');
 
 const router = express.Router();
 
+const LOSS_ADJUSTMENT_TYPES = new Set(['damage', 'theft', 'spoilage']);
+
 // Create stock adjustment
 router.post('/', [
   authenticateToken,
@@ -22,11 +24,20 @@ router.post('/', [
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { product_id, adjustment_type, quantity_adjusted, reason } = req.body;
+    const requestedQuantity = Number(quantity_adjusted);
+
+    if (!Number.isFinite(requestedQuantity) || requestedQuantity === 0) {
+      return res.status(400).json({ message: 'Quantity must be a non-zero number' });
+    }
 
     const product = await getRow('SELECT * FROM products WHERE id = ?', [product_id]);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    const newQuantity = product.quantity_available + quantity_adjusted;
+    const signedAdjustment = LOSS_ADJUSTMENT_TYPES.has(adjustment_type)
+      ? -Math.abs(requestedQuantity)
+      : requestedQuantity;
+
+    const newQuantity = Number(product.quantity_available) + signedAdjustment;
     if (newQuantity < 0) {
       return res.status(400).json({ message: `Cannot adjust below zero. Current stock: ${product.quantity_available}` });
     }
@@ -41,19 +52,19 @@ router.post('/', [
     const result = await runQuery(
       `INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_adjusted, quantity_before, quantity_after, reason, adjusted_by, adjustment_date, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [product_id, adjustment_type, quantity_adjusted, product.quantity_available, newQuantity, reason, req.user.id, adjustmentDate, adjustmentDate]
+      [product_id, adjustment_type, signedAdjustment, product.quantity_available, newQuantity, reason, req.user.id, adjustmentDate, adjustmentDate]
     );
 
     addReviewNotification({
       actorId: req.user.id, actorName: req.user.username, actorRole: req.user.role,
       type: 'inventory',
       title: 'Stock adjustment',
-      description: `${adjustment_type}: ${quantity_adjusted} ${product.unit} of ${product.product_name} (${product.quantity_available} → ${newQuantity})`,
+      description: `${adjustment_type}: ${signedAdjustment > 0 ? '+' : ''}${signedAdjustment} ${product.unit} of ${product.product_name} (${product.quantity_available} → ${newQuantity})`,
       createdAt: adjustmentDate
     });
 
     await logAudit(req, 'stock_adjustment', 'product', product_id, {
-      adjustment_type, quantity_adjusted, before: product.quantity_available, after: newQuantity, reason
+      adjustment_type, quantity_adjusted: signedAdjustment, before: product.quantity_available, after: newQuantity, reason
     });
 
     const adjustment = await getRow('SELECT * FROM stock_adjustments WHERE id = ?', [result.id]);

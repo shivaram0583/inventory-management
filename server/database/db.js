@@ -102,9 +102,11 @@ function initializeDatabase() {
     purchase_price REAL NOT NULL DEFAULT 0,
     selling_price REAL NOT NULL DEFAULT 0,
     supplier TEXT,
+    supplier_id INTEGER,
     date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
   )`, (err) => {
     if (err) {
       console.error('Error creating products table:', err.message);
@@ -265,9 +267,11 @@ function initializeDatabase() {
           purchase_price REAL NOT NULL DEFAULT 0,
           selling_price REAL NOT NULL DEFAULT 0,
           supplier TEXT,
+          supplier_id INTEGER,
           date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
         `);
         db.run(`INSERT OR IGNORE INTO products_v2 SELECT * FROM products`);
         db.run(`DROP TABLE products`);
@@ -294,9 +298,11 @@ function initializeDatabase() {
           purchase_price REAL NOT NULL DEFAULT 0,
           selling_price REAL NOT NULL DEFAULT 0,
           supplier TEXT,
+          supplier_id INTEGER,
           date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
         )`);
         db.run(`INSERT OR IGNORE INTO products_v3 SELECT * FROM products`);
         db.run(`DROP TABLE products`);
@@ -323,9 +329,11 @@ function initializeDatabase() {
           purchase_price REAL NOT NULL DEFAULT 0,
           selling_price REAL NOT NULL DEFAULT 0,
           supplier TEXT,
+          supplier_id INTEGER,
           date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
         )`);
         db.run(`INSERT OR IGNORE INTO products_v4 SELECT * FROM products`);
         db.run(`DROP TABLE products`);
@@ -372,10 +380,12 @@ function initializeDatabase() {
     price_per_unit REAL NOT NULL,
     total_amount REAL NOT NULL,
     supplier TEXT,
+    supplier_id INTEGER,
     purchase_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     added_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
     FOREIGN KEY (added_by) REFERENCES users (id)
   )`, (err) => {
     if (err) {
@@ -392,6 +402,7 @@ function initializeDatabase() {
     const hasDeliveryDate = columns.some((c) => c.name === 'delivery_date');
     const hasAdvanceAmount = columns.some((c) => c.name === 'advance_amount');
     const hasAdvancePaymentId = columns.some((c) => c.name === 'advance_payment_id');
+    const hasSupplierId = columns.some((c) => c.name === 'supplier_id');
 
     if (!hasPurchaseStatus) {
       db.run(`ALTER TABLE purchases ADD COLUMN purchase_status TEXT NOT NULL DEFAULT 'delivered'`, (e) => {
@@ -414,6 +425,12 @@ function initializeDatabase() {
     if (!hasAdvancePaymentId) {
       db.run(`ALTER TABLE purchases ADD COLUMN advance_payment_id INTEGER`, (e) => {
         if (!e) console.log('Added advance_payment_id column to purchases table');
+      });
+    }
+
+    if (!hasSupplierId) {
+      db.run(`ALTER TABLE purchases ADD COLUMN supplier_id INTEGER`, (e) => {
+        if (!e) console.log('Added supplier_id column to purchases table');
       });
     }
 
@@ -571,6 +588,7 @@ function initializeDatabase() {
   db.run(`CREATE TABLE IF NOT EXISTS supplier_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     supplier_name TEXT NOT NULL,
+    supplier_id INTEGER,
     amount REAL NOT NULL,
     payment_mode TEXT NOT NULL DEFAULT 'bank' CHECK (payment_mode IN ('cash', 'bank', 'upi')),
     bank_account_id INTEGER,
@@ -578,6 +596,7 @@ function initializeDatabase() {
     payment_date DATE NOT NULL,
     created_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
     FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id),
     FOREIGN KEY (created_by) REFERENCES users (id)
   )`, (err) => {
@@ -852,6 +871,14 @@ function initializeDatabase() {
     }
     if (!cols.includes('supplier_id')) {
       db.run(`ALTER TABLE products ADD COLUMN supplier_id INTEGER`);
+    }
+  });
+
+  db.all(`PRAGMA table_info(supplier_payments)`, (err, columns) => {
+    if (err || !columns) return;
+    const cols = columns.map(c => c.name);
+    if (!cols.includes('supplier_id')) {
+      db.run(`ALTER TABLE supplier_payments ADD COLUMN supplier_id INTEGER`);
     }
   });
 
@@ -1212,6 +1239,60 @@ async function runTimestampMigrations() {
          WHERE bt.source_type = 'supplier_payment'
            AND bt.source_reference = 'supplier-payment:' || sp.id
        )`
+  ]);
+
+  await runOneTimeMigration('supplier-foreign-key-backfill-v1', [
+    `UPDATE products
+     SET supplier_id = (
+       SELECT s.id
+       FROM suppliers s
+       WHERE LOWER(TRIM(s.name)) = LOWER(TRIM(products.supplier))
+       LIMIT 1
+     )
+     WHERE supplier_id IS NULL
+       AND supplier IS NOT NULL
+       AND TRIM(supplier) != ''`,
+    `UPDATE purchases
+     SET supplier_id = (
+       SELECT s.id
+       FROM suppliers s
+       WHERE LOWER(TRIM(s.name)) = LOWER(TRIM(purchases.supplier))
+       LIMIT 1
+     )
+     WHERE supplier_id IS NULL
+       AND supplier IS NOT NULL
+       AND TRIM(supplier) != ''`,
+    `UPDATE supplier_payments
+     SET supplier_id = (
+       SELECT s.id
+       FROM suppliers s
+       WHERE LOWER(TRIM(s.name)) = LOWER(TRIM(supplier_payments.supplier_name))
+       LIMIT 1
+     )
+     WHERE supplier_id IS NULL
+       AND supplier_name IS NOT NULL
+       AND TRIM(supplier_name) != ''`,
+    `UPDATE products
+     SET supplier = (
+       SELECT s.name
+       FROM suppliers s
+       WHERE s.id = products.supplier_id
+     )
+     WHERE supplier_id IS NOT NULL`,
+    `UPDATE purchases
+     SET supplier = (
+       SELECT s.name
+       FROM suppliers s
+       WHERE s.id = purchases.supplier_id
+     )
+     WHERE supplier_id IS NOT NULL`,
+    `UPDATE supplier_payments
+     SET supplier_name = (
+       SELECT s.name
+       FROM suppliers s
+       WHERE s.id = supplier_payments.supplier_id
+     )
+     WHERE supplier_id IS NOT NULL`
   ]);
 }
 

@@ -128,6 +128,7 @@ async function initializeTestSchema(testDb) {
     purchase_price REAL NOT NULL DEFAULT 0,
     selling_price REAL NOT NULL DEFAULT 0,
     supplier TEXT,
+    supplier_id INTEGER,
     is_deleted INTEGER NOT NULL DEFAULT 0,
     gst_percent REAL NOT NULL DEFAULT 0,
     hsn_code TEXT,
@@ -137,10 +138,10 @@ async function initializeTestSchema(testDb) {
     expiry_date DATE,
     batch_number TEXT,
     manufacturing_date DATE,
-    supplier_id INTEGER,
     date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
   )`);
 
   await runQuery(`CREATE TABLE IF NOT EXISTS sales (
@@ -217,6 +218,7 @@ async function initializeTestSchema(testDb) {
     price_per_unit REAL NOT NULL,
     total_amount REAL NOT NULL,
     supplier TEXT,
+    supplier_id INTEGER,
     purchase_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     delivery_date DATETIME,
     purchase_status TEXT NOT NULL DEFAULT 'delivered',
@@ -227,6 +229,7 @@ async function initializeTestSchema(testDb) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME,
     FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
     FOREIGN KEY (added_by) REFERENCES users (id)
   )`);
 
@@ -289,6 +292,7 @@ async function initializeTestSchema(testDb) {
   await runQuery(`CREATE TABLE IF NOT EXISTS supplier_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     supplier_name TEXT NOT NULL,
+    supplier_id INTEGER,
     amount REAL NOT NULL,
     payment_mode TEXT NOT NULL DEFAULT 'bank' CHECK (payment_mode IN ('cash', 'bank', 'upi')),
     bank_account_id INTEGER,
@@ -296,6 +300,7 @@ async function initializeTestSchema(testDb) {
     payment_date DATE NOT NULL,
     created_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
     FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id),
     FOREIGN KEY (created_by) REFERENCES users (id)
   )`);

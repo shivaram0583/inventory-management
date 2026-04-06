@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { getRow, runQuery, getAll, nowIST } = require('../database/db');
+const { backfillSupplierDirectory, renameSupplierReferences } = require('../services/supplierDirectory');
 
 const requireAdmin = authorizeRole(['admin']);
 
@@ -9,10 +10,12 @@ const router = express.Router();
 // List all suppliers
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    await backfillSupplierDirectory();
+
     const suppliers = await getAll(
       `SELECT s.*, 
-        (SELECT COUNT(*) FROM purchases p WHERE p.supplier = s.name) as total_orders,
-        (SELECT COALESCE(SUM(p.total_amount), 0) FROM purchases p WHERE p.supplier = s.name) as total_spent
+        (SELECT COUNT(*) FROM purchases p WHERE p.supplier_id = s.id OR (p.supplier_id IS NULL AND LOWER(TRIM(p.supplier)) = LOWER(TRIM(s.name)))) as total_orders,
+        (SELECT COALESCE(SUM(p.total_amount), 0) FROM purchases p WHERE p.supplier_id = s.id OR (p.supplier_id IS NULL AND LOWER(TRIM(p.supplier)) = LOWER(TRIM(s.name)))) as total_spent
        FROM suppliers s
        ORDER BY s.name ASC`
     );
@@ -34,15 +37,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
               pr.product_name, pr.variety
        FROM purchases p
        JOIN products pr ON p.product_id = pr.id
-       WHERE p.supplier = ?
+       WHERE p.supplier_id = ? OR (p.supplier_id IS NULL AND LOWER(TRIM(p.supplier)) = LOWER(?))
        ORDER BY p.purchase_date DESC
        LIMIT 20`,
-      [supplier.name]
+      [supplier.id, supplier.name]
     );
 
     const payments = await getAll(
-      `SELECT * FROM supplier_payments WHERE supplier_name = ? ORDER BY payment_date DESC LIMIT 20`,
-      [supplier.name]
+      `SELECT *
+       FROM supplier_payments
+       WHERE supplier_id = ? OR (supplier_id IS NULL AND LOWER(TRIM(supplier_name)) = LOWER(?))
+       ORDER BY payment_date DESC
+       LIMIT 20`,
+      [supplier.id, supplier.name]
     );
 
     res.json({ ...supplier, purchases, payments });
@@ -95,10 +102,33 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
       return res.status(409).json({ message: 'Another supplier with this name already exists' });
     }
 
-    await runQuery(
-      `UPDATE suppliers SET name = ?, contact_person = ?, mobile = ?, email = ?, address = ?, gstin = ?, updated_at = ? WHERE id = ?`,
-      [name.trim(), contact_person || null, mobile || null, email || null, address || null, gstin || null, nowIST(), req.params.id]
-    );
+    const eventTimestamp = nowIST();
+
+    await runQuery('BEGIN TRANSACTION');
+    try {
+      await runQuery(
+        `UPDATE suppliers SET name = ?, contact_person = ?, mobile = ?, email = ?, address = ?, gstin = ?, updated_at = ? WHERE id = ?`,
+        [name.trim(), contact_person || null, mobile || null, email || null, address || null, gstin || null, eventTimestamp, req.params.id]
+      );
+
+      if (supplier.name !== name.trim()) {
+        await renameSupplierReferences({
+          supplierId: supplier.id,
+          oldName: supplier.name,
+          newName: name.trim(),
+          eventTimestamp
+        });
+      }
+
+      await runQuery('COMMIT');
+    } catch (transactionError) {
+      try {
+        await runQuery('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Rollback supplier update error:', rollbackError);
+      }
+      throw transactionError;
+    }
 
     res.json({ message: 'Supplier updated' });
   } catch (error) {

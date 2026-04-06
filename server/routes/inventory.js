@@ -5,6 +5,7 @@ const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup
 const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = require('../database/db');
 const { addReviewNotification } = require('../services/reviewNotifications');
 const { createSupplierPaymentRecord } = require('../services/bankLedger');
+const { resolveSupplier } = require('../services/supplierDirectory');
 const { logAudit } = require('../middleware/auditLog');
 const crypto = require('crypto');
 const moment = require('moment');
@@ -30,6 +31,40 @@ const createHttpError = (status, message) => {
   const error = new Error(message);
   error.status = status;
   return error;
+};
+
+const parseAuditDetails = (details) => {
+  if (!details) return {};
+  if (typeof details === 'object') return details;
+
+  try {
+    return JSON.parse(details);
+  } catch (error) {
+    return {};
+  }
+};
+
+const includesSearchTerm = (movement, searchTerm) => {
+  if (!searchTerm) return true;
+
+  const lowered = String(searchTerm).trim().toLowerCase();
+  if (!lowered) return true;
+
+  return [
+    movement.product_code,
+    movement.product_name,
+    movement.variety,
+    movement.reference_id,
+    movement.event_type,
+    movement.source_type,
+    movement.description,
+    movement.actor_name
+  ].some((value) => String(value || '').toLowerCase().includes(lowered));
+};
+
+const toFlowNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 async function createAdvancePayment({
@@ -116,6 +151,440 @@ router.get('/next-id', authenticateToken, async (req, res) => {
     res.json({ nextId });
   } catch (error) {
     console.error('Generate next ID error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Inventory flow timeline
+router.get('/flow', authenticateToken, async (req, res) => {
+  try {
+    const {
+      product_id,
+      category,
+      event_type = 'all',
+      search = '',
+      start_date,
+      end_date,
+      page = 1,
+      limit = 25
+    } = req.query;
+
+    const normalizedCategory = category && category !== 'all' ? String(category).trim() : null;
+    const normalizedEventType = String(event_type || 'all').trim().toLowerCase();
+    const safePage = Math.max(1, parseInt(page, 10) || 1);
+    const safeLimit = Math.min(Math.max(1, parseInt(limit, 10) || 25), 100);
+
+    const salesConditions = ['1 = 1'];
+    const salesParams = [];
+    if (product_id) {
+      salesConditions.push('p.id = ?');
+      salesParams.push(product_id);
+    }
+    if (normalizedCategory) {
+      salesConditions.push('p.category = ?');
+      salesParams.push(normalizedCategory);
+    }
+    if (start_date) {
+      salesConditions.push('DATE(s.sale_date) >= ?');
+      salesParams.push(start_date);
+    }
+    if (end_date) {
+      salesConditions.push('DATE(s.sale_date) <= ?');
+      salesParams.push(end_date);
+    }
+
+    const returnsConditions = ['1 = 1'];
+    const returnsParams = [];
+    if (product_id) {
+      returnsConditions.push('p.id = ?');
+      returnsParams.push(product_id);
+    }
+    if (normalizedCategory) {
+      returnsConditions.push('p.category = ?');
+      returnsParams.push(normalizedCategory);
+    }
+    if (start_date) {
+      returnsConditions.push('DATE(sr.return_date) >= ?');
+      returnsParams.push(start_date);
+    }
+    if (end_date) {
+      returnsConditions.push('DATE(sr.return_date) <= ?');
+      returnsParams.push(end_date);
+    }
+
+    const purchaseConditions = [
+      `COALESCE(pur.purchase_status, '${PURCHASE_STATUS.DELIVERED}') = '${PURCHASE_STATUS.DELIVERED}'`,
+      `NOT EXISTS (
+         SELECT 1
+         FROM audit_log al
+         WHERE al.entity_type = 'purchase'
+           AND al.entity_id = pur.purchase_id
+           AND al.action IN ('partial_delivery', 'mark_delivered')
+       )`
+    ];
+    const purchaseParams = [];
+    if (product_id) {
+      purchaseConditions.push('p.id = ?');
+      purchaseParams.push(product_id);
+    }
+    if (normalizedCategory) {
+      purchaseConditions.push('p.category = ?');
+      purchaseParams.push(normalizedCategory);
+    }
+    if (start_date) {
+      purchaseConditions.push('DATE(COALESCE(pur.delivery_date, pur.purchase_date, pur.created_at)) >= ?');
+      purchaseParams.push(start_date);
+    }
+    if (end_date) {
+      purchaseConditions.push('DATE(COALESCE(pur.delivery_date, pur.purchase_date, pur.created_at)) <= ?');
+      purchaseParams.push(end_date);
+    }
+
+    const adjustmentConditions = ['1 = 1'];
+    const adjustmentParams = [];
+    if (product_id) {
+      adjustmentConditions.push('p.id = ?');
+      adjustmentParams.push(product_id);
+    }
+    if (normalizedCategory) {
+      adjustmentConditions.push('p.category = ?');
+      adjustmentParams.push(normalizedCategory);
+    }
+    if (start_date) {
+      adjustmentConditions.push('DATE(sa.adjustment_date) >= ?');
+      adjustmentParams.push(start_date);
+    }
+    if (end_date) {
+      adjustmentConditions.push('DATE(sa.adjustment_date) <= ?');
+      adjustmentParams.push(end_date);
+    }
+
+    const purchaseAuditConditions = [
+      "al.entity_type = 'purchase'",
+      "al.action IN ('partial_delivery', 'mark_delivered')"
+    ];
+    const purchaseAuditParams = [];
+    if (product_id) {
+      purchaseAuditConditions.push('pur.product_id = ?');
+      purchaseAuditParams.push(product_id);
+    }
+    if (normalizedCategory) {
+      purchaseAuditConditions.push('p.category = ?');
+      purchaseAuditParams.push(normalizedCategory);
+    }
+    if (start_date) {
+      purchaseAuditConditions.push('DATE(al.created_at) >= ?');
+      purchaseAuditParams.push(start_date);
+    }
+    if (end_date) {
+      purchaseAuditConditions.push('DATE(al.created_at) <= ?');
+      purchaseAuditParams.push(end_date);
+    }
+
+    const deletionAuditConditions = ["al.entity_type = 'product'", "al.action = 'delete'"];
+    const deletionAuditParams = [];
+    if (start_date) {
+      deletionAuditConditions.push('DATE(al.created_at) >= ?');
+      deletionAuditParams.push(start_date);
+    }
+    if (end_date) {
+      deletionAuditConditions.push('DATE(al.created_at) <= ?');
+      deletionAuditParams.push(end_date);
+    }
+
+    const [salesRows, returnRows, purchaseRows, adjustmentRows, purchaseAuditRows, deletionAuditRows] = await Promise.all([
+      getAll(
+        `SELECT
+           s.sale_id AS reference_id,
+           s.sale_date AS event_date,
+           s.quantity_sold,
+           p.id AS inventory_product_id,
+           p.product_id AS product_code,
+           p.product_name,
+           p.variety,
+           p.category,
+           p.unit,
+           u.username AS actor_name,
+           r.customer_name,
+           r.payment_mode
+         FROM sales s
+         JOIN products p ON s.product_id = p.id
+         LEFT JOIN users u ON s.operator_id = u.id
+         LEFT JOIN receipts r ON r.sale_id = s.sale_id
+         WHERE ${salesConditions.join(' AND ')}`,
+        salesParams
+      ),
+      getAll(
+        `SELECT
+           sr.return_id AS reference_id,
+           sr.return_date AS event_date,
+           sr.quantity_returned,
+           sr.refund_mode,
+           sr.reason,
+           p.id AS inventory_product_id,
+           p.product_id AS product_code,
+           p.product_name,
+           p.variety,
+           p.category,
+           p.unit,
+           u.username AS actor_name
+         FROM sales_returns sr
+         JOIN products p ON sr.product_id = p.id
+         LEFT JOIN users u ON sr.returned_by = u.id
+         WHERE ${returnsConditions.join(' AND ')}`,
+        returnsParams
+      ),
+      getAll(
+        `SELECT
+           pur.purchase_id AS reference_id,
+           COALESCE(pur.delivery_date, pur.purchase_date, pur.created_at) AS event_date,
+           pur.quantity,
+           pur.supplier,
+           p.id AS inventory_product_id,
+           p.product_id AS product_code,
+           p.product_name,
+           p.variety,
+           p.category,
+           p.unit,
+           u.username AS actor_name
+         FROM purchases pur
+         LEFT JOIN products p ON pur.product_id = p.id
+         LEFT JOIN users u ON pur.added_by = u.id
+         WHERE ${purchaseConditions.join(' AND ')}`,
+        purchaseParams
+      ),
+      getAll(
+        `SELECT
+           sa.id AS reference_id,
+           sa.adjustment_date AS event_date,
+           sa.adjustment_type,
+           sa.quantity_adjusted,
+           sa.reason,
+           p.id AS inventory_product_id,
+           p.product_id AS product_code,
+           p.product_name,
+           p.variety,
+           p.category,
+           p.unit,
+           u.username AS actor_name
+         FROM stock_adjustments sa
+         JOIN products p ON sa.product_id = p.id
+         LEFT JOIN users u ON sa.adjusted_by = u.id
+         WHERE ${adjustmentConditions.join(' AND ')}`,
+        adjustmentParams
+      ),
+      getAll(
+        `SELECT
+           al.*,
+           p.id AS inventory_product_id,
+           p.product_id AS product_code,
+           p.product_name,
+           p.variety,
+           p.category,
+           p.unit
+         FROM audit_log al
+         LEFT JOIN purchases pur ON pur.purchase_id = al.entity_id
+         LEFT JOIN products p ON pur.product_id = p.id
+         WHERE ${purchaseAuditConditions.join(' AND ')}`,
+        purchaseAuditParams
+      ),
+      getAll(
+        `SELECT al.*
+         FROM audit_log al
+         WHERE ${deletionAuditConditions.join(' AND ')}`,
+        deletionAuditParams
+      )
+    ]);
+
+    const salesMovements = salesRows.map((row) => ({
+      event_type: 'sale',
+      source_type: 'sale',
+      quantity_change: -toFlowNumber(row.quantity_sold),
+      quantity_moved: toFlowNumber(row.quantity_sold),
+      event_date: row.event_date,
+      reference_id: row.reference_id,
+      inventory_product_id: row.inventory_product_id,
+      product_code: row.product_code,
+      product_name: row.product_name,
+      variety: row.variety,
+      category: row.category,
+      unit: row.unit,
+      actor_name: row.actor_name,
+      description: row.customer_name
+        ? `Sold to ${row.customer_name}${row.payment_mode ? ` via ${String(row.payment_mode).toUpperCase()}` : ''}`
+        : `Inventory reduced by sale${row.payment_mode ? ` via ${String(row.payment_mode).toUpperCase()}` : ''}`
+    }));
+
+    const returnMovements = returnRows.map((row) => ({
+      event_type: 'return',
+      source_type: 'sales_return',
+      quantity_change: toFlowNumber(row.quantity_returned),
+      quantity_moved: toFlowNumber(row.quantity_returned),
+      event_date: row.event_date,
+      reference_id: row.reference_id,
+      inventory_product_id: row.inventory_product_id,
+      product_code: row.product_code,
+      product_name: row.product_name,
+      variety: row.variety,
+      category: row.category,
+      unit: row.unit,
+      actor_name: row.actor_name,
+      description: row.reason || `Returned to inventory via ${String(row.refund_mode || 'cash').toUpperCase()} refund`
+    }));
+
+    const purchaseMovements = purchaseRows.map((row) => ({
+      event_type: 'purchase',
+      source_type: 'purchase',
+      quantity_change: toFlowNumber(row.quantity),
+      quantity_moved: toFlowNumber(row.quantity),
+      event_date: row.event_date,
+      reference_id: row.reference_id,
+      inventory_product_id: row.inventory_product_id,
+      product_code: row.product_code,
+      product_name: row.product_name,
+      variety: row.variety,
+      category: row.category,
+      unit: row.unit,
+      actor_name: row.actor_name,
+      description: row.supplier
+        ? `Stock received from ${row.supplier}`
+        : 'Stock received into inventory'
+    }));
+
+    const adjustmentMovements = adjustmentRows.map((row) => ({
+      event_type: String(row.adjustment_type || 'other').toLowerCase(),
+      source_type: 'stock_adjustment',
+      quantity_change: toFlowNumber(row.quantity_adjusted),
+      quantity_moved: Math.abs(toFlowNumber(row.quantity_adjusted)),
+      event_date: row.event_date,
+      reference_id: `ADJ-${row.reference_id}`,
+      inventory_product_id: row.inventory_product_id,
+      product_code: row.product_code,
+      product_name: row.product_name,
+      variety: row.variety,
+      category: row.category,
+      unit: row.unit,
+      actor_name: row.actor_name,
+      description: row.reason || 'Stock adjusted'
+    }));
+
+    const purchaseAuditMovements = purchaseAuditRows
+      .map((row) => {
+        const details = parseAuditDetails(row.details);
+        const deliveredQuantity = toFlowNumber(details.quantity_delivered);
+
+        if (deliveredQuantity <= 0) {
+          return null;
+        }
+
+        return {
+          event_type: 'purchase',
+          source_type: row.action === 'partial_delivery' ? 'partial_delivery' : 'purchase_delivery',
+          quantity_change: deliveredQuantity,
+          quantity_moved: deliveredQuantity,
+          event_date: row.created_at,
+          reference_id: row.entity_id,
+          inventory_product_id: row.inventory_product_id,
+          product_code: row.product_code,
+          product_name: row.product_name,
+          variety: row.variety,
+          category: row.category,
+          unit: row.unit,
+          actor_name: row.username,
+          description: row.action === 'partial_delivery'
+            ? `Partial delivery recorded (${deliveredQuantity} received)`
+            : `Pending purchase marked as delivered (${deliveredQuantity} received)`
+        };
+      })
+      .filter(Boolean);
+
+    const deletionMovements = deletionAuditRows
+      .map((row) => {
+        const details = parseAuditDetails(row.details);
+        const previousQuantity = Math.abs(toFlowNumber(details.previous_quantity));
+
+        if (product_id && String(details.product_id || '') !== String(product_id)) {
+          return null;
+        }
+
+        if (normalizedCategory && String(details.category || '').toLowerCase() !== normalizedCategory.toLowerCase()) {
+          return null;
+        }
+
+        return {
+          event_type: 'deletion',
+          source_type: details.deleted_mode === 'soft' ? 'soft_delete' : 'hard_delete',
+          quantity_change: previousQuantity > 0 ? -previousQuantity : 0,
+          quantity_moved: previousQuantity,
+          event_date: row.created_at,
+          reference_id: details.product_code || row.entity_id,
+          inventory_product_id: details.product_id || null,
+          product_code: details.product_code || row.entity_id,
+          product_name: details.product_name || '[Deleted Product]',
+          variety: details.variety || null,
+          category: details.category || null,
+          unit: details.unit || null,
+          actor_name: row.username,
+          description: details.deleted_mode === 'soft'
+            ? 'Product removed from active inventory and stock reset to zero'
+            : 'Product deleted from inventory'
+        };
+      })
+      .filter(Boolean);
+
+    let movements = [
+      ...salesMovements,
+      ...returnMovements,
+      ...purchaseMovements,
+      ...adjustmentMovements,
+      ...purchaseAuditMovements,
+      ...deletionMovements
+    ];
+
+    if (normalizedEventType && normalizedEventType !== 'all') {
+      movements = movements.filter((movement) => movement.event_type === normalizedEventType);
+    }
+
+    movements = movements.filter((movement) => includesSearchTerm(movement, search));
+    movements.sort((left, right) => String(right.event_date || '').localeCompare(String(left.event_date || '')));
+
+    const total = movements.length;
+    const offset = (safePage - 1) * safeLimit;
+    const pagedMovements = movements.slice(offset, offset + safeLimit);
+
+    const summary = movements.reduce((accumulator, movement) => {
+      const quantityChange = toFlowNumber(movement.quantity_change);
+      accumulator.total_events += 1;
+      accumulator.net_quantity += quantityChange;
+
+      if (quantityChange >= 0) {
+        accumulator.inbound_quantity += quantityChange;
+      } else {
+        accumulator.outbound_quantity += Math.abs(quantityChange);
+      }
+
+      accumulator.event_breakdown[movement.event_type] = (accumulator.event_breakdown[movement.event_type] || 0) + 1;
+      return accumulator;
+    }, {
+      total_events: 0,
+      inbound_quantity: 0,
+      outbound_quantity: 0,
+      net_quantity: 0,
+      event_breakdown: {}
+    });
+
+    res.json({
+      data: pagedMovements,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit)
+      },
+      summary
+    });
+  } catch (error) {
+    console.error('Inventory flow error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -247,15 +716,20 @@ router.post('/', [
     }
 
     const eventTimestamp = nowIST();
+    const supplierRecord = supplierName
+      ? await resolveSupplier({ supplierName, createIfMissing: true, eventTimestamp })
+      : null;
+    const supplierId = supplierRecord?.id || null;
+    const canonicalSupplierName = supplierRecord?.name || supplierName || null;
     let newProduct;
     let createdPurchase = null;
 
     await runQuery('BEGIN TRANSACTION');
     try {
       const result = await runQuery(
-        `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier, gst_percent, hsn_code, reorder_point, reorder_quantity, barcode, expiry_date, batch_number, manufacturing_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [product_id, category, product_name, variety, inventoryQuantity, unit, purchase_price, selling_price, supplierName || null,
+        `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier, supplier_id, gst_percent, hsn_code, reorder_point, reorder_quantity, barcode, expiry_date, batch_number, manufacturing_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [product_id, category, product_name, variety, inventoryQuantity, unit, purchase_price, selling_price, canonicalSupplierName, supplierId,
          toNumber(gst_percent), hsn_code || null, toNumber(reorder_point) || 10, toNumber(reorder_quantity), barcode || null, expiry_date || null, batch_number || null, manufacturing_date || null]
       );
 
@@ -271,19 +745,21 @@ router.post('/', [
              price_per_unit,
              total_amount,
              supplier,
+             supplier_id,
              purchase_date,
              delivery_date,
              purchase_status,
              advance_amount,
              added_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             purchaseId,
             newProduct.id,
             inventoryQuantity,
             toNumber(purchase_price),
             inventoryQuantity * toNumber(purchase_price),
-            supplierName || null,
+            canonicalSupplierName,
+            supplierId,
             eventTimestamp,
             eventTimestamp,
             PURCHASE_STATUS.DELIVERED,
@@ -309,19 +785,21 @@ router.post('/', [
              price_per_unit,
              total_amount,
              supplier,
+             supplier_id,
              purchase_date,
              delivery_date,
              purchase_status,
              advance_amount,
              added_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             purchaseId,
             newProduct.id,
             orderQuantity,
             toNumber(purchase_price),
             orderQuantity * toNumber(purchase_price),
-            supplierName || null,
+            canonicalSupplierName,
+            supplierId,
             storedOrderDate,
             null,
             PURCHASE_STATUS.ORDERED,
@@ -332,6 +810,7 @@ router.post('/', [
 
         if (advanceAmount > 0) {
           const advancePaymentId = await createAdvancePayment({
+            supplierId,
             supplierName,
             amount: advanceAmount,
             bankAccountId,
@@ -464,11 +943,13 @@ router.delete('/:id', [
 ], async (req, res) => {
   try {
     const productId = req.params.id;
-    const product = await getRow('SELECT id FROM products WHERE id = ?', [productId]);
+    const product = await getRow('SELECT * FROM products WHERE id = ?', [productId]);
     
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
+
+    const eventTimestamp = nowIST();
 
     // Check if product has sales records
     const salesCount = await getRow('SELECT COUNT(*) as count FROM sales WHERE product_id = ?', [productId]);
@@ -478,11 +959,31 @@ router.delete('/:id', [
 
     // Check if product has purchase history — soft-delete to preserve history
     const purchaseCount = await getRow('SELECT COUNT(*) as count FROM purchases WHERE product_id = ?', [productId]);
+    const deleteAuditDetails = {
+      product_id: product.id,
+      product_code: product.product_id,
+      product_name: product.product_name,
+      variety: product.variety,
+      category: product.category,
+      unit: product.unit,
+      previous_quantity: toFlowNumber(product.quantity_available)
+    };
+
     if (purchaseCount.count > 0) {
-      await runQuery('UPDATE products SET is_deleted = 1, quantity_available = 0 WHERE id = ?', [productId]);
+      await runQuery('UPDATE products SET is_deleted = 1, quantity_available = 0, updated_at = ? WHERE id = ?', [eventTimestamp, productId]);
+      await logAudit(req, 'delete', 'product', productId, {
+        ...deleteAuditDetails,
+        deleted_mode: 'soft',
+        quantity_after: 0
+      });
       return res.json({ message: 'Product removed from inventory. Purchase history preserved.' });
     }
 
+    await logAudit(req, 'delete', 'product', productId, {
+      ...deleteAuditDetails,
+      deleted_mode: 'hard',
+      quantity_after: null
+    });
     await runQuery('DELETE FROM products WHERE id = ?', [productId]);
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
@@ -524,9 +1025,18 @@ router.post('/:id/add-stock', [
     const crypto = require('crypto');
     const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
     await runQuery(
-      `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, added_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [purchaseId, updatedProduct.id, quantity, updatedProduct.purchase_price, quantity * updatedProduct.purchase_price, updatedProduct.supplier || null, req.user.id]
+      `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, supplier_id, added_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        purchaseId,
+        updatedProduct.id,
+        quantity,
+        updatedProduct.purchase_price,
+        quantity * updatedProduct.purchase_price,
+        updatedProduct.supplier || null,
+        updatedProduct.supplier_id || null,
+        req.user.id
+      ]
     );
 
     addReviewNotification({

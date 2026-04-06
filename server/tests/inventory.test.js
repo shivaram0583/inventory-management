@@ -355,6 +355,84 @@ describe('Inventory Management', () => {
     });
   });
 
+  describe('GET /api/inventory/flow', () => {
+    test('should return movement events across inventory sources', async () => {
+      const product = await createTestProduct(testDb, {
+        product_id: 'FLOW001',
+        product_name: 'Flow Tracking Product',
+        quantity_available: 75
+      });
+      const eventTime = testDb.nowIST();
+
+      await testDb.runQuery(
+        `INSERT INTO sales (sale_id, product_id, quantity_sold, price_per_unit, total_amount, sale_date, operator_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['FLOWSALE001', product.id, 4, 80, 320, eventTime, adminAuth.user.id]
+      );
+
+      await testDb.runQuery(
+        `INSERT INTO sales_returns (return_id, sale_id, product_id, quantity_returned, price_per_unit, refund_amount, refund_mode, reason, returned_by, return_date, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'cash', ?, ?, ?, ?)`,
+        ['FLOWRET001', 'FLOWSALE001', product.id, 2, 80, 160, 'Returned packs', adminAuth.user.id, eventTime, eventTime]
+      );
+
+      await testDb.runQuery(
+        `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, purchase_date, delivery_date, purchase_status, added_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?)`,
+        ['FLOWPUR001', product.id, 6, 50, 300, 'Flow Supplier', eventTime, eventTime, adminAuth.user.id]
+      );
+
+      await testDb.runQuery(
+        `INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_adjusted, quantity_before, quantity_after, reason, adjusted_by, adjustment_date, created_at)
+         VALUES (?, 'damage', ?, ?, ?, ?, ?, ?, ?)`,
+        [product.id, -3, 75, 72, 'Damaged in storage', adminAuth.user.id, eventTime, eventTime]
+      );
+
+      const res = await request(app)
+        .get('/api/inventory/flow')
+        .query({ search: 'FLOW001' })
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual(expect.arrayContaining([
+        expect.objectContaining({ event_type: 'sale', quantity_change: -4, product_code: 'FLOW001' }),
+        expect.objectContaining({ event_type: 'return', quantity_change: 2, product_code: 'FLOW001' }),
+        expect.objectContaining({ event_type: 'purchase', quantity_change: 6, product_code: 'FLOW001' }),
+        expect.objectContaining({ event_type: 'damage', quantity_change: -3, product_code: 'FLOW001' })
+      ]));
+      expect(res.body.summary.total_events).toBeGreaterThanOrEqual(4);
+    });
+
+    test('should include deleted products in the inventory flow timeline', async () => {
+      const product = await createTestProduct(testDb, {
+        product_id: 'FLOWDEL001',
+        product_name: 'Deleted Flow Product',
+        quantity_available: 11
+      });
+
+      const deleteRes = await request(app)
+        .delete(`/api/inventory/${product.id}`)
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(deleteRes.status).toBe(200);
+
+      const flowRes = await request(app)
+        .get('/api/inventory/flow')
+        .query({ search: 'FLOWDEL001' })
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(flowRes.status).toBe(200);
+      expect(flowRes.body.data).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          event_type: 'deletion',
+          source_type: 'hard_delete',
+          product_code: 'FLOWDEL001',
+          quantity_change: -11
+        })
+      ]));
+    });
+  });
+
   describe('DELETE /api/inventory/:id', () => {
     test('should hard delete product without sales or purchases', async () => {
       const product = await createTestProduct(testDb, { product_id: 'DEL001' });

@@ -16,12 +16,31 @@ const {
   upsertSelectedBank,
   markBalanceReviewed
 } = require('../services/dailySetup');
+const { resolveSupplier } = require('../services/supplierDirectory');
 
 const router = express.Router();
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+function buildSupplierFilter({ alias, nameColumn, idColumn, supplierRecord, supplierName }) {
+  const normalizedSupplierName = supplierName ? String(supplierName).trim() : '';
+  const qualifiedIdColumn = `${alias}.${idColumn}`;
+  const qualifiedNameColumn = `${alias}.${nameColumn}`;
+
+  if (supplierRecord?.id) {
+    return {
+      clause: `(${qualifiedIdColumn} = ? OR (${qualifiedIdColumn} IS NULL AND LOWER(TRIM(${qualifiedNameColumn})) = LOWER(?)))`,
+      params: [supplierRecord.id, normalizedSupplierName]
+    };
+  }
+
+  return {
+    clause: `LOWER(TRIM(${qualifiedNameColumn})) = LOWER(?)`,
+    params: [normalizedSupplierName]
+  };
+}
 
 // ─── BANK ACCOUNTS ──────────────────────────────────────────────────────────
 
@@ -590,8 +609,16 @@ router.get('/supplier-payments', authenticateToken, async (req, res) => {
       params.push(end_date);
     }
     if (supplier_name) {
-      query += ' AND sp.supplier_name = ?';
-      params.push(supplier_name);
+      const supplierRecord = await resolveSupplier({ supplierName: supplier_name });
+      const supplierFilter = buildSupplierFilter({
+        alias: 'sp',
+        nameColumn: 'supplier_name',
+        idColumn: 'supplier_id',
+        supplierRecord,
+        supplierName: supplier_name
+      });
+      query += ` AND ${supplierFilter.clause}`;
+      params.push(...supplierFilter.params);
     }
 
     query += ' ORDER BY sp.payment_date DESC, sp.created_at DESC';
@@ -684,38 +711,69 @@ router.delete('/supplier-payments/:id', [authenticateToken, authorizeRole(['admi
 // GET supplier ledger: total purchased vs total paid, remaining balance
 router.get('/supplier-balances', authenticateToken, async (req, res) => {
   try {
-    // Total purchase amounts per supplier from purchases table
     const purchased = await getAll(`
-      SELECT supplier AS supplier_name, SUM(total_amount) AS total_purchased
-      FROM purchases
-      WHERE supplier IS NOT NULL AND supplier != ''
-      GROUP BY supplier
+      SELECT
+        COALESCE(s.id, p.supplier_id) AS supplier_id,
+        COALESCE(s.name, p.supplier) AS supplier_name,
+        SUM(p.total_amount) AS total_purchased
+      FROM purchases p
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
+      WHERE COALESCE(TRIM(COALESCE(s.name, p.supplier)), '') != ''
+      GROUP BY COALESCE(CAST(p.supplier_id AS TEXT), LOWER(TRIM(p.supplier))), COALESCE(s.id, p.supplier_id), COALESCE(s.name, p.supplier)
     `);
 
-    // Total payments per supplier
     const paid = await getAll(`
-      SELECT supplier_name, SUM(amount) AS total_paid
-      FROM supplier_payments
-      GROUP BY supplier_name
+      SELECT
+        COALESCE(s.id, sp.supplier_id) AS supplier_id,
+        COALESCE(s.name, sp.supplier_name) AS supplier_name,
+        SUM(sp.amount) AS total_paid
+      FROM supplier_payments sp
+      LEFT JOIN suppliers s ON sp.supplier_id = s.id
+      WHERE COALESCE(TRIM(COALESCE(s.name, sp.supplier_name)), '') != ''
+      GROUP BY COALESCE(CAST(sp.supplier_id AS TEXT), LOWER(TRIM(sp.supplier_name))), COALESCE(s.id, sp.supplier_id), COALESCE(s.name, sp.supplier_name)
     `);
 
-    const purchaseMap = {};
-    for (const p of purchased) {
-      purchaseMap[p.supplier_name] = toNumber(p.total_purchased);
-    }
-    const paidMap = {};
-    for (const p of paid) {
-      paidMap[p.supplier_name] = toNumber(p.total_paid);
+    const balancesMap = new Map();
+
+    const getSupplierKey = (row) => {
+      if (row.supplier_id) {
+        return `id:${row.supplier_id}`;
+      }
+
+      return `name:${String(row.supplier_name || '').trim().toLowerCase()}`;
+    };
+
+    const ensureBalanceEntry = (row) => {
+      const key = getSupplierKey(row);
+      if (!balancesMap.has(key)) {
+        balancesMap.set(key, {
+          supplier_id: row.supplier_id || null,
+          supplier_name: row.supplier_name,
+          total_purchased: 0,
+          total_paid: 0,
+          remaining_balance: 0
+        });
+      }
+
+      return balancesMap.get(key);
+    };
+
+    for (const row of purchased) {
+      const entry = ensureBalanceEntry(row);
+      entry.total_purchased = toNumber(row.total_purchased);
     }
 
-    // Merge all supplier names
-    const allSuppliers = new Set([...Object.keys(purchaseMap), ...Object.keys(paidMap)]);
-    const balances = Array.from(allSuppliers).map(name => ({
-      supplier_name: name,
-      total_purchased: purchaseMap[name] || 0,
-      total_paid: paidMap[name] || 0,
-      remaining_balance: (purchaseMap[name] || 0) - (paidMap[name] || 0)
-    })).sort((a, b) => b.remaining_balance - a.remaining_balance);
+    for (const row of paid) {
+      const entry = ensureBalanceEntry(row);
+      entry.total_paid = toNumber(row.total_paid);
+    }
+
+    const balances = Array.from(balancesMap.values())
+      .map((entry) => ({
+        ...entry,
+        remaining_balance: entry.total_purchased - entry.total_paid
+      }))
+      .sort((a, b) => b.remaining_balance - a.remaining_balance);
 
     res.json(balances);
   } catch (error) {

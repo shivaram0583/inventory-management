@@ -42,6 +42,31 @@ const PAYMENT_FILTERS = [
   { value: 'credit', label: 'Credit' }
 ];
 
+const buildProductSummary = (row) => {
+  const rawPreview = String(row.product_preview || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const distinctProducts = Number(row.distinct_products || rawPreview.length || row.line_items || 0);
+
+  if (!rawPreview.length) {
+    return distinctProducts > 1
+      ? `${distinctProducts} products in this sale`
+      : 'Single product sale';
+  }
+
+  if (distinctProducts <= 1) {
+    return rawPreview[0];
+  }
+
+  if (rawPreview.length === 1) {
+    return `${rawPreview[0]} +${distinctProducts - 1} more`;
+  }
+
+  return `${rawPreview[0]}, ${rawPreview[1]}${distinctProducts > 2 ? ` +${distinctProducts - 2} more` : ''}`;
+};
+
 const SalesRecordsPanel = ({ mode, onOpenSaleDetail, onOpenReceipt }) => {
   const isHistory = mode === 'history';
   const [rows, setRows] = useState([]);
@@ -236,7 +261,7 @@ const SalesRecordsPanel = ({ mode, onOpenSaleDetail, onOpenReceipt }) => {
                     </td>
                     <td className="px-4 py-3 text-center text-sm">
                       <p className="font-semibold text-gray-900">{row.total_quantity}</p>
-                      <p className="text-xs text-gray-500">{row.line_items} lines</p>
+                      <p className="text-xs text-gray-500">{buildProductSummary(row)}</p>
                       {Number(row.returned_quantity || 0) > 0 && <p className="text-xs text-rose-600">Returned {row.returned_quantity}</p>}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900">₹{fmtMoney(row.total_amount)}</td>

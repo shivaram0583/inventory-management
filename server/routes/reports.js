@@ -3,8 +3,27 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { getRow, getAll, runQuery, nowIST } = require('../database/db');
 const moment = require('moment');
 const { getDailyBalanceSnapshot, getDailySetupRecord, getISTDateString } = require('../services/dailySetup');
+const { resolveSupplier } = require('../services/supplierDirectory');
 
 const router = express.Router();
+
+function buildSupplierFilter({ alias, nameColumn, idColumn, supplierRecord, supplierName }) {
+  const normalizedSupplierName = supplierName ? String(supplierName).trim() : '';
+  const qualifiedIdColumn = `${alias}.${idColumn}`;
+  const qualifiedNameColumn = `${alias}.${nameColumn}`;
+
+  if (supplierRecord?.id) {
+    return {
+      clause: `(${qualifiedIdColumn} = ? OR (${qualifiedIdColumn} IS NULL AND LOWER(TRIM(${qualifiedNameColumn})) = LOWER(?)))`,
+      params: [supplierRecord.id, normalizedSupplierName]
+    };
+  }
+
+  return {
+    clause: `LOWER(TRIM(${qualifiedNameColumn})) = LOWER(?)`,
+    params: [normalizedSupplierName]
+  };
+}
 
 async function getCustomerSalesSelect() {
   const columns = await getAll('PRAGMA table_info(customer_sales)');
@@ -414,6 +433,16 @@ router.get('/purchases', authenticateToken, async (req, res) => {
 router.get('/suppliers', authenticateToken, async (req, res) => {
   try {
     const { start_date, end_date, supplier } = req.query;
+    const supplierRecord = supplier ? await resolveSupplier({ supplierName: supplier }) : null;
+    const supplierFilter = supplier
+      ? buildSupplierFilter({
+          alias: 'pu',
+          nameColumn: 'supplier',
+          idColumn: 'supplier_id',
+          supplierRecord,
+          supplierName: supplier
+        })
+      : null;
     let dateFilter = '';
     const params = [];
 
@@ -422,16 +451,16 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
       params.push(start_date, end_date);
     }
 
-    let supplierFilter = '';
-    if (supplier) {
-      supplierFilter = 'AND pu.supplier = ?';
-      params.push(supplier);
+    let supplierClause = '';
+    if (supplierFilter) {
+      supplierClause = `AND ${supplierFilter.clause}`;
+      params.push(...supplierFilter.params);
     }
 
-    // Summary per supplier
     const suppliers = await getAll(`
       SELECT
-        pu.supplier,
+        COALESCE(s.id, pu.supplier_id) AS supplier_id,
+        COALESCE(s.name, pu.supplier) AS supplier,
         COUNT(pu.id) AS total_purchases,
         SUM(pu.quantity) AS total_quantity,
         SUM(pu.total_amount) AS total_spent,
@@ -439,28 +468,29 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
         MIN(pu.purchase_date) AS first_purchase,
         MAX(pu.purchase_date) AS last_purchase
       FROM purchases pu
-      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
-        ${dateFilter} ${supplierFilter}
-      GROUP BY pu.supplier
+      LEFT JOIN suppliers s ON pu.supplier_id = s.id
+      WHERE COALESCE(TRIM(COALESCE(s.name, pu.supplier)), '') != ''
+        ${dateFilter} ${supplierClause}
+      GROUP BY COALESCE(CAST(pu.supplier_id AS TEXT), LOWER(TRIM(pu.supplier))), COALESCE(s.id, pu.supplier_id), COALESCE(s.name, pu.supplier)
       ORDER BY total_spent DESC
     `, params);
 
-    // Detail rows per supplier-product
     const detailParams = [];
     let detailDateFilter = '';
-    let detailSupplierFilter = '';
     if (start_date && end_date) {
       detailDateFilter = "AND DATE(pu.purchase_date) BETWEEN ? AND ?";
       detailParams.push(start_date, end_date);
     }
-    if (supplier) {
-      detailSupplierFilter = 'AND pu.supplier = ?';
-      detailParams.push(supplier);
+    let detailSupplierClause = '';
+    if (supplierFilter) {
+      detailSupplierClause = `AND ${supplierFilter.clause}`;
+      detailParams.push(...supplierFilter.params);
     }
 
     const details = await getAll(`
       SELECT
-        pu.supplier,
+        COALESCE(s.id, pu.supplier_id) AS supplier_id,
+        COALESCE(s.name, pu.supplier) AS supplier,
         p.product_id AS product_code,
         p.product_name,
         p.variety,
@@ -472,22 +502,35 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
         MAX(pu.purchase_date) AS last_purchase
       FROM purchases pu
       JOIN products p ON pu.product_id = p.id
-      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
-        ${detailDateFilter} ${detailSupplierFilter}
-      GROUP BY pu.supplier, p.id, p.product_id, p.product_name, p.variety, p.category, p.unit
-      ORDER BY pu.supplier, total_spent DESC
+      LEFT JOIN suppliers s ON pu.supplier_id = s.id
+      WHERE COALESCE(TRIM(COALESCE(s.name, pu.supplier)), '') != ''
+        ${detailDateFilter} ${detailSupplierClause}
+      GROUP BY COALESCE(CAST(pu.supplier_id AS TEXT), LOWER(TRIM(pu.supplier))), COALESCE(s.id, pu.supplier_id), COALESCE(s.name, pu.supplier), p.id, p.product_id, p.product_name, p.variety, p.category, p.unit
+      ORDER BY supplier, total_spent DESC
     `, detailParams);
+
+    const summaryParams = [];
+    let summaryDateFilter = '';
+    if (start_date && end_date) {
+      summaryDateFilter = "AND DATE(pu.purchase_date) BETWEEN ? AND ?";
+      summaryParams.push(start_date, end_date);
+    }
+    let summarySupplierClause = '';
+    if (supplierFilter) {
+      summarySupplierClause = `AND ${supplierFilter.clause}`;
+      summaryParams.push(...supplierFilter.params);
+    }
 
     const overallSummary = await getRow(`
       SELECT
-        COUNT(DISTINCT supplier) AS total_suppliers,
+        COUNT(DISTINCT COALESCE(CAST(pu.supplier_id AS TEXT), LOWER(TRIM(pu.supplier)))) AS total_suppliers,
         COUNT(*) AS total_purchases,
-        SUM(total_amount) AS total_cost
-      FROM purchases
-      WHERE supplier IS NOT NULL AND supplier != ''
-        ${start_date && end_date ? "AND DATE(purchase_date) BETWEEN ? AND ?" : ''}
-        ${supplier ? 'AND supplier = ?' : ''}
-    `, [...(start_date && end_date ? [start_date, end_date] : []), ...(supplier ? [supplier] : [])]);
+        SUM(pu.total_amount) AS total_cost
+      FROM purchases pu
+      WHERE COALESCE(TRIM(pu.supplier), '') != ''
+        ${summaryDateFilter}
+        ${summarySupplierClause}
+    `, summaryParams);
 
     res.json({
       suppliers,
@@ -749,35 +792,43 @@ router.get('/audit', authenticateToken, async (req, res) => {
     // ── 4. Supplier advances & balances ──
     const supplierBalances = await getAll(`
       SELECT
-        pu.supplier,
+        COALESCE(s.id, pu.supplier_id) AS supplier_id,
+        COALESCE(s.name, pu.supplier) AS supplier,
         SUM(pu.total_amount) AS total_purchases,
         COALESCE(sp_agg.total_paid, 0) AS total_paid,
         SUM(pu.total_amount) - COALESCE(sp_agg.total_paid, 0) AS remaining_balance,
         COUNT(DISTINCT pu.id) AS purchase_count,
         COALESCE(sp_agg.payment_count, 0) AS payment_count
       FROM purchases pu
+      LEFT JOIN suppliers s ON pu.supplier_id = s.id
       LEFT JOIN (
-        SELECT supplier_name,
+        SELECT
+          COALESCE(s2.id, sp.supplier_id) AS supplier_id,
+          COALESCE(CAST(sp.supplier_id AS TEXT), LOWER(TRIM(sp.supplier_name))) AS supplier_key,
           SUM(amount) AS total_paid,
           COUNT(*) AS payment_count
-        FROM supplier_payments
-        GROUP BY supplier_name
-      ) sp_agg ON sp_agg.supplier_name = pu.supplier
-      WHERE pu.supplier IS NOT NULL AND pu.supplier != ''
-      GROUP BY pu.supplier
+        FROM supplier_payments sp
+        LEFT JOIN suppliers s2 ON sp.supplier_id = s2.id
+        WHERE COALESCE(TRIM(COALESCE(s2.name, sp.supplier_name)), '') != ''
+        GROUP BY COALESCE(CAST(sp.supplier_id AS TEXT), LOWER(TRIM(sp.supplier_name))), COALESCE(s2.id, sp.supplier_id)
+      ) sp_agg ON sp_agg.supplier_key = COALESCE(CAST(pu.supplier_id AS TEXT), LOWER(TRIM(pu.supplier)))
+      WHERE COALESCE(TRIM(COALESCE(s.name, pu.supplier)), '') != ''
+      GROUP BY COALESCE(CAST(pu.supplier_id AS TEXT), LOWER(TRIM(pu.supplier))), COALESCE(s.id, pu.supplier_id), COALESCE(s.name, pu.supplier)
       ORDER BY remaining_balance DESC
     `);
 
     // Supplier payment mode breakdown
     const supplierPaymentModes = await getAll(`
       SELECT
-        supplier_name,
+        COALESCE(s.name, sp.supplier_name) AS supplier_name,
+        COALESCE(s.id, sp.supplier_id) AS supplier_id,
         payment_mode,
-        SUM(amount) AS total_amount,
+        SUM(sp.amount) AS total_amount,
         COUNT(*) AS payment_count
-      FROM supplier_payments
-      WHERE payment_date BETWEEN ? AND ?
-      GROUP BY supplier_name, payment_mode
+      FROM supplier_payments sp
+      LEFT JOIN suppliers s ON sp.supplier_id = s.id
+      WHERE sp.payment_date BETWEEN ? AND ?
+      GROUP BY COALESCE(CAST(sp.supplier_id AS TEXT), LOWER(TRIM(sp.supplier_name))), COALESCE(s.name, sp.supplier_name), COALESCE(s.id, sp.supplier_id), payment_mode
       ORDER BY supplier_name, total_amount DESC
     `, [start_date, end_date]);
 

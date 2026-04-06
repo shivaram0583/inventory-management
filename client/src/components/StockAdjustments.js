@@ -3,6 +3,8 @@ import axios from 'axios';
 import SharedModal from './shared/Modal';
 import { ClipboardCheck, Plus } from 'lucide-react';
 
+const LOSS_ADJUSTMENT_TYPES = new Set(['damage', 'theft', 'spoilage']);
+
 const StockAdjustments = () => {
   const [adjustments, setAdjustments] = useState([]);
   const [products, setProducts] = useState([]);
@@ -37,11 +39,14 @@ const StockAdjustments = () => {
 
   const handleCreate = async (e) => {
     if (e?.preventDefault) e.preventDefault();
+    const expectsReduction = LOSS_ADJUSTMENT_TYPES.has(formData.adjustment_type);
+    const normalizedQuantity = Number(formData.quantity_adjusted);
+
     try {
       await axios.post('/api/stock-adjustments', {
         ...formData,
         product_id: Number(formData.product_id),
-        quantity_adjusted: Number(formData.quantity_adjusted)
+        quantity_adjusted: expectsReduction ? Math.abs(normalizedQuantity) : normalizedQuantity
       });
       setShowCreateModal(false);
       setFormData({ product_id: '', adjustment_type: 'counting_error', quantity_adjusted: 0, reason: '' });
@@ -59,6 +64,8 @@ const StockAdjustments = () => {
     counting_error: { label: 'Counting Error', color: 'bg-blue-100 text-blue-700' },
     other: { label: 'Other', color: 'bg-gray-100 text-gray-700' }
   };
+
+  const expectsReduction = LOSS_ADJUSTMENT_TYPES.has(formData.adjustment_type);
 
   return (
     <div className="space-y-6">
@@ -101,13 +108,16 @@ const StockAdjustments = () => {
               <tbody className="divide-y divide-gray-50">
                 {adjustments.map(a => {
                   const t = typeLabels[a.adjustment_type] || typeLabels.other;
+                  const signedQuantity = Number(a.quantity_adjusted || 0);
                   return (
                     <tr key={a.id} className="hover:bg-indigo-50/30 transition-colors">
                       <td className="px-4 py-3 text-sm font-medium">{a.product_name || '-'}</td>
                       <td className="px-4 py-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${t.color}`}>{t.label}</span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-right font-medium text-red-600">-{a.quantity_adjusted}</td>
+                      <td className={`px-4 py-3 text-sm text-right font-medium ${signedQuantity < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                        {signedQuantity > 0 ? '+' : ''}{signedQuantity}
+                      </td>
                       <td className="px-4 py-3 text-sm text-right">{a.quantity_before}</td>
                       <td className="px-4 py-3 text-sm text-right">{a.quantity_after}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">{a.reason}</td>
@@ -163,9 +173,14 @@ const StockAdjustments = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Quantity *</label>
-              <input type="number" min="1" required value={formData.quantity_adjusted}
+              <input type="number" step="1" min={expectsReduction ? '1' : undefined} required value={formData.quantity_adjusted}
                 onChange={e => setFormData({...formData, quantity_adjusted: Number(e.target.value)})}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-indigo-500" />
+              <p className="mt-1 text-xs text-gray-500">
+                {expectsReduction
+                  ? 'Enter the lost quantity. Damage, theft, and spoilage will reduce stock automatically.'
+                  : 'Use a positive number to add stock or a negative number to reduce it.'}
+              </p>
             </div>
           </div>
           <div>

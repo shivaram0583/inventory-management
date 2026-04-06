@@ -32,6 +32,7 @@ function createTestApp(testDb) {
   const inventoryRoutes = require('../../routes/inventory');
   const salesRoutes = require('../../routes/sales');
   const purchasesRoutes = require('../../routes/purchases');
+  const suppliersRoutes = require('../../routes/suppliers');
   const transactionsRoutes = require('../../routes/transactions');
   const dashboardRoutes = require('../../routes/dashboard');
   const reportsRoutes = require('../../routes/reports');
@@ -39,6 +40,7 @@ function createTestApp(testDb) {
   const customersRoutes = require('../../routes/customers');
   const returnsRoutes = require('../../routes/returns');
   const quotationsRoutes = require('../../routes/quotations');
+  const stockAdjustmentsRoutes = require('../../routes/stockAdjustments');
   const pricingRoutes = require('../../routes/pricing');
   const publicPagesRoutes = require('../../routes/publicPages');
 
@@ -46,6 +48,7 @@ function createTestApp(testDb) {
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/sales', salesRoutes);
   app.use('/api/purchases', purchasesRoutes);
+  app.use('/api/suppliers', suppliersRoutes);
   app.use('/api/transactions', transactionsRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/reports', reportsRoutes);
@@ -53,6 +56,7 @@ function createTestApp(testDb) {
   app.use('/api/customers', customersRoutes);
   app.use('/api/returns', returnsRoutes);
   app.use('/api/quotations', quotationsRoutes);
+  app.use('/api/stock-adjustments', stockAdjustmentsRoutes);
   app.use('/api/pricing', pricingRoutes);
   app.use('/', publicPagesRoutes);
 

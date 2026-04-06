@@ -332,6 +332,14 @@ router.get('/summary', authenticateToken, async (req, res) => {
         r.tax_amount,
         r.receipt_date AS sale_date,
         COUNT(s.id) AS line_items,
+        COUNT(DISTINCT s.product_id) AS distinct_products,
+        GROUP_CONCAT(DISTINCT TRIM(
+          COALESCE(p.product_name, '') ||
+          CASE
+            WHEN COALESCE(TRIM(p.variety), '') = '' THEN ''
+            ELSE ' ' || p.variety
+          END
+        )) AS product_preview,
         COALESCE(SUM(s.quantity_sold), 0) AS total_quantity,
         MAX(u.username) AS operator_name,
         COALESCE(ret.return_entries, 0) AS return_entries,
@@ -340,6 +348,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
         r.total_amount - COALESCE(ret.refunded_amount, 0) AS net_amount
       FROM receipts r
       LEFT JOIN sales s ON s.sale_id = r.sale_id
+      LEFT JOIN products p ON p.id = s.product_id
       LEFT JOIN users u ON u.id = s.operator_id
       LEFT JOIN (
         SELECT
@@ -424,6 +433,8 @@ router.get('/archive', authenticateToken, async (req, res) => {
         cs.payment_mode,
         MAX(cs.sale_date) AS sale_date,
         COUNT(cs.id) AS line_items,
+        COUNT(DISTINCT LOWER(COALESCE(cs.product_name, ''))) AS distinct_products,
+        GROUP_CONCAT(DISTINCT TRIM(COALESCE(cs.product_name, ''))) AS product_preview,
         COALESCE(SUM(cs.quantity), 0) AS total_quantity,
         COALESCE(SUM(cs.amount), 0) AS total_amount,
         COALESCE(ret.return_entries, 0) AS return_entries,
