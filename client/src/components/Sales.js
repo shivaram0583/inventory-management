@@ -15,8 +15,7 @@ import {
   CreditCard,
   Phone,
   FileText,
-  History,
-  Archive
+  History
 } from 'lucide-react';
 
 const fmtMoney = (value) => Number(value || 0).toLocaleString('en-IN', {
@@ -220,8 +219,6 @@ const Sales = () => {
     }
   };
 
-  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
-
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.variety?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -295,6 +292,8 @@ const Sales = () => {
     const discount = Number(discountAmount) || 0;
     return Math.max(0, subtotal - discount);
   };
+
+  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const handleSale = () => {
     if (cart.length === 0) {
@@ -405,8 +404,7 @@ const Sales = () => {
         <nav className="flex gap-1">
           {[
             { id: 'record', label: 'Record Sale', icon: ShoppingCart },
-            { id: 'history', label: 'Sales Done', icon: History },
-            { id: 'archive', label: 'Sales Archive', icon: Archive }
+            { id: 'history', label: 'Sales Done', icon: History }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -660,10 +658,6 @@ const Sales = () => {
 
       {activeTab === 'history' && (
         <SalesRecordsPanel mode="history" onOpenSaleDetail={openSaleDetail} onOpenReceipt={openReceipt} />
-      )}
-
-      {activeTab === 'archive' && (
-        <SalesRecordsPanel mode="archive" onOpenSaleDetail={openSaleDetail} onOpenReceipt={openReceipt} />
       )}
 
       <SharedModal
