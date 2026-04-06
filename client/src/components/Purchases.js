@@ -145,7 +145,7 @@ const Purchases = () => {
   const [deliverSubmitting, setDeliverSubmitting] = useState(false);
   const [cancelModal, setCancelModal] = useState({ open: false, purchase: null });
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
-  const [partialModal, setPartialModal] = useState({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() });
+  const [partialModal, setPartialModal] = useState({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString(), mark_as_completed: false });
   const [partialSubmitting, setPartialSubmitting] = useState(false);
 
   const [showNewProductModal, setShowNewProductModal] = useState(false);
@@ -447,12 +447,13 @@ const Purchases = () => {
     setPartialSubmitting(true);
     setError('');
     try {
-      await axios.post(`/api/purchases/${partialModal.purchase.id}/partial-delivery`, {
+      const res = await axios.post(`/api/purchases/${partialModal.purchase.id}/partial-delivery`, {
         quantity_delivered: Number(partialModal.quantity),
-        delivery_date: partialModal.delivery_date
+        delivery_date: partialModal.delivery_date,
+        mark_as_completed: Boolean(partialModal.mark_as_completed)
       });
-      setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() });
-      setSuccess('Partial delivery recorded and inventory updated');
+      setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString(), mark_as_completed: false });
+      setSuccess(res.data?.message || 'Partial delivery recorded and inventory updated');
       await fetchAll();
       setTimeout(() => setSuccess(''), 3000);
     } catch (e) {
@@ -1040,7 +1041,7 @@ const Purchases = () => {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setPartialModal({ open: true, purchase, quantity: '', delivery_date: getISTDateString() })}
+                                onClick={() => setPartialModal({ open: true, purchase, quantity: '', delivery_date: getISTDateString(), mark_as_completed: false })}
                                 className="inline-flex items-center gap-1 rounded-lg border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-100"
                               >
                                 <Package className="h-3.5 w-3.5" />
@@ -1677,7 +1678,7 @@ const Purchases = () => {
                   <h3 className="text-base font-bold text-gray-900">Partial Delivery</h3>
                   <p className="text-xs text-gray-500 font-mono">{partialModal.purchase.purchase_id}</p>
                 </div>
-                <button onClick={() => setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() })} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-blue-300 hover:text-blue-700 hover:bg-white/80 transition-all">
+                <button onClick={() => setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString(), mark_as_completed: false })} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-blue-300 hover:text-blue-700 hover:bg-white/80 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1697,12 +1698,26 @@ const Purchases = () => {
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Delivery Date</label>
                 <input type="date" className="input-field !text-sm !rounded-2xl" value={partialModal.delivery_date} onChange={(e) => setPartialModal(prev => ({ ...prev, delivery_date: e.target.value }))} required />
               </div>
+              <label className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                  checked={Boolean(partialModal.mark_as_completed)}
+                  onChange={(e) => setPartialModal(prev => ({ ...prev, mark_as_completed: e.target.checked }))}
+                />
+                <span>
+                  <span className="block font-semibold">Mark this order as completed after this delivery</span>
+                  <span className="block text-xs text-amber-700 mt-1">
+                    Use this when the supplier delivered less than ordered and no further stock will arrive. The purchase will be closed with the delivered quantity only.
+                  </span>
+                </span>
+              </label>
               <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString() })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                <button type="button" onClick={() => setPartialModal({ open: false, purchase: null, quantity: '', delivery_date: getISTDateString(), mark_as_completed: false })} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
                   Cancel
                 </button>
                 <button type="submit" disabled={partialSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
-                  {partialSubmitting ? 'Processing...' : 'Confirm Delivery'}
+                  {partialSubmitting ? 'Processing...' : partialModal.mark_as_completed ? 'Deliver & Close Order' : 'Confirm Delivery'}
                 </button>
               </div>
             </form>

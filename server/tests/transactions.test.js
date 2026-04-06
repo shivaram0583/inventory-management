@@ -1,6 +1,6 @@
 const request = require('supertest');
 const { createTestDb, initializeTestSchema, seedTestUsers } = require('./setup/testDb');
-const { createTestApp, loginUser, createTestBankAccount, completeDailySetup } = require('./setup/testHelpers');
+const { createTestApp, loginUser, createTestBankAccount, completeDailySetup, createTestProduct } = require('./setup/testHelpers');
 
 let testDb, app, adminAuth, operatorAuth, bankAccount;
 
@@ -533,6 +533,38 @@ describe('Transactions', () => {
         .set('Authorization', `Bearer ${adminAuth.token}`);
 
       expect(res.status).toBe(400);
+    });
+
+    test('should not treat sales return bank refunds as cash registry withdrawals', async () => {
+      const product = await createTestProduct(testDb, {
+        product_id: 'TXNRET001',
+        product_name: 'Ledger Check Product',
+        quantity_available: 25,
+        selling_price: 1000
+      });
+
+      await testDb.runQuery(
+        `INSERT INTO sales (sale_id, product_id, quantity_sold, price_per_unit, total_amount, sale_date, operator_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['SALE-RET-CHECK', product.id, 1, 1000, 1000, '2026-04-10 10:30:00', adminAuth.user.id]
+      );
+
+      await testDb.runQuery(
+        `INSERT INTO bank_transfers (
+          bank_account_id, amount, transfer_type, source_type, source_reference, transfer_date, withdrawal_purpose
+        ) VALUES (?, ?, 'withdrawal', 'sales_return', ?, ?, NULL)`,
+        [bankAccount.id, 750, 'return:legacy-ret-1', '2026-04-10']
+      );
+
+      const res = await request(app)
+        .get('/api/transactions/daily-summary?start_date=2026-04-10&end_date=2026-04-10')
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].bank_withdrawals).toBe(0);
+      expect(res.body[0].sales).toBe(1000);
+      expect(res.body[0].closing_balance - res.body[0].opening_balance).toBe(1000);
     });
   });
 

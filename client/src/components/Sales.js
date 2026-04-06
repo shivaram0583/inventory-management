@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useLocation, useNavigate } from 'react-router-dom';
 import SharedModal from './shared/Modal';
 import CustomSelect from './shared/CustomSelect';
+import SalesRecordsPanel from './SalesRecordsPanel';
 import { 
   ShoppingCart, 
   Plus, 
@@ -13,23 +14,21 @@ import {
   User,
   CreditCard,
   Phone,
-  FileText
+  FileText,
+  History,
+  Archive
 } from 'lucide-react';
 
-function loadRazorpayCheckout() {
-  if (window.Razorpay) {
-    return Promise.resolve(true);
-  }
+const fmtMoney = (value) => Number(value || 0).toLocaleString('en-IN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
 
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => reject(new Error('Failed to load payment gateway checkout script'));
-    document.body.appendChild(script);
-  });
-}
+const fmtDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value).slice(0, 10) : date.toLocaleString('en-IN');
+};
 
 const Sales = () => {
   const location = useLocation();
@@ -45,16 +44,15 @@ const Sales = () => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [paymentMode, setPaymentMode] = useState('cash');
   const [discountAmount, setDiscountAmount] = useState('');
-  const [barcodeInput, setBarcodeInput] = useState('');
   const [customerLookupLoading, setCustomerLookupLoading] = useState(false);
-  const [barcodeLookupLoading, setBarcodeLookupLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [receiptModal, setReceiptModal] = useState({ open: false, saleId: null, receiptNumber: null });
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('record');
+  const [saleDetailModal, setSaleDetailModal] = useState({ open: false, sale: null });
   const [quotationConversion, setQuotationConversion] = useState(null);
   const [quotationNotice, setQuotationNotice] = useState('');
-  const [paymentGatewayConfig, setPaymentGatewayConfig] = useState({ enabled: false, provider: null, keyId: null });
   const pendingSaleRef = useRef(null);
   const cartRef = useRef([]);
 
@@ -106,19 +104,9 @@ const Sales = () => {
     }
   }, []);
 
-  const fetchPaymentGatewayConfig = async () => {
-    try {
-      const response = await axios.get('/api/payments/config');
-      setPaymentGatewayConfig(response.data || { enabled: false, provider: null, keyId: null });
-    } catch (paymentError) {
-      setPaymentGatewayConfig({ enabled: false, provider: null, keyId: null });
-    }
-  };
-
   useEffect(() => {
     fetchProducts();
     fetchCategories();
-    fetchPaymentGatewayConfig();
   }, []);
 
   useEffect(() => {
@@ -218,32 +206,18 @@ const Sales = () => {
     }
   };
 
-  const handleBarcodeLookup = async () => {
-    const code = barcodeInput.trim();
-    if (!code) return;
-
-    setBarcodeLookupLoading(true);
-    setError('');
-    try {
-      const response = await axios.get('/api/inventory/lookup/barcode', {
-        params: { code }
-      });
-      if (Number(response.data?.quantity_available) <= 0) {
-        setError('This product is currently out of stock');
-      } else {
-        addToCart(response.data);
-        setBarcodeInput('');
-      }
-    } catch (lookupError) {
-      setError(lookupError.response?.data?.message || 'Failed to find product by barcode');
-    } finally {
-      setBarcodeLookupLoading(false);
-    }
-  };
-
   const openReceipt = (saleId) => {
     if (!saleId) return;
     window.location.href = `/receipt/${saleId}`;
+  };
+
+  const openSaleDetail = async (saleId) => {
+    try {
+      const response = await axios.get(`/api/sales/${saleId}`);
+      setSaleDetailModal({ open: true, sale: response.data });
+    } catch (detailError) {
+      setError(detailError.response?.data?.message || 'Failed to load sale details');
+    }
   };
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -361,55 +335,6 @@ const Sales = () => {
     setConfirmModalOpen(true);
   };
 
-  const processOnlinePayment = async (saleData) => {
-    if (!paymentGatewayConfig?.enabled || paymentGatewayConfig.provider !== 'razorpay') {
-      setError('Online payment gateway is not configured');
-      return null;
-    }
-
-    await loadRazorpayCheckout();
-
-    const orderResponse = await axios.post('/api/payments/create-order', {
-      amount: calculateTotal(),
-      reference: `sale-${Date.now()}`,
-      customer_name: saleData.customer_name
-    });
-
-    return new Promise((resolve) => {
-      const razorpay = new window.Razorpay({
-        key: orderResponse.data.keyId,
-        order_id: orderResponse.data.orderId,
-        amount: orderResponse.data.amountInPaise,
-        currency: orderResponse.data.currency,
-        name: 'Sri Lakshmi Vigneswara Traders',
-        description: `Sale payment for ${saleData.customer_name || 'customer'}`,
-        prefill: {
-          name: saleData.customer_name,
-          contact: saleData.customer_mobile
-        },
-        theme: { color: '#047857' },
-        handler: (response) => {
-          resolve({
-            payment_gateway: 'razorpay',
-            gateway_order_id: response.razorpay_order_id,
-            gateway_payment_id: response.razorpay_payment_id,
-            gateway_signature: response.razorpay_signature
-          });
-        },
-        modal: {
-          ondismiss: () => resolve(null)
-        }
-      });
-
-      razorpay.on('payment.failed', (event) => {
-        setError(event.error?.description || 'Online payment failed');
-        resolve(null);
-      });
-
-      razorpay.open();
-    });
-  };
-
   const confirmSale = async () => {
     if (!pendingSaleRef.current) {
       setConfirmModalOpen(false);
@@ -421,18 +346,7 @@ const Sales = () => {
     setConfirmModalOpen(false);
 
     try {
-      let salePayload = pendingSaleRef.current;
-
-      if (salePayload.payment_mode === 'online') {
-        const paymentPayload = await processOnlinePayment(salePayload);
-        if (!paymentPayload) {
-          setLoading(false);
-          return;
-        }
-        salePayload = { ...salePayload, ...paymentPayload };
-      }
-
-      const response = await axios.post('/api/sales', salePayload);
+      const response = await axios.post('/api/sales', pendingSaleRef.current);
 
       setReceiptModal({
         open: true,
@@ -446,7 +360,6 @@ const Sales = () => {
       setSelectedCustomer(null);
       setPaymentMode('cash');
       setDiscountAmount('');
-      setBarcodeInput('');
       setQuotationConversion(null);
       setQuotationNotice('');
       pendingSaleRef.current = null;
@@ -488,6 +401,31 @@ const Sales = () => {
         </div>
       )}
 
+      <div className="card !p-2">
+        <nav className="flex gap-1">
+          {[
+            { id: 'record', label: 'Record Sale', icon: ShoppingCart },
+            { id: 'history', label: 'Sales Done', icon: History },
+            { id: 'archive', label: 'Sales Archive', icon: Archive }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === tab.id ? 'text-white shadow-md' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+              }`}
+              style={activeTab === tab.id
+                ? { background: 'linear-gradient(135deg,#059669,#10b981)', boxShadow: '0 2px 8px rgba(16,185,129,0.35)' }
+                : {}}
+            >
+              <tab.icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {activeTab === 'record' && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Product Selection */}
         <div className="lg:col-span-2">
@@ -512,34 +450,6 @@ const Sales = () => {
                   onChange={(val) => setCategoryFilter(val)}
                 />
               </div>
-            </div>
-
-            <div className="flex gap-3 mb-4">
-              <div className="relative flex-1">
-                <Package className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Enter barcode to add product quickly..."
-                  className="input-field pl-10"
-                  value={barcodeInput}
-                  onChange={(e) => setBarcodeInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleBarcodeLookup();
-                    }
-                  }}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleBarcodeLookup}
-                disabled={barcodeLookupLoading || !barcodeInput.trim()}
-                className="px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-sm disabled:opacity-50"
-                style={{background:'linear-gradient(135deg,#6366f1,#8b5cf6)'}}
-              >
-                {barcodeLookupLoading ? 'Finding...' : 'Add By Barcode'}
-              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
@@ -701,17 +611,11 @@ const Sales = () => {
                         { value: 'cash', label: 'Cash' },
                         { value: 'card', label: 'Card' },
                         { value: 'upi', label: 'UPI' },
-                        { value: 'credit', label: 'Credit' },
-                        ...(paymentGatewayConfig?.enabled ? [{ value: 'online', label: 'Online Gateway' }] : []),
+                        { value: 'credit', label: 'Credit' }
                       ]}
                       value={paymentMode}
                       onChange={(val) => setPaymentMode(val)}
                     />
-                    {paymentMode === 'online' && (
-                      <p className="mt-1 text-[11px] text-emerald-600">
-                        This will open Razorpay checkout before the sale is saved.
-                      </p>
-                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
@@ -752,6 +656,15 @@ const Sales = () => {
           </div>
         </div>
       </div>
+      )}
+
+      {activeTab === 'history' && (
+        <SalesRecordsPanel mode="history" onOpenSaleDetail={openSaleDetail} onOpenReceipt={openReceipt} />
+      )}
+
+      {activeTab === 'archive' && (
+        <SalesRecordsPanel mode="archive" onOpenSaleDetail={openSaleDetail} onOpenReceipt={openReceipt} />
+      )}
 
       <SharedModal
         isOpen={confirmModalOpen}
@@ -818,6 +731,101 @@ const Sales = () => {
             Open Receipt PDF
           </button>
         </div>
+      </SharedModal>
+
+      <SharedModal
+        isOpen={saleDetailModal.open}
+        onClose={() => setSaleDetailModal({ open: false, sale: null })}
+        title={`Sale ${saleDetailModal.sale?.saleId || ''}`}
+        type="info"
+        theme="sales"
+        confirmText="Close"
+      >
+        {saleDetailModal.sale && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">
+              <div><span className="text-gray-500">Receipt:</span> <span className="font-medium">{saleDetailModal.sale.receipt?.receipt_number || '-'}</span></div>
+              <div><span className="text-gray-500">Payment:</span> <span className="font-medium capitalize">{saleDetailModal.sale.receipt?.payment_mode || '-'}</span></div>
+              <div><span className="text-gray-500">Payment Status:</span> <span className="font-medium uppercase">{saleDetailModal.sale.receipt?.payment_status || '-'}</span></div>
+              <div><span className="text-gray-500">Receipt Date:</span> <span className="font-medium">{fmtDate(saleDetailModal.sale.receipt?.receipt_date)}</span></div>
+              <div><span className="text-gray-500">Customer:</span> <span className="font-medium">{saleDetailModal.sale.receipt?.customer_name || 'Walk-in Customer'}</span></div>
+              <div><span className="text-gray-500">Mobile:</span> <span className="font-medium">{saleDetailModal.sale.receipt?.customer_mobile || '-'}</span></div>
+              <div className="sm:col-span-2"><span className="text-gray-500">Address:</span> <span className="font-medium">{saleDetailModal.sale.receipt?.customer_address || '-'}</span></div>
+            </div>
+            <div className="rounded-xl border border-gray-100 overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-100">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-600">Product</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-gray-600">Qty</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Rate</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 text-sm">
+                  {saleDetailModal.sale.items.map((item) => (
+                    <tr key={`${item.sale_id}-${item.product_id}`}>
+                      <td className="px-3 py-2">
+                        <p className="font-medium text-gray-900">{item.product_name}</p>
+                        {item.pricing_rule_label && <p className="text-[11px] text-emerald-600">{item.pricing_rule_label}</p>}
+                      </td>
+                      <td className="px-3 py-2 text-center">{item.quantity_sold} {item.unit}</td>
+                      <td className="px-3 py-2 text-right">₹{fmtMoney(item.price_per_unit)}</td>
+                      <td className="px-3 py-2 text-right font-semibold">₹{fmtMoney(item.total_amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-between text-sm font-semibold text-gray-900">
+              <span>Total</span>
+              <span>₹{fmtMoney(saleDetailModal.sale.totalAmount)}</span>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm">
+              <div className="flex items-center justify-between text-gray-800">
+                <span className="font-semibold">Returns Summary</span>
+                <span className="text-xs uppercase tracking-wide text-amber-700">{saleDetailModal.sale.returns_summary?.return_entries || 0} entries</span>
+              </div>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 text-xs text-gray-700">
+                <div>Returned Qty: <span className="font-semibold">{saleDetailModal.sale.returns_summary?.returned_quantity || 0}</span></div>
+                <div>Refunded: <span className="font-semibold">₹{fmtMoney(saleDetailModal.sale.returns_summary?.refunded_amount || 0)}</span></div>
+                <div>Net Sale: <span className="font-semibold">₹{fmtMoney(Number(saleDetailModal.sale.totalAmount || 0) - Number(saleDetailModal.sale.returns_summary?.refunded_amount || 0))}</span></div>
+              </div>
+            </div>
+            {saleDetailModal.sale.returns?.length > 0 && (
+              <div className="rounded-xl border border-gray-100 overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-100">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-600">Return</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-600">Product</th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-gray-600">Qty</th>
+                      <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-gray-600">Mode</th>
+                      <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Refund</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 text-sm">
+                    {saleDetailModal.sale.returns.map((item, index) => (
+                      <tr key={`${item.return_id}-${item.product_id}-${index}`}>
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-gray-900">{item.return_id}</p>
+                          <p className="text-[11px] text-gray-500">{fmtDate(item.return_date)}</p>
+                        </td>
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-gray-900">{item.product_name}</p>
+                          {item.reason && <p className="text-[11px] text-gray-500">{item.reason}</p>}
+                        </td>
+                        <td className="px-3 py-2 text-center">{item.quantity_returned} {item.unit}</td>
+                        <td className="px-3 py-2 text-center capitalize">{item.refund_mode}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-amber-700">₹{fmtMoney(item.refund_amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </SharedModal>
     </div>
   );

@@ -1,5 +1,4 @@
 const nodemailer = require('nodemailer');
-const twilio = require('twilio');
 
 function hasRealValue(value) {
   const normalized = String(value || '').trim();
@@ -24,18 +23,9 @@ function hasEmailDelivery() {
   );
 }
 
-function hasSmsDelivery() {
-  return Boolean(
-    hasRealValue(process.env.TWILIO_ACCOUNT_SID) &&
-    hasRealValue(process.env.TWILIO_AUTH_TOKEN) &&
-    hasRealValue(process.env.TWILIO_FROM_NUMBER)
-  );
-}
-
 function getCommunicationCapabilities() {
   return {
     emailEnabled: hasEmailDelivery(),
-    smsEnabled: hasSmsDelivery(),
     frontendBaseUrl: getFrontendBaseUrl(),
     publicApiBaseUrl: getPublicApiBaseUrl()
   };
@@ -57,14 +47,6 @@ function getEmailTransport() {
   });
 }
 
-function getSmsClient() {
-  if (!hasSmsDelivery()) {
-    throw new Error('SMS delivery is not configured');
-  }
-
-  return twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-}
-
 async function sendEmail({ to, subject, text, html }) {
   const transport = getEmailTransport();
   return transport.sendMail({
@@ -73,15 +55,6 @@ async function sendEmail({ to, subject, text, html }) {
     subject,
     text,
     html
-  });
-}
-
-async function sendSms({ to, body }) {
-  const client = getSmsClient();
-  return client.messages.create({
-    from: process.env.TWILIO_FROM_NUMBER,
-    to,
-    body
   });
 }
 
@@ -96,7 +69,6 @@ function buildQuotationShareLink(quotationNumber) {
 module.exports = {
   getCommunicationCapabilities,
   sendEmail,
-  sendSms,
   buildReceiptVerificationLink,
   buildQuotationShareLink,
   getFrontendBaseUrl,

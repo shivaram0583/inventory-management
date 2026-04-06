@@ -73,7 +73,31 @@ function createTestDb() {
       });
     });
 
-  return { db, runQuery, getRow, getAll, nowIST, combineISTDateWithCurrentTime, runTransaction, close };
+  const paginate = async (sql, params = [], page = 1, limit = 50) => {
+    const safePage = Math.max(Number(page) || 1, 1);
+    const safeLimit = Math.max(Number(limit) || 50, 1);
+    const offset = (safePage - 1) * safeLimit;
+
+    const totalRow = await getRow(
+      `SELECT COUNT(*) AS total FROM (${sql}) AS paginated_rows`,
+      params
+    );
+
+    const data = await getAll(`${sql} LIMIT ? OFFSET ?`, [...params, safeLimit, offset]);
+    const total = Number(totalRow?.total || 0);
+
+    return {
+      data,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.max(Math.ceil(total / safeLimit), 1)
+      }
+    };
+  };
+
+  return { db, runQuery, getRow, getAll, nowIST, combineISTDateWithCurrentTime, runTransaction, paginate, close };
 }
 
 /**

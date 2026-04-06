@@ -34,6 +34,7 @@ async function getDailyBalanceSnapshot(date = getISTDateString()) {
     FROM bank_transfers
     WHERE transfer_type = 'withdrawal'
       AND source_type != 'supplier_payment'
+      AND source_type != 'sales_return'
       AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
       AND transfer_date < ?
   `, [date]);
@@ -67,6 +68,7 @@ async function getDailyBalanceSnapshot(date = getISTDateString()) {
     FROM bank_transfers
     WHERE transfer_type = 'withdrawal'
       AND source_type != 'supplier_payment'
+      AND source_type != 'sales_return'
       AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
       AND transfer_date = ?
   `, [date]);

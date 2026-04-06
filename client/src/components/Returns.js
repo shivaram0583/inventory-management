@@ -101,6 +101,10 @@ const Returns = () => {
         </button>
       </div>
 
+      <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+        Returns are tracked in the register below against the original <span className="font-semibold">Sale ID</span> and <span className="font-semibold">Return ID</span>. Each entry also stores refund mode, operator, date, and item-level refund values.
+      </div>
+
       {error && (
         <div className="rounded-xl border border-red-200 px-4 py-3 text-red-700 text-sm" style={{background:'linear-gradient(90deg,#fff5f5,#fef2f2)'}}>
           ⚠ {error}
@@ -117,6 +121,7 @@ const Returns = () => {
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Return ID</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Sale ID</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Customer</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Product</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Qty</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Refund</th>
@@ -129,14 +134,24 @@ const Returns = () => {
                 {returns.map(r => (
                   <tr key={r.id} className="hover:bg-indigo-50/30 transition-colors">
                     <td className="px-4 py-3 text-sm font-mono">{r.return_id}</td>
-                    <td className="px-4 py-3 text-sm font-mono">{r.sale_id}</td>
+                    <td className="px-4 py-3 text-sm font-mono">
+                      <p>{r.sale_id}</p>
+                      <p className="text-xs text-gray-400">Receipt #{r.receipt_number || '-'}</p>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <p className="font-medium text-gray-900">{r.customer_name || 'Walk-in Customer'}</p>
+                      <p className="text-xs text-gray-500">{r.customer_mobile || '-'}</p>
+                    </td>
                     <td className="px-4 py-3 text-sm">{r.product_name || '-'}</td>
                     <td className="px-4 py-3 text-sm text-right">{r.quantity_returned}</td>
                     <td className="px-4 py-3 text-sm text-right font-medium text-red-600">₹{fmt(r.refund_amount)}</td>
                     <td className="px-4 py-3 text-center">
                       <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100">{r.refund_mode}</span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{r.return_date?.slice(0, 10)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      <p>{r.return_date?.slice(0, 10)}</p>
+                      <p className="text-xs text-gray-400">By {r.returned_by_name || '-'}</p>
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <button onClick={() => viewDetail(r)} className="text-indigo-600 hover:text-indigo-800">
                         <Eye className="h-4 w-4" />
@@ -145,7 +160,7 @@ const Returns = () => {
                   </tr>
                 ))}
                 {returns.length === 0 && (
-                  <tr><td colSpan="8" className="px-4 py-12 text-center text-gray-400">No returns found</td></tr>
+                  <tr><td colSpan="9" className="px-4 py-12 text-center text-gray-400">No returns found</td></tr>
                 )}
               </tbody>
             </table>
@@ -244,18 +259,43 @@ const Returns = () => {
       <SharedModal isOpen={showDetailModal} onClose={() => setShowDetailModal(false)}
         title={`Return ${selectedReturn?.return_id || ''}`} type="info" confirmText="Close">
         {selectedReturn && (
-          <div className="space-y-3 text-sm">
-            <div className="grid grid-cols-2 gap-3">
-              <div><span className="text-gray-500">Sale ID:</span> {selectedReturn.sale_id}</div>
-              <div><span className="text-gray-500">Product:</span> {selectedReturn.product_name || selectedReturn.product_id}</div>
-              <div><span className="text-gray-500">Quantity:</span> {selectedReturn.quantity_returned}</div>
-              <div><span className="text-gray-500">Refund:</span> ₹{fmt(selectedReturn.refund_amount)}</div>
-              <div><span className="text-gray-500">Mode:</span> {selectedReturn.refund_mode}</div>
-              <div><span className="text-gray-500">Date:</span> {selectedReturn.return_date?.slice(0, 10)}</div>
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div><span className="text-gray-500">Sale ID:</span> <span className="font-medium">{selectedReturn.sale_id}</span></div>
+              <div><span className="text-gray-500">Receipt:</span> <span className="font-medium">{selectedReturn.receipt_number || '-'}</span></div>
+              <div><span className="text-gray-500">Customer:</span> <span className="font-medium">{selectedReturn.customer_name || 'Walk-in Customer'}</span></div>
+              <div><span className="text-gray-500">Mobile:</span> <span className="font-medium">{selectedReturn.customer_mobile || '-'}</span></div>
+              <div><span className="text-gray-500">Refund Mode:</span> <span className="font-medium capitalize">{selectedReturn.refund_mode}</span></div>
+              <div><span className="text-gray-500">Returned By:</span> <span className="font-medium">{selectedReturn.returned_by_name || '-'}</span></div>
+              <div><span className="text-gray-500">Date:</span> <span className="font-medium">{selectedReturn.return_date?.slice(0, 10)}</span></div>
+              <div><span className="text-gray-500">Total Refund:</span> <span className="font-semibold text-red-600">₹{fmt(selectedReturn.total_refund)}</span></div>
+              <div className="sm:col-span-2"><span className="text-gray-500">Address:</span> <span className="font-medium">{selectedReturn.customer_address || '-'}</span></div>
             </div>
             {selectedReturn.reason && (
-              <div><span className="text-gray-500">Reason:</span> {selectedReturn.reason}</div>
+              <div><span className="text-gray-500">Reason:</span> <span className="font-medium">{selectedReturn.reason}</span></div>
             )}
+            <div className="rounded-xl border border-gray-100 overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-100">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-600">Product</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold uppercase text-gray-600">Qty</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Rate</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase text-gray-600">Refund</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {selectedReturn.items?.map((item) => (
+                    <tr key={item.id}>
+                      <td className="px-3 py-2 text-gray-900 font-medium">{item.product_name || item.product_id}</td>
+                      <td className="px-3 py-2 text-center">{item.quantity_returned} {item.unit}</td>
+                      <td className="px-3 py-2 text-right">₹{fmt(item.price_per_unit)}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-red-600">₹{fmt(item.refund_amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </SharedModal>

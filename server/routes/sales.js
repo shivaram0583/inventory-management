@@ -9,7 +9,6 @@ const { addReviewNotification } = require('../services/reviewNotifications');
 const { getDailySetupStatus, getISTDateString } = require('../services/dailySetup');
 const { logAudit } = require('../middleware/auditLog');
 const { buildReceiptVerificationLink } = require('../services/communications');
-const { isGatewayEnabled, verifyGatewayPayment } = require('../services/paymentGateway');
 const { resolveEffectivePrice } = require('../services/pricing');
 
 const router = express.Router();
@@ -38,11 +37,7 @@ router.post('/', [
   body('items.*.product_id').isInt({ min: 1 }).withMessage('Valid product ID is required'),
   body('items.*.quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive whole number'),
   body('customer_name').optional().isString().withMessage('Customer name must be a string'),
-  body('payment_mode').optional().isIn(['cash', 'card', 'upi', 'credit', 'online']).withMessage('Invalid payment mode'),
-  body('payment_gateway').optional().isString(),
-  body('gateway_order_id').optional().isString(),
-  body('gateway_payment_id').optional().isString(),
-  body('gateway_signature').optional().isString()
+  body('payment_mode').optional().isIn(['cash', 'card', 'upi', 'credit']).withMessage('Invalid payment mode')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -53,8 +48,7 @@ router.post('/', [
     const {
       items, customer_name, customer_mobile, customer_address,
       payment_mode = 'cash', customer_id, discount_amount = 0,
-      quotation_id, payment_gateway, gateway_order_id,
-      gateway_payment_id, gateway_signature
+      quotation_id
     } = req.body;
     const saleId = generateSaleId();
     const saleTimestamp = nowIST();
@@ -67,27 +61,6 @@ router.post('/', [
       if (customer_id) {
         const customer = await getRow('SELECT * FROM customers WHERE id = ? AND is_active = 1', [customer_id]);
         if (!customer) return res.status(404).json({ message: 'Customer not found' });
-      }
-    }
-
-    if (payment_mode === 'online') {
-      if (!isGatewayEnabled()) {
-        return res.status(400).json({ message: 'Payment gateway is not configured' });
-      }
-
-      if (!payment_gateway || !gateway_order_id || !gateway_payment_id || !gateway_signature) {
-        return res.status(400).json({ message: 'Online payment details are required' });
-      }
-
-      const paymentVerified = verifyGatewayPayment({
-        payment_gateway,
-        gateway_order_id,
-        gateway_payment_id,
-        gateway_signature
-      });
-
-      if (!paymentVerified) {
-        return res.status(400).json({ message: 'Payment verification failed' });
       }
     }
 
@@ -219,7 +192,7 @@ router.post('/', [
          )
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
         [receiptNumber, saleId, customer_name, customer_mobile || null, customer_address || null,
-         payment_mode, payment_gateway || null, gateway_payment_id || null, gateway_order_id || null,
+        payment_mode, null, null, null,
          netAmount, billDiscount, totalTax, paymentStatus,
          customer_id || null, saleTimestamp, saleTimestamp]
       );
@@ -342,6 +315,188 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+router.get('/summary', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date, payment_mode, q } = req.query;
+    let query = `
+      SELECT
+        r.sale_id,
+        r.receipt_number,
+        r.customer_name,
+        r.customer_mobile,
+        r.customer_address,
+        r.payment_mode,
+        r.payment_status,
+        r.total_amount,
+        r.discount_amount,
+        r.tax_amount,
+        r.receipt_date AS sale_date,
+        COUNT(s.id) AS line_items,
+        COALESCE(SUM(s.quantity_sold), 0) AS total_quantity,
+        MAX(u.username) AS operator_name,
+        COALESCE(ret.return_entries, 0) AS return_entries,
+        COALESCE(ret.returned_quantity, 0) AS returned_quantity,
+        COALESCE(ret.refunded_amount, 0) AS refunded_amount,
+        r.total_amount - COALESCE(ret.refunded_amount, 0) AS net_amount
+      FROM receipts r
+      LEFT JOIN sales s ON s.sale_id = r.sale_id
+      LEFT JOIN users u ON u.id = s.operator_id
+      LEFT JOIN (
+        SELECT
+          sale_id,
+          COUNT(DISTINCT return_id) AS return_entries,
+          COALESCE(SUM(quantity_returned), 0) AS returned_quantity,
+          COALESCE(SUM(refund_amount), 0) AS refunded_amount
+        FROM sales_returns
+        GROUP BY sale_id
+      ) ret ON ret.sale_id = r.sale_id
+    `;
+    const params = [];
+    const conditions = [];
+
+    if (start_date) {
+      conditions.push('DATE(r.receipt_date) >= ?');
+      params.push(start_date);
+    }
+
+    if (end_date) {
+      conditions.push('DATE(r.receipt_date) <= ?');
+      params.push(end_date);
+    }
+
+    if (payment_mode) {
+      conditions.push('r.payment_mode = ?');
+      params.push(payment_mode);
+    }
+
+    if (q) {
+      conditions.push(`(
+        LOWER(COALESCE(r.sale_id, '')) LIKE ? OR
+        LOWER(COALESCE(r.receipt_number, '')) LIKE ? OR
+        LOWER(COALESCE(r.customer_name, '')) LIKE ? OR
+        LOWER(COALESCE(r.customer_mobile, '')) LIKE ?
+      )`);
+      const likeQuery = `%${String(q).toLowerCase()}%`;
+      params.push(likeQuery, likeQuery, likeQuery, likeQuery);
+    }
+
+    if (conditions.length) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+
+    query += `
+      GROUP BY
+        r.sale_id,
+        r.receipt_number,
+        r.customer_name,
+        r.customer_mobile,
+        r.customer_address,
+        r.payment_mode,
+        r.payment_status,
+        r.total_amount,
+        r.discount_amount,
+        r.tax_amount,
+        r.receipt_date,
+        ret.return_entries,
+        ret.returned_quantity,
+        ret.refunded_amount
+      ORDER BY r.receipt_date DESC
+    `;
+
+    const sales = await getAll(query, params);
+    res.json(sales);
+  } catch (error) {
+    console.error('Get sales summary error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/archive', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date, payment_mode, q } = req.query;
+    let query = `
+      SELECT
+        cs.sale_id,
+        r.receipt_number,
+        cs.customer_name,
+        cs.customer_mobile,
+        cs.customer_address,
+        cs.payment_mode,
+        MAX(cs.sale_date) AS sale_date,
+        COUNT(cs.id) AS line_items,
+        COALESCE(SUM(cs.quantity), 0) AS total_quantity,
+        COALESCE(SUM(cs.amount), 0) AS total_amount,
+        COALESCE(ret.return_entries, 0) AS return_entries,
+        COALESCE(ret.returned_quantity, 0) AS returned_quantity,
+        COALESCE(ret.refunded_amount, 0) AS refunded_amount,
+        COALESCE(SUM(cs.amount), 0) - COALESCE(ret.refunded_amount, 0) AS net_amount
+      FROM customer_sales cs
+      LEFT JOIN receipts r ON r.id = cs.receipt_id
+      LEFT JOIN (
+        SELECT
+          sale_id,
+          COUNT(DISTINCT return_id) AS return_entries,
+          COALESCE(SUM(quantity_returned), 0) AS returned_quantity,
+          COALESCE(SUM(refund_amount), 0) AS refunded_amount
+        FROM sales_returns
+        GROUP BY sale_id
+      ) ret ON ret.sale_id = cs.sale_id
+    `;
+    const params = [];
+    const conditions = [];
+
+    if (start_date) {
+      conditions.push('DATE(cs.sale_date) >= ?');
+      params.push(start_date);
+    }
+
+    if (end_date) {
+      conditions.push('DATE(cs.sale_date) <= ?');
+      params.push(end_date);
+    }
+
+    if (payment_mode) {
+      conditions.push('cs.payment_mode = ?');
+      params.push(payment_mode);
+    }
+
+    if (q) {
+      conditions.push(`(
+        LOWER(COALESCE(cs.sale_id, '')) LIKE ? OR
+        LOWER(COALESCE(r.receipt_number, '')) LIKE ? OR
+        LOWER(COALESCE(cs.customer_name, '')) LIKE ? OR
+        LOWER(COALESCE(cs.customer_mobile, '')) LIKE ?
+      )`);
+      const likeQuery = `%${String(q).toLowerCase()}%`;
+      params.push(likeQuery, likeQuery, likeQuery, likeQuery);
+    }
+
+    if (conditions.length) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+
+    query += `
+      GROUP BY
+        cs.sale_id,
+        r.receipt_number,
+        cs.customer_name,
+        cs.customer_mobile,
+        cs.customer_address,
+        cs.payment_mode,
+        ret.return_entries,
+        ret.returned_quantity,
+        ret.refunded_amount
+      ORDER BY MAX(cs.sale_date) DESC
+    `;
+
+    const archives = await getAll(query, params);
+    res.json(archives);
+  } catch (error) {
+    console.error('Get sales archive error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get single sale details
 router.get('/:saleId', authenticateToken, async (req, res) => {
   try {
@@ -365,6 +520,17 @@ router.get('/:saleId', authenticateToken, async (req, res) => {
       [saleId]
     );
 
+    const returns = await getAll(
+      `SELECT sr.return_id, sr.product_id, sr.quantity_returned, sr.price_per_unit, sr.refund_amount,
+              sr.refund_mode, sr.reason, sr.return_date, p.product_name, p.unit, u.username AS returned_by_name
+       FROM sales_returns sr
+       JOIN products p ON p.id = sr.product_id
+       LEFT JOIN users u ON u.id = sr.returned_by
+       WHERE sr.sale_id = ?
+       ORDER BY sr.return_date DESC, sr.id DESC`,
+      [saleId]
+    );
+
     let receiptQr = null;
     if (receipt?.receipt_number) {
       const verificationLink = buildReceiptVerificationLink(receipt.receipt_number);
@@ -385,6 +551,12 @@ router.get('/:saleId', authenticateToken, async (req, res) => {
       saleId,
       items: saleItems,
       receipt,
+      returns,
+      returns_summary: {
+        return_entries: Array.from(new Set(returns.map((entry) => entry.return_id))).length,
+        returned_quantity: returns.reduce((sum, entry) => sum + Number(entry.quantity_returned || 0), 0),
+        refunded_amount: returns.reduce((sum, entry) => sum + Number(entry.refund_amount || 0), 0)
+      },
       receipt_qr: receiptQr,
       totalAmount: saleItems.reduce((sum, item) => sum + item.total_amount, 0)
     });

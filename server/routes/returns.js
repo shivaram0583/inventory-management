@@ -85,8 +85,8 @@ router.post('/', [
         await txRun('UPDATE bank_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?',
           [totalRefund, returnDate, bank_account_id]);
         await txRun(
-          `INSERT INTO bank_transfers (bank_account_id, amount, transfer_type, source_type, source_reference, description, transfer_date, created_by, created_at)
-           VALUES (?, ?, 'withdrawal', 'sales_return', ?, ?, ?, ?, ?)`,
+          `INSERT INTO bank_transfers (bank_account_id, amount, transfer_type, source_type, source_reference, description, transfer_date, created_by, created_at, withdrawal_purpose)
+           VALUES (?, ?, 'withdrawal', 'sales_return', ?, ?, ?, ?, ?, 'customer_refund')`,
           [bank_account_id, totalRefund, `return:${returnId}`, `Refund for return ${returnId}`, returnDate.split(' ')[0], req.user.id, returnDate]
         );
       }
@@ -126,10 +126,12 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { start_date, end_date, page = 1, limit = 50 } = req.query;
     let query = `
-      SELECT sr.*, p.product_name, p.unit, u.username as returned_by_name
+      SELECT sr.*, p.product_name, p.unit, u.username as returned_by_name,
+             r.receipt_number, r.customer_name, r.customer_mobile
       FROM sales_returns sr
       JOIN products p ON sr.product_id = p.id
       LEFT JOIN users u ON sr.returned_by = u.id
+      LEFT JOIN receipts r ON r.sale_id = sr.sale_id
     `;
     const params = [];
     const conditions = [];
@@ -145,8 +147,12 @@ router.get('/', authenticateToken, async (req, res) => {
     console.error('List returns error:', error);
     // fallback without pagination
     const returns = await getAll(
-      `SELECT sr.*, p.product_name, p.unit, u.username as returned_by_name
-       FROM sales_returns sr JOIN products p ON sr.product_id = p.id LEFT JOIN users u ON sr.returned_by = u.id
+      `SELECT sr.*, p.product_name, p.unit, u.username as returned_by_name,
+              r.receipt_number, r.customer_name, r.customer_mobile
+       FROM sales_returns sr
+       JOIN products p ON sr.product_id = p.id
+       LEFT JOIN users u ON sr.returned_by = u.id
+       LEFT JOIN receipts r ON r.sale_id = sr.sale_id
        ORDER BY sr.return_date DESC LIMIT 100`
     );
     res.json({ data: returns, pagination: { page: 1, limit: 100, total: returns.length, totalPages: 1 } });
@@ -157,15 +163,40 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:returnId', authenticateToken, async (req, res) => {
   try {
     const items = await getAll(
-      `SELECT sr.*, p.product_name, p.unit, u.username as returned_by_name
+      `SELECT sr.*, p.product_name, p.unit, u.username as returned_by_name,
+              r.receipt_number, r.customer_name, r.customer_mobile, r.customer_address
        FROM sales_returns sr
        JOIN products p ON sr.product_id = p.id
        LEFT JOIN users u ON sr.returned_by = u.id
+       LEFT JOIN receipts r ON r.sale_id = sr.sale_id
        WHERE sr.return_id = ?`,
       [req.params.returnId]
     );
     if (!items.length) return res.status(404).json({ message: 'Return not found' });
-    res.json({ return_id: req.params.returnId, items });
+
+    const firstItem = items[0];
+    res.json({
+      return_id: req.params.returnId,
+      sale_id: firstItem.sale_id,
+      receipt_number: firstItem.receipt_number || null,
+      customer_name: firstItem.customer_name || null,
+      customer_mobile: firstItem.customer_mobile || null,
+      customer_address: firstItem.customer_address || null,
+      refund_mode: firstItem.refund_mode,
+      return_date: firstItem.return_date,
+      returned_by_name: firstItem.returned_by_name || null,
+      reason: firstItem.reason || null,
+      total_refund: items.reduce((sum, item) => sum + Number(item.refund_amount || 0), 0),
+      items: items.map((item) => ({
+        id: item.id,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        unit: item.unit,
+        quantity_returned: item.quantity_returned,
+        price_per_unit: item.price_per_unit,
+        refund_amount: item.refund_amount
+      }))
+    });
   } catch (error) {
     console.error('Get return error:', error);
     res.status(500).json({ message: 'Server error' });

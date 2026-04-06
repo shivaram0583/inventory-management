@@ -594,18 +594,4 @@ router.get('/alerts/expiring', authenticateToken, async (req, res) => {
   }
 });
 
-// Lookup product by barcode
-router.get('/lookup/barcode', authenticateToken, async (req, res) => {
-  try {
-    const { code } = req.query;
-    if (!code) return res.status(400).json({ message: 'Barcode required' });
-    const product = await getRow('SELECT * FROM products WHERE barcode = ? AND COALESCE(is_deleted, 0) = 0', [code]);
-    if (!product) return res.status(404).json({ message: 'Product not found for this barcode' });
-    res.json(product);
-  } catch (error) {
-    console.error('Barcode lookup error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
 module.exports = router;

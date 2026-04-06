@@ -23,13 +23,10 @@ const Receipt = () => {
   const [saleData, setSaleData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [deliveryCapabilities, setDeliveryCapabilities] = useState({ emailEnabled: false, smsEnabled: false });
+  const [deliveryCapabilities, setDeliveryCapabilities] = useState({ emailEnabled: false });
   const [sendModal, setSendModal] = useState({
     open: false,
     email: '',
-    mobile: '',
-    sendEmail: true,
-    sendSms: false,
     submitting: false
   });
   const [deliveryMessage, setDeliveryMessage] = useState('');
@@ -38,9 +35,9 @@ const Receipt = () => {
   const fetchDeliveryCapabilities = useCallback(async () => {
     try {
       const response = await axios.get('/api/delivery/capabilities');
-      setDeliveryCapabilities(response.data || { emailEnabled: false, smsEnabled: false });
+      setDeliveryCapabilities(response.data || { emailEnabled: false });
     } catch {
-      setDeliveryCapabilities({ emailEnabled: false, smsEnabled: false });
+      setDeliveryCapabilities({ emailEnabled: false });
     }
   }, []);
 
@@ -107,33 +104,23 @@ const Receipt = () => {
     `Rs. ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const sendReceipt = async () => {
-    const channels = [];
-    if (sendModal.sendEmail) channels.push('email');
-    if (sendModal.sendSms) channels.push('sms');
-
-    if (channels.length === 0) {
-      setError('Select at least one delivery channel');
+    if (!deliveryCapabilities.emailEnabled) {
+      setError('Email delivery is not configured');
       return;
     }
 
-    if (sendModal.sendEmail && !sendModal.email.trim()) {
+    if (!sendModal.email.trim()) {
       setError('Enter an email address to send the receipt');
-      return;
-    }
-
-    if (sendModal.sendSms && !sendModal.mobile.trim()) {
-      setError('Enter a mobile number to send the receipt');
       return;
     }
 
     setSendModal((current) => ({ ...current, submitting: true }));
     try {
       const response = await axios.post(`/api/delivery/receipts/${saleId}`, {
-        channels,
-        email: sendModal.email.trim() || undefined,
-        mobile: sendModal.mobile.trim() || undefined
+        channels: ['email'],
+        email: sendModal.email.trim() || undefined
       });
-      setSendModal({ open: false, email: '', mobile: '', sendEmail: true, sendSms: false, submitting: false });
+      setSendModal({ open: false, email: '', submitting: false });
       setDeliveryMessage(response.data?.message || 'Receipt sent successfully');
     } catch (deliveryError) {
       setError(deliveryError.response?.data?.message || 'Failed to send receipt');
@@ -157,9 +144,6 @@ const Receipt = () => {
             onClick={() => setSendModal({
               open: true,
               email: '',
-              mobile: receipt.customer_mobile || '',
-              sendEmail: deliveryCapabilities.emailEnabled,
-              sendSms: deliveryCapabilities.smsEnabled && Boolean(receipt.customer_mobile),
               submitting: false
             })}
             className="btn-secondary"
@@ -371,7 +355,7 @@ const Receipt = () => {
 
       <SharedModal
         isOpen={sendModal.open}
-        onClose={() => setSendModal({ open: false, email: '', mobile: '', sendEmail: true, sendSms: false, submitting: false })}
+        onClose={() => setSendModal({ open: false, email: '', submitting: false })}
         title={`Send ${receipt.receipt_number}`}
         type="info"
         confirmText={sendModal.submitting ? 'Sending...' : 'Send'}
@@ -379,43 +363,21 @@ const Receipt = () => {
       >
         <div className="space-y-4 text-sm">
           <div className="space-y-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={sendModal.sendEmail}
-                disabled={!deliveryCapabilities.emailEnabled}
-                onChange={(event) => setSendModal((current) => ({ ...current, sendEmail: event.target.checked }))}
-              />
-              <span>Email delivery {deliveryCapabilities.emailEnabled ? '' : '(not configured)'}</span>
-            </label>
+            <label className="block font-medium text-gray-700">Customer email</label>
             <input
               type="email"
               value={sendModal.email}
               onChange={(event) => setSendModal((current) => ({ ...current, email: event.target.value }))}
               placeholder="Customer email"
-              disabled={!sendModal.sendEmail}
+              disabled={!deliveryCapabilities.emailEnabled}
               className="w-full rounded-lg border border-gray-200 px-3 py-2"
             />
           </div>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={sendModal.sendSms}
-                disabled={!deliveryCapabilities.smsEnabled}
-                onChange={(event) => setSendModal((current) => ({ ...current, sendSms: event.target.checked }))}
-              />
-              <span>SMS delivery {deliveryCapabilities.smsEnabled ? '' : '(not configured)'}</span>
-            </label>
-            <input
-              type="text"
-              value={sendModal.mobile}
-              onChange={(event) => setSendModal((current) => ({ ...current, mobile: event.target.value }))}
-              placeholder="Customer mobile number"
-              disabled={!sendModal.sendSms}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2"
-            />
-          </div>
+          {!deliveryCapabilities.emailEnabled && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700">
+              Email delivery is not configured on the server.
+            </p>
+          )}
         </div>
       </SharedModal>
     </div>

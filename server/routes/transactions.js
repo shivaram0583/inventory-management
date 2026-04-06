@@ -764,6 +764,7 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
       FROM bank_transfers
       WHERE transfer_type = 'withdrawal'
         AND source_type != 'supplier_payment'
+        AND source_type != 'sales_return'
         AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
         AND transfer_date BETWEEN ? AND ?
       GROUP BY transfer_date ORDER BY transfer_date
@@ -860,6 +861,7 @@ router.get('/daily-summary', authenticateToken, async (req, res) => {
       SELECT COALESCE(SUM(amount), 0) as total FROM bank_transfers
       WHERE transfer_type = 'withdrawal'
         AND source_type != 'supplier_payment'
+        AND source_type != 'sales_return'
         AND COALESCE(withdrawal_purpose, 'cash_registry') = 'cash_registry'
         AND transfer_date < ?
     `, [start_date]);

@@ -27,9 +27,7 @@
     "moment": "^2.29.4",
     "nodemailer": "^8.0.4",
     "qrcode": "^1.5.4",
-    "razorpay": "^2.9.6",
-    "sqlite3": "^5.1.6",
-    "twilio": "^5.13.1"
+    "sqlite3": "^5.1.6"
   },
   "devDependencies": {
     "jest": "^30.3.0",

@@ -217,6 +217,34 @@ describe('Sales Flow', () => {
     });
   });
 
+  describe('GET /api/sales/summary', () => {
+    test('should return grouped completed sales', async () => {
+      const res = await request(app)
+        .get('/api/sales/summary')
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBeGreaterThan(0);
+      expect(res.body[0].sale_id).toBeDefined();
+      expect(res.body[0].receipt_number).toBeDefined();
+    });
+  });
+
+  describe('GET /api/sales/archive', () => {
+    test('should return grouped archived customer sales', async () => {
+      const res = await request(app)
+        .get('/api/sales/archive')
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBeGreaterThan(0);
+      expect(res.body[0].sale_id).toBeDefined();
+      expect(res.body[0].total_amount).toBeDefined();
+    });
+  });
+
   describe('GET /api/sales/:saleId', () => {
     test('should get sale details', async () => {
       const sale = await testDb.getRow('SELECT sale_id FROM sales LIMIT 1');

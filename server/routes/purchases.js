@@ -485,6 +485,13 @@ router.post('/:id/mark-delivered', [
     const deliveryDate = suppliedDeliveryDate && String(suppliedDeliveryDate).length === 10
       ? combineISTDateWithCurrentTime(suppliedDeliveryDate, eventTimestamp)
       : eventTimestamp;
+    const totalQuantity = toNumber(purchase.quantity);
+    const alreadyDelivered = toNumber(purchase.quantity_delivered || 0);
+    const remainingQuantity = Math.max(totalQuantity - alreadyDelivered, 0);
+
+    if (remainingQuantity <= 0) {
+      return res.status(400).json({ message: 'No remaining quantity is pending for delivery' });
+    }
 
     await runQuery('BEGIN TRANSACTION');
     try {
@@ -496,7 +503,7 @@ router.post('/:id/mark-delivered', [
            updated_at = ?
          WHERE id = ?`,
         [
-          toNumber(purchase.quantity),
+          remainingQuantity,
           toNumber(purchase.price_per_unit),
           purchase.supplier || null,
           eventTimestamp,
@@ -506,9 +513,9 @@ router.post('/:id/mark-delivered', [
 
       await runQuery(
         `UPDATE purchases
-         SET purchase_status = ?, delivery_date = ?
+         SET purchase_status = ?, quantity_delivered = ?, delivery_date = ?, updated_at = ?
          WHERE id = ?`,
-        [PURCHASE_STATUS.DELIVERED, deliveryDate, req.params.id]
+        [PURCHASE_STATUS.DELIVERED, totalQuantity, deliveryDate, eventTimestamp, req.params.id]
       );
 
       await runQuery('COMMIT');
@@ -529,7 +536,7 @@ router.post('/:id/mark-delivered', [
       actorRole: req.user.role,
       type: 'purchase',
       title: 'Marked a purchase as delivered',
-      description: `${updated.quantity} ${updated.unit} of ${updated.product_name} was received into inventory.`,
+      description: `${remainingQuantity} ${updated.unit} of ${updated.product_name} was received and the order was closed.`,
       createdAt: eventTimestamp
     });
 
@@ -861,6 +868,7 @@ router.post('/:id/partial-delivery', [
   authorizeRole(['admin', 'operator']),
   requireDailySetupForOperatorWrites,
   body('quantity_delivered').isInt({ min: 1 }).withMessage('Quantity delivered must be a positive whole number'),
+  body('mark_as_completed').optional().isBoolean().withMessage('mark_as_completed must be true or false'),
   body('delivery_date').optional().trim()
 ], async (req, res) => {
   try {
@@ -878,6 +886,7 @@ router.post('/:id/partial-delivery', [
     const totalQuantity = toNumber(purchase.quantity);
     const alreadyDelivered = toNumber(purchase.quantity_delivered || 0);
     const remaining = totalQuantity - alreadyDelivered;
+    const markAsCompleted = Boolean(req.body.mark_as_completed);
 
     if (quantityDelivered > remaining) {
       return res.status(400).json({
@@ -893,6 +902,13 @@ router.post('/:id/partial-delivery', [
 
     const newDelivered = alreadyDelivered + quantityDelivered;
     const isFullyDelivered = newDelivered >= totalQuantity;
+    const closeOrder = markAsCompleted || isFullyDelivered;
+    const finalizedQuantity = closeOrder ? newDelivered : totalQuantity;
+    const finalizedTotalAmount = finalizedQuantity * toNumber(purchase.price_per_unit);
+
+    if (closeOrder && finalizedQuantity <= 0) {
+      return res.status(400).json({ message: 'Delivered quantity must be greater than zero to close the order' });
+    }
 
     await runQuery('BEGIN TRANSACTION');
     try {
@@ -909,12 +925,22 @@ router.post('/:id/partial-delivery', [
 
       await runQuery(
         `UPDATE purchases SET
+           quantity = ?,
+           total_amount = ?,
            quantity_delivered = ?,
            purchase_status = ?,
-           delivery_date = ?
+           delivery_date = ?,
+           updated_at = ?
          WHERE id = ?`,
-        [newDelivered, isFullyDelivered ? PURCHASE_STATUS.DELIVERED : PURCHASE_STATUS.ORDERED,
-         deliveryDate, req.params.id]
+        [
+          finalizedQuantity,
+          finalizedTotalAmount,
+          newDelivered,
+          closeOrder ? PURCHASE_STATUS.DELIVERED : PURCHASE_STATUS.ORDERED,
+          deliveryDate,
+          eventTimestamp,
+          req.params.id
+        ]
       );
 
       await runQuery('COMMIT');
@@ -927,7 +953,10 @@ router.post('/:id/partial-delivery', [
     await logAudit(req, 'partial_delivery', 'purchase', purchase.purchase_id, {
       quantity_delivered: quantityDelivered,
       total_delivered: newDelivered,
-      fully_delivered: isFullyDelivered
+      fully_delivered: isFullyDelivered,
+      closed_with_short_delivery: closeOrder && !isFullyDelivered,
+      original_quantity: totalQuantity,
+      finalized_quantity: finalizedQuantity
     });
 
     addReviewNotification({
@@ -935,15 +964,19 @@ router.post('/:id/partial-delivery', [
       actorName: req.user.username,
       actorRole: req.user.role,
       type: 'purchase',
-      title: 'Recorded partial delivery',
-      description: `${quantityDelivered} ${updated.unit} of ${updated.product_name} received (${newDelivered}/${totalQuantity} total).`,
+      title: closeOrder ? 'Closed a purchase order after delivery' : 'Recorded partial delivery',
+      description: closeOrder
+        ? `${newDelivered} ${updated.unit} of ${updated.product_name} was received in total and the remaining balance was closed.`
+        : `${quantityDelivered} ${updated.unit} of ${updated.product_name} received (${newDelivered}/${totalQuantity} total).`,
       createdAt: eventTimestamp
     });
 
     res.json({
       ...updated,
-      message: isFullyDelivered
-        ? 'Final delivery recorded. Order fully received.'
+      message: closeOrder
+        ? (isFullyDelivered
+          ? 'Final delivery recorded. Order fully received.'
+          : 'Delivery recorded and the remaining quantity was closed.')
         : `Partial delivery recorded. ${totalQuantity - newDelivered} units remaining.`
     });
   } catch (error) {

@@ -839,7 +839,7 @@ router.get('/audit', authenticateToken, async (req, res) => {
       ) manual_dep ON manual_dep.bank_account_id = ba.id
       LEFT JOIN (
         SELECT bank_account_id, SUM(amount) AS total
-        FROM bank_transfers WHERE transfer_type='withdrawal' AND COALESCE(withdrawal_purpose,'cash_registry')='cash_registry' AND source_type != 'supplier_payment' AND transfer_date BETWEEN ? AND ?
+        FROM bank_transfers WHERE transfer_type='withdrawal' AND COALESCE(withdrawal_purpose,'cash_registry')='cash_registry' AND source_type != 'supplier_payment' AND source_type != 'sales_return' AND transfer_date BETWEEN ? AND ?
         GROUP BY bank_account_id
       ) cr_wth ON cr_wth.bank_account_id = ba.id
       LEFT JOIN (

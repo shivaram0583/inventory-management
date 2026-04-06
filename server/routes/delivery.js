@@ -7,7 +7,6 @@ const { addReviewNotification } = require('../services/reviewNotifications');
 const {
   getCommunicationCapabilities,
   sendEmail,
-  sendSms,
   buildReceiptVerificationLink,
   buildQuotationShareLink
 } = require('../services/communications');
@@ -18,7 +17,7 @@ function normalizeChannels(channels) {
   return Array.from(new Set((channels || []).map((channel) => String(channel).toLowerCase())));
 }
 
-async function deliverByChannels({ channels, email, mobile, emailPayload, smsPayload }) {
+async function deliverByChannels({ channels, email, emailPayload }) {
   const results = [];
 
   for (const channel of channels) {
@@ -28,15 +27,10 @@ async function deliverByChannels({ channels, email, mobile, emailPayload, smsPay
       }
       await sendEmail({ to: email, ...emailPayload });
       results.push({ channel, status: 'sent', recipient: email });
+      continue;
     }
 
-    if (channel === 'sms') {
-      if (!mobile) {
-        throw new Error('Mobile recipient is required for SMS delivery');
-      }
-      await sendSms({ to: mobile, body: smsPayload.body });
-      results.push({ channel, status: 'sent', recipient: mobile });
-    }
+    throw new Error(`Unsupported delivery channel: ${channel}`);
   }
 
   return results;
@@ -54,8 +48,7 @@ router.get('/capabilities', authenticateToken, async (req, res) => {
 router.post('/quotations/:id', [
   authenticateToken,
   body('channels').isArray({ min: 1 }).withMessage('At least one delivery channel is required'),
-  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Valid email is required'),
-  body('mobile').optional({ checkFalsy: true }).isString().isLength({ min: 8 }).withMessage('Valid mobile number is required')
+  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Valid email is required')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -77,8 +70,10 @@ router.post('/quotations/:id', [
     );
 
     const channels = normalizeChannels(req.body.channels);
+    if (channels.some((channel) => channel !== 'email')) {
+      return res.status(400).json({ message: 'Only email delivery is supported' });
+    }
     const recipientEmail = req.body.email || quotation.customer_email || '';
-    const recipientMobile = req.body.mobile || quotation.customer_mobile || '';
     const quoteLink = buildQuotationShareLink(quotation.quotation_number);
     const itemLines = items.map((item) => `${item.product_name} - ${item.quantity} ${item.unit} @ ₹${Number(item.price_per_unit).toFixed(2)}`).join('\n');
     const emailPayload = {
@@ -103,16 +98,10 @@ router.post('/quotations/:id', [
           <p style="margin-top:16px"><a href="${quoteLink}">${quoteLink}</a></p>
         </div>`
     };
-    const smsPayload = {
-      body: `Quotation ${quotation.quotation_number} from Sri Lakshmi Vigneswara Traders. Amount: ₹${Number(quotation.net_amount || 0).toFixed(2)}. Valid until ${quotation.valid_until || '-'}. ${quoteLink}`
-    };
-
     const deliveryResults = await deliverByChannels({
       channels,
       email: recipientEmail,
-      mobile: recipientMobile,
-      emailPayload,
-      smsPayload
+      emailPayload
     });
 
     if (quotation.status === 'draft') {
@@ -143,8 +132,7 @@ router.post('/quotations/:id', [
 router.post('/receipts/:saleId', [
   authenticateToken,
   body('channels').isArray({ min: 1 }).withMessage('At least one delivery channel is required'),
-  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Valid email is required'),
-  body('mobile').optional({ checkFalsy: true }).isString().isLength({ min: 8 }).withMessage('Valid mobile number is required')
+  body('email').optional({ checkFalsy: true }).isEmail().withMessage('Valid email is required')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -166,8 +154,10 @@ router.post('/receipts/:saleId', [
     );
 
     const channels = normalizeChannels(req.body.channels);
+    if (channels.some((channel) => channel !== 'email')) {
+      return res.status(400).json({ message: 'Only email delivery is supported' });
+    }
     const recipientEmail = req.body.email || '';
-    const recipientMobile = req.body.mobile || receipt.customer_mobile || '';
     const receiptLink = buildReceiptVerificationLink(receipt.receipt_number);
     const itemLines = items.map((item) => `${item.product_name} - ${item.quantity_sold} ${item.unit} = ₹${Number(item.total_amount).toFixed(2)}`).join('\n');
     const emailPayload = {
@@ -193,16 +183,10 @@ router.post('/receipts/:saleId', [
           <p style="margin-top:16px"><a href="${receiptLink}">${receiptLink}</a></p>
         </div>`
     };
-    const smsPayload = {
-      body: `Receipt ${receipt.receipt_number} from Sri Lakshmi Vigneswara Traders. Amount: ₹${Number(receipt.total_amount || 0).toFixed(2)}. Verify: ${receiptLink}`
-    };
-
     const deliveryResults = await deliverByChannels({
       channels,
       email: recipientEmail,
-      mobile: recipientMobile,
-      emailPayload,
-      smsPayload
+      emailPayload
     });
 
     await logAudit(req, 'deliver', 'receipt', receipt.receipt_number, { channels: deliveryResults });

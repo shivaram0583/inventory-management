@@ -22,14 +22,11 @@ const Quotations = () => {
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0, limit: 10 });
   const [exportingId, setExportingId] = useState(null);
   const [convertingId, setConvertingId] = useState(null);
-  const [deliveryCapabilities, setDeliveryCapabilities] = useState({ emailEnabled: false, smsEnabled: false });
+  const [deliveryCapabilities, setDeliveryCapabilities] = useState({ emailEnabled: false });
   const [deliveryModal, setDeliveryModal] = useState({
     open: false,
     quotation: null,
     email: '',
-    mobile: '',
-    sendEmail: true,
-    sendSms: false,
     submitting: false
   });
 
@@ -43,9 +40,9 @@ const Quotations = () => {
   const fetchDeliveryCapabilities = async () => {
     try {
       const response = await axios.get('/api/delivery/capabilities');
-      setDeliveryCapabilities(response.data || { emailEnabled: false, smsEnabled: false });
+      setDeliveryCapabilities(response.data || { emailEnabled: false });
     } catch {
-      setDeliveryCapabilities({ emailEnabled: false, smsEnabled: false });
+      setDeliveryCapabilities({ emailEnabled: false });
     }
   };
 
@@ -194,41 +191,28 @@ const Quotations = () => {
       open: true,
       quotation,
       email: '',
-      mobile: quotation.customer_mobile || '',
-      sendEmail: deliveryCapabilities.emailEnabled,
-      sendSms: deliveryCapabilities.smsEnabled && Boolean(quotation.customer_mobile),
       submitting: false
     });
   };
 
   const sendQuotation = async () => {
-    const channels = [];
-    if (deliveryModal.sendEmail) channels.push('email');
-    if (deliveryModal.sendSms) channels.push('sms');
-
-    if (channels.length === 0) {
-      setError('Select at least one delivery channel');
+    if (!deliveryCapabilities.emailEnabled) {
+      setError('Email delivery is not configured');
       return;
     }
 
-    if (deliveryModal.sendEmail && !deliveryModal.email.trim()) {
+    if (!deliveryModal.email.trim()) {
       setError('Enter an email address to send the quotation');
-      return;
-    }
-
-    if (deliveryModal.sendSms && !deliveryModal.mobile.trim()) {
-      setError('Enter a mobile number to send the quotation');
       return;
     }
 
     setDeliveryModal((current) => ({ ...current, submitting: true }));
     try {
       const response = await axios.post(`/api/delivery/quotations/${deliveryModal.quotation.id}`, {
-        channels,
-        email: deliveryModal.email.trim() || undefined,
-        mobile: deliveryModal.mobile.trim() || undefined
+        channels: ['email'],
+        email: deliveryModal.email.trim() || undefined
       });
-      setDeliveryModal({ open: false, quotation: null, email: '', mobile: '', sendEmail: true, sendSms: false, submitting: false });
+      setDeliveryModal({ open: false, quotation: null, email: '', submitting: false });
       fetchData();
       setActionModal({
         open: true,
@@ -617,7 +601,7 @@ const Quotations = () => {
 
       <SharedModal
         isOpen={deliveryModal.open}
-        onClose={() => setDeliveryModal({ open: false, quotation: null, email: '', mobile: '', sendEmail: true, sendSms: false, submitting: false })}
+        onClose={() => setDeliveryModal({ open: false, quotation: null, email: '', submitting: false })}
         title={`Send ${deliveryModal.quotation?.quotation_number || 'Quotation'}`}
         type="info"
         confirmText={deliveryModal.submitting ? 'Sending...' : 'Send'}
@@ -625,43 +609,21 @@ const Quotations = () => {
       >
         <div className="space-y-4 text-sm">
           <div className="space-y-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={deliveryModal.sendEmail}
-                disabled={!deliveryCapabilities.emailEnabled}
-                onChange={(event) => setDeliveryModal((current) => ({ ...current, sendEmail: event.target.checked }))}
-              />
-              <span>Email delivery {deliveryCapabilities.emailEnabled ? '' : '(not configured)'}</span>
-            </label>
+            <label className="block font-medium text-gray-700">Customer email</label>
             <input
               type="email"
               value={deliveryModal.email}
               onChange={(event) => setDeliveryModal((current) => ({ ...current, email: event.target.value }))}
               placeholder="Customer email"
-              disabled={!deliveryModal.sendEmail}
+              disabled={!deliveryCapabilities.emailEnabled}
               className="w-full rounded-lg border border-gray-200 px-3 py-2"
             />
           </div>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={deliveryModal.sendSms}
-                disabled={!deliveryCapabilities.smsEnabled}
-                onChange={(event) => setDeliveryModal((current) => ({ ...current, sendSms: event.target.checked }))}
-              />
-              <span>SMS delivery {deliveryCapabilities.smsEnabled ? '' : '(not configured)'}</span>
-            </label>
-            <input
-              type="text"
-              value={deliveryModal.mobile}
-              onChange={(event) => setDeliveryModal((current) => ({ ...current, mobile: event.target.value }))}
-              placeholder="Customer mobile number"
-              disabled={!deliveryModal.sendSms}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2"
-            />
-          </div>
+          {!deliveryCapabilities.emailEnabled && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700">
+              Email delivery is not configured on the server.
+            </p>
+          )}
         </div>
       </SharedModal>
 

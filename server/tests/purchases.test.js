@@ -248,6 +248,64 @@ describe('Purchase Management', () => {
 
       expect(res.status).toBe(404);
     });
+
+    test('should only add the remaining stock when an order was partially delivered earlier', async () => {
+      const orderedPurchase = await testDb.runQuery(
+        `INSERT INTO purchases (
+           purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, purchase_status, quantity_delivered
+         ) VALUES ('PURMARKPART001', ?, 25, 80, 2000, 'Mark Supplier', 'ordered', 10)`,
+        [testProduct.id]
+      );
+
+      await testDb.runQuery(
+        'UPDATE products SET quantity_available = quantity_available + 10 WHERE id = ?',
+        [testProduct.id]
+      );
+
+      const initialQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
+
+      const res = await request(app)
+        .post(`/api/purchases/${orderedPurchase.id}/mark-delivered`)
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({ delivery_date: '2026-04-04' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.purchase_status).toBe('delivered');
+      expect(Number(res.body.quantity_delivered)).toBe(25);
+
+      const newQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
+      expect(newQty).toBe(initialQty + 15);
+    });
+  });
+
+  describe('POST /api/purchases/:id/partial-delivery', () => {
+    test('should allow closing an order with a short final delivery', async () => {
+      const orderedPurchase = await testDb.runQuery(
+        `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, purchase_status)
+         VALUES ('PURPARTCLOSE001', ?, 100, 80, 8000, 'Partial Supplier', 'ordered')`,
+        [testProduct.id]
+      );
+
+      const initialQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
+
+      const res = await request(app)
+        .post(`/api/purchases/${orderedPurchase.id}/partial-delivery`)
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          quantity_delivered: 40,
+          delivery_date: '2026-04-04',
+          mark_as_completed: true
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.purchase_status).toBe('delivered');
+      expect(Number(res.body.quantity)).toBe(40);
+      expect(Number(res.body.quantity_delivered)).toBe(40);
+      expect(Number(res.body.total_amount)).toBe(3200);
+
+      const newQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
+      expect(newQty).toBe(initialQty + 40);
+    });
   });
 
   describe('PUT /api/purchases/:id', () => {
