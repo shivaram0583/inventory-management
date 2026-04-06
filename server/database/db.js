@@ -24,6 +24,44 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
+function quoteIdentifier(identifier) {
+  return `"${identifier}"`;
+}
+
+function copySharedColumns(sourceTable, targetTable, options = {}, callback = () => {}) {
+  const insertKeyword = options.ignore ? 'INSERT OR IGNORE' : 'INSERT';
+
+  db.all(`PRAGMA table_info(${sourceTable})`, (sourceErr, sourceColumns) => {
+    if (sourceErr) {
+      callback(sourceErr);
+      return;
+    }
+
+    db.all(`PRAGMA table_info(${targetTable})`, (targetErr, targetColumns) => {
+      if (targetErr) {
+        callback(targetErr);
+        return;
+      }
+
+      const sourceColumnNames = new Set(sourceColumns.map((column) => column.name));
+      const sharedColumns = targetColumns
+        .map((column) => column.name)
+        .filter((columnName) => sourceColumnNames.has(columnName));
+
+      if (sharedColumns.length === 0) {
+        callback(new Error(`No shared columns found between ${sourceTable} and ${targetTable}`));
+        return;
+      }
+
+      const columnList = sharedColumns.map(quoteIdentifier).join(', ');
+      db.run(
+        `${insertKeyword} INTO ${quoteIdentifier(targetTable)} (${columnList}) SELECT ${columnList} FROM ${quoteIdentifier(sourceTable)}`,
+        callback
+      );
+    });
+  });
+}
+
 function initializeDatabase() {
   // Create users table
   db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -256,6 +294,7 @@ function initializeDatabase() {
     if (err || !row) return;
     if (row.sql && row.sql.includes("CHECK (category IN")) {
       db.serialize(() => {
+        db.run(`DROP TABLE IF EXISTS products_v2`);
         db.run(`CREATE TABLE IF NOT EXISTS products_v2 (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           product_id TEXT UNIQUE NOT NULL,
@@ -266,17 +305,38 @@ function initializeDatabase() {
           unit TEXT NOT NULL CHECK (unit IN ('kg', 'packet', 'bag', 'liters')),
           purchase_price REAL NOT NULL DEFAULT 0,
           selling_price REAL NOT NULL DEFAULT 0,
+          gst_percent REAL NOT NULL DEFAULT 0,
+          hsn_code TEXT,
+          reorder_point REAL NOT NULL DEFAULT 10,
+          reorder_quantity REAL NOT NULL DEFAULT 0,
+          barcode TEXT,
+          expiry_date DATE,
+          batch_number TEXT,
+          manufacturing_date DATE,
           supplier TEXT,
           supplier_id INTEGER,
+          is_deleted INTEGER NOT NULL DEFAULT 0,
           date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
-        `);
-        db.run(`INSERT OR IGNORE INTO products_v2 SELECT * FROM products`);
-        db.run(`DROP TABLE products`);
-        db.run(`ALTER TABLE products_v2 RENAME TO products`, (e) => {
-          if (!e) console.log('Migrated products table: removed hardcoded category constraint');
+          )`);
+        copySharedColumns('products', 'products_v2', { ignore: true }, (copyErr) => {
+          if (copyErr) {
+            console.error('Error migrating products table to products_v2:', copyErr.message);
+            return;
+          }
+
+          db.run(`DROP TABLE products`, (dropErr) => {
+            if (dropErr) {
+              console.error('Error dropping legacy products table:', dropErr.message);
+              return;
+            }
+
+            db.run(`ALTER TABLE products_v2 RENAME TO products`, (renameErr) => {
+              if (!renameErr) console.log('Migrated products table: removed hardcoded category constraint');
+            });
+          });
         });
       });
     }
@@ -287,6 +347,7 @@ function initializeDatabase() {
     if (err || !row) return;
     if (row.sql && !row.sql.includes('liters')) {
       db.serialize(() => {
+        db.run(`DROP TABLE IF EXISTS products_v3`);
         db.run(`CREATE TABLE IF NOT EXISTS products_v3 (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           product_id TEXT UNIQUE NOT NULL,
@@ -297,17 +358,38 @@ function initializeDatabase() {
           unit TEXT NOT NULL CHECK (unit IN ('kg', 'packet', 'bag', 'liters')),
           purchase_price REAL NOT NULL DEFAULT 0,
           selling_price REAL NOT NULL DEFAULT 0,
+          gst_percent REAL NOT NULL DEFAULT 0,
+          hsn_code TEXT,
+          reorder_point REAL NOT NULL DEFAULT 10,
+          reorder_quantity REAL NOT NULL DEFAULT 0,
+          barcode TEXT,
+          expiry_date DATE,
+          batch_number TEXT,
+          manufacturing_date DATE,
           supplier TEXT,
           supplier_id INTEGER,
+          is_deleted INTEGER NOT NULL DEFAULT 0,
           date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
         )`);
-        db.run(`INSERT OR IGNORE INTO products_v3 SELECT * FROM products`);
-        db.run(`DROP TABLE products`);
-        db.run(`ALTER TABLE products_v3 RENAME TO products`, (e) => {
-          if (!e) console.log('Migrated products table: added liters to unit options');
+        copySharedColumns('products', 'products_v3', { ignore: true }, (copyErr) => {
+          if (copyErr) {
+            console.error('Error migrating products table to products_v3:', copyErr.message);
+            return;
+          }
+
+          db.run(`DROP TABLE products`, (dropErr) => {
+            if (dropErr) {
+              console.error('Error dropping products table before products_v3 rename:', dropErr.message);
+              return;
+            }
+
+            db.run(`ALTER TABLE products_v3 RENAME TO products`, (renameErr) => {
+              if (!renameErr) console.log('Migrated products table: added liters to unit options');
+            });
+          });
         });
       });
     }
@@ -318,6 +400,7 @@ function initializeDatabase() {
     if (err || !row) return;
     if (row.sql && !row.sql.includes('pieces')) {
       db.serialize(() => {
+        db.run(`DROP TABLE IF EXISTS products_v4`);
         db.run(`CREATE TABLE IF NOT EXISTS products_v4 (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           product_id TEXT UNIQUE NOT NULL,
@@ -328,17 +411,38 @@ function initializeDatabase() {
           unit TEXT NOT NULL CHECK (unit IN ('kg', 'grams', 'packet', 'bag', 'liters', 'ml', 'pieces', 'bottles', 'tonnes')),
           purchase_price REAL NOT NULL DEFAULT 0,
           selling_price REAL NOT NULL DEFAULT 0,
+          gst_percent REAL NOT NULL DEFAULT 0,
+          hsn_code TEXT,
+          reorder_point REAL NOT NULL DEFAULT 10,
+          reorder_quantity REAL NOT NULL DEFAULT 0,
+          barcode TEXT,
+          expiry_date DATE,
+          batch_number TEXT,
+          manufacturing_date DATE,
           supplier TEXT,
           supplier_id INTEGER,
+          is_deleted INTEGER NOT NULL DEFAULT 0,
           date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
         )`);
-        db.run(`INSERT OR IGNORE INTO products_v4 SELECT * FROM products`);
-        db.run(`DROP TABLE products`);
-        db.run(`ALTER TABLE products_v4 RENAME TO products`, (e) => {
-          if (!e) console.log('Migrated products table: added pieces, bottles, tonnes, grams, ml units');
+        copySharedColumns('products', 'products_v4', { ignore: true }, (copyErr) => {
+          if (copyErr) {
+            console.error('Error migrating products table to products_v4:', copyErr.message);
+            return;
+          }
+
+          db.run(`DROP TABLE products`, (dropErr) => {
+            if (dropErr) {
+              console.error('Error dropping products table before products_v4 rename:', dropErr.message);
+              return;
+            }
+
+            db.run(`ALTER TABLE products_v4 RENAME TO products`, (renameErr) => {
+              if (!renameErr) console.log('Migrated products table: added pieces, bottles, tonnes, grams, ml units');
+            });
+          });
         });
       });
     }
@@ -349,6 +453,7 @@ function initializeDatabase() {
     if (err || !row) return;
     if (row.sql && row.sql.includes('sale_id TEXT UNIQUE')) {
       db.serialize(() => {
+        db.run(`DROP TABLE IF EXISTS sales_v2`);
         db.run(`CREATE TABLE IF NOT EXISTS sales_v2 (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           sale_id TEXT NOT NULL,
@@ -356,16 +461,33 @@ function initializeDatabase() {
           quantity_sold REAL NOT NULL,
           price_per_unit REAL NOT NULL,
           total_amount REAL NOT NULL,
+          discount_amount REAL NOT NULL DEFAULT 0,
+          tax_amount REAL NOT NULL DEFAULT 0,
+          gst_percent REAL NOT NULL DEFAULT 0,
+          pricing_rule_type TEXT,
+          pricing_rule_label TEXT,
           sale_date DATETIME DEFAULT CURRENT_TIMESTAMP,
           operator_id INTEGER,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (product_id) REFERENCES products (id),
           FOREIGN KEY (operator_id) REFERENCES users (id)
         )`);
-        db.run(`INSERT INTO sales_v2 SELECT * FROM sales`);
-        db.run(`DROP TABLE sales`);
-        db.run(`ALTER TABLE sales_v2 RENAME TO sales`, (e) => {
-          if (!e) console.log('Migrated sales table: removed UNIQUE constraint on sale_id');
+        copySharedColumns('sales', 'sales_v2', {}, (copyErr) => {
+          if (copyErr) {
+            console.error('Error migrating sales table to sales_v2:', copyErr.message);
+            return;
+          }
+
+          db.run(`DROP TABLE sales`, (dropErr) => {
+            if (dropErr) {
+              console.error('Error dropping legacy sales table:', dropErr.message);
+              return;
+            }
+
+            db.run(`ALTER TABLE sales_v2 RENAME TO sales`, (renameErr) => {
+              if (!renameErr) console.log('Migrated sales table: removed UNIQUE constraint on sale_id');
+            });
+          });
         });
       });
     }

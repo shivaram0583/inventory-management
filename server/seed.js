@@ -13,6 +13,42 @@ function dateOnlyIST(date) {
   return formatIST(date).slice(0, 10);
 }
 
+function compactDateIST(date) {
+  return dateOnlyIST(date).replace(/-/g, '');
+}
+
+function compactTimestampIST(date) {
+  return formatIST(date).replace(/[-: ]/g, '').slice(0, 14);
+}
+
+function codeToken(value, maxLength = 8) {
+  const normalized = String(value || '')
+    .replace(/[^a-zA-Z0-9]+/g, '')
+    .toUpperCase()
+    .slice(0, maxLength);
+  return normalized || 'REF';
+}
+
+function buildPurchaseId(date, suffix) {
+  return `PUR${compactTimestampIST(date)}${suffix}`;
+}
+
+function buildSaleId(date, suffix) {
+  return `SALE-${compactDateIST(date)}-${suffix}`;
+}
+
+function buildReceiptNumber(date, customerName, suffix) {
+  return `R-${compactDateIST(date)}-${codeToken(customerName, 8)}-${suffix}`;
+}
+
+function buildReturnId(date, suffix) {
+  return `RET-${compactDateIST(date)}-${suffix}`;
+}
+
+function buildQuotationNumber(date, suffix) {
+  return `Q-${compactDateIST(date)}-${suffix}`;
+}
+
 function shiftDays(baseDate, days) {
   return new Date(baseDate.getTime() + (days * 24 * 60 * 60 * 1000));
 }
@@ -151,7 +187,7 @@ async function seedScenarioData() {
   await clearScenarioData();
 
   const { admin, operator } = await ensureBaseUsers();
-  const now = new Date('2026-04-05T10:30:00+05:30');
+  const now = new Date();
 
   const categories = ['seeds', 'fertilizers', 'pesticides', 'tools'];
   for (const category of categories) {
@@ -166,13 +202,15 @@ async function seedScenarioData() {
     { name: 'BioCrop Crop Science', contact_person: 'Anita Reddy', mobile: '9011005500', email: 'biocrop@example.com', address: 'Warangal', gstin: '36ABCDE1234F1Z5' },
     { name: 'Kisan Tools Depot', contact_person: 'Manoj Sharma', mobile: '9011006600', email: 'kisantools@example.com', address: 'Nalgonda', gstin: '36ABCDE1234F1Z6' }
   ];
+  const supplierIds = {};
   for (const supplier of suppliers) {
-    await insertRow('suppliers', {
+    const supplierId = await insertRow('suppliers', {
       ...supplier,
       is_active: 1,
       created_at: formatIST(shiftDays(now, -40)),
       updated_at: formatIST(shiftDays(now, -4))
     });
+    supplierIds[supplier.name] = supplierId;
   }
 
   const bankAccountIds = {};
@@ -205,7 +243,7 @@ async function seedScenarioData() {
   });
 
   await insertRow('daily_operation_setup', {
-    business_date: '2026-04-05',
+    business_date: dateOnlyIST(now),
     selected_bank_account_id: bankAccountIds.main,
     bank_selected_by: admin.id,
     bank_selected_at: formatIST(shiftDays(now, 0)),
@@ -218,16 +256,16 @@ async function seedScenarioData() {
   });
 
   const productCatalog = [
-    { code: 'SEED001', category: 'seeds', name: 'Tomato Seeds', variety: 'Hybrid F1', unit: 'packet', purchase_price: 80, selling_price: 120, supplier: 'Rasi Seeds Pvt Ltd', gst_percent: 5, hsn_code: '120991', reorder_point: 25, reorder_quantity: 80, barcode: '890100000001', expiry_date: '2026-08-31', batch_number: 'TOM-APR-01', manufacturing_date: '2026-03-01' },
-    { code: 'SEED002', category: 'seeds', name: 'Paddy Seeds', variety: 'BPT 5204', unit: 'kg', purchase_price: 45, selling_price: 70, supplier: 'Mahyco Seeds', gst_percent: 5, hsn_code: '100610', reorder_point: 40, reorder_quantity: 120, barcode: '890100000002', expiry_date: '2026-12-31', batch_number: 'PAD-APR-01', manufacturing_date: '2026-02-10' },
-    { code: 'SEED003', category: 'seeds', name: 'Chilli Seeds', variety: 'Teja', unit: 'packet', purchase_price: 110, selling_price: 160, supplier: 'Rasi Seeds Pvt Ltd', gst_percent: 5, hsn_code: '120991', reorder_point: 35, reorder_quantity: 70, barcode: '890100000003', expiry_date: '2026-07-15', batch_number: 'CHI-MAR-04', manufacturing_date: '2026-02-28' },
-    { code: 'FERT001', category: 'fertilizers', name: 'Urea', variety: 'Neem Coated', unit: 'bag', purchase_price: 300, selling_price: 380, supplier: 'IFFCO Agri Inputs', gst_percent: 5, hsn_code: '310210', reorder_point: 35, reorder_quantity: 100, barcode: '890100000004', expiry_date: '2026-04-22', batch_number: 'URE-FEB-02', manufacturing_date: '2026-01-12' },
-    { code: 'FERT002', category: 'fertilizers', name: 'DAP', variety: '18-46-0', unit: 'bag', purchase_price: 1250, selling_price: 1450, supplier: 'Tata Chemicals', gst_percent: 5, hsn_code: '310530', reorder_point: 20, reorder_quantity: 60, barcode: '890100000005', expiry_date: '2026-05-15', batch_number: 'DAP-JAN-03', manufacturing_date: '2026-01-05' },
-    { code: 'FERT003', category: 'fertilizers', name: 'Potash', variety: 'MOP 60%', unit: 'kg', purchase_price: 38, selling_price: 52, supplier: 'IFFCO Agri Inputs', gst_percent: 5, hsn_code: '310420', reorder_point: 30, reorder_quantity: 90, barcode: '890100000006', expiry_date: '2026-10-10', batch_number: 'POT-MAR-02', manufacturing_date: '2026-02-15' },
-    { code: 'PEST001', category: 'pesticides', name: 'Confidor Insecticide', variety: '100 ml', unit: 'bottles', purchase_price: 540, selling_price: 690, supplier: 'BioCrop Crop Science', gst_percent: 18, hsn_code: '380891', reorder_point: 12, reorder_quantity: 36, barcode: '890100000007', expiry_date: '2027-01-31', batch_number: 'PST-MAR-01', manufacturing_date: '2026-03-05' },
-    { code: 'PEST002', category: 'pesticides', name: 'Carbendazim Fungicide', variety: '500 g', unit: 'pieces', purchase_price: 260, selling_price: 340, supplier: 'BioCrop Crop Science', gst_percent: 18, hsn_code: '380892', reorder_point: 20, reorder_quantity: 60, barcode: '890100000008', expiry_date: '2027-02-28', batch_number: 'FUN-MAR-02', manufacturing_date: '2026-03-12' },
-    { code: 'TOOL001', category: 'tools', name: 'Battery Sprayer', variety: '16 L', unit: 'pieces', purchase_price: 1650, selling_price: 2100, supplier: 'Kisan Tools Depot', gst_percent: 18, hsn_code: '842441', reorder_point: 5, reorder_quantity: 12, barcode: '890100000009', expiry_date: null, batch_number: 'SPR-JAN-01', manufacturing_date: '2026-01-15' },
-    { code: 'TOOL002', category: 'tools', name: 'Pruning Shear', variety: 'Heavy Duty', unit: 'pieces', purchase_price: 180, selling_price: 260, supplier: 'Kisan Tools Depot', gst_percent: 18, hsn_code: '820150', reorder_point: 10, reorder_quantity: 24, barcode: '890100000010', expiry_date: null, batch_number: 'TOOL-FEB-03', manufacturing_date: '2026-02-01' }
+    { code: 'SEED001', category: 'seeds', name: 'Tomato Seeds', variety: 'Hybrid F1', unit: 'packet', purchase_price: 80, selling_price: 120, supplier: 'Rasi Seeds Pvt Ltd', gst_percent: 5, hsn_code: '120991', reorder_point: 25, reorder_quantity: 80, barcode: '890100000001', expiry_date: dateOnlyIST(shiftDays(now, 150)), batch_number: 'TOM-LIVE-01', manufacturing_date: dateOnlyIST(shiftDays(now, -35)) },
+    { code: 'SEED002', category: 'seeds', name: 'Paddy Seeds', variety: 'BPT 5204', unit: 'kg', purchase_price: 45, selling_price: 70, supplier: 'Mahyco Seeds', gst_percent: 5, hsn_code: '100610', reorder_point: 40, reorder_quantity: 120, barcode: '890100000002', expiry_date: dateOnlyIST(shiftDays(now, 220)), batch_number: 'PAD-LIVE-01', manufacturing_date: dateOnlyIST(shiftDays(now, -48)) },
+    { code: 'SEED003', category: 'seeds', name: 'Chilli Seeds', variety: 'Teja', unit: 'packet', purchase_price: 110, selling_price: 160, supplier: 'Rasi Seeds Pvt Ltd', gst_percent: 5, hsn_code: '120991', reorder_point: 35, reorder_quantity: 70, barcode: '890100000003', expiry_date: dateOnlyIST(shiftDays(now, 105)), batch_number: 'CHI-LIVE-04', manufacturing_date: dateOnlyIST(shiftDays(now, -42)) },
+    { code: 'FERT001', category: 'fertilizers', name: 'Urea', variety: 'Neem Coated', unit: 'bag', purchase_price: 300, selling_price: 380, supplier: 'IFFCO Agri Inputs', gst_percent: 5, hsn_code: '310210', reorder_point: 35, reorder_quantity: 100, barcode: '890100000004', expiry_date: dateOnlyIST(shiftDays(now, 18)), batch_number: 'URE-LIVE-02', manufacturing_date: dateOnlyIST(shiftDays(now, -70)) },
+    { code: 'FERT002', category: 'fertilizers', name: 'DAP', variety: '18-46-0', unit: 'bag', purchase_price: 1250, selling_price: 1450, supplier: 'Tata Chemicals', gst_percent: 5, hsn_code: '310530', reorder_point: 20, reorder_quantity: 60, barcode: '890100000005', expiry_date: dateOnlyIST(shiftDays(now, 45)), batch_number: 'DAP-LIVE-03', manufacturing_date: dateOnlyIST(shiftDays(now, -80)) },
+    { code: 'FERT003', category: 'fertilizers', name: 'Potash', variety: 'MOP 60%', unit: 'kg', purchase_price: 38, selling_price: 52, supplier: 'IFFCO Agri Inputs', gst_percent: 5, hsn_code: '310420', reorder_point: 30, reorder_quantity: 90, barcode: '890100000006', expiry_date: dateOnlyIST(shiftDays(now, 170)), batch_number: 'POT-LIVE-02', manufacturing_date: dateOnlyIST(shiftDays(now, -55)) },
+    { code: 'PEST001', category: 'pesticides', name: 'Confidor Insecticide', variety: '100 ml', unit: 'bottles', purchase_price: 540, selling_price: 690, supplier: 'BioCrop Crop Science', gst_percent: 18, hsn_code: '380891', reorder_point: 12, reorder_quantity: 36, barcode: '890100000007', expiry_date: dateOnlyIST(shiftDays(now, 300)), batch_number: 'PST-LIVE-01', manufacturing_date: dateOnlyIST(shiftDays(now, -28)) },
+    { code: 'PEST002', category: 'pesticides', name: 'Carbendazim Fungicide', variety: '500 g', unit: 'pieces', purchase_price: 260, selling_price: 340, supplier: 'BioCrop Crop Science', gst_percent: 18, hsn_code: '380892', reorder_point: 20, reorder_quantity: 60, barcode: '890100000008', expiry_date: dateOnlyIST(shiftDays(now, 330)), batch_number: 'FUN-LIVE-02', manufacturing_date: dateOnlyIST(shiftDays(now, -24)) },
+    { code: 'TOOL001', category: 'tools', name: 'Battery Sprayer', variety: '16 L', unit: 'pieces', purchase_price: 1650, selling_price: 2100, supplier: 'Kisan Tools Depot', gst_percent: 18, hsn_code: '842441', reorder_point: 5, reorder_quantity: 12, barcode: '890100000009', expiry_date: null, batch_number: 'SPR-LIVE-01', manufacturing_date: dateOnlyIST(shiftDays(now, -90)) },
+    { code: 'TOOL002', category: 'tools', name: 'Pruning Shear', variety: 'Heavy Duty', unit: 'pieces', purchase_price: 180, selling_price: 260, supplier: 'Kisan Tools Depot', gst_percent: 18, hsn_code: '820150', reorder_point: 10, reorder_quantity: 24, barcode: '890100000010', expiry_date: null, batch_number: 'TOOL-LIVE-03', manufacturing_date: dateOnlyIST(shiftDays(now, -64)) }
   ];
 
   const productIds = {};
@@ -243,6 +281,7 @@ async function seedScenarioData() {
       purchase_price: product.purchase_price,
       selling_price: product.selling_price,
       supplier: product.supplier,
+      supplier_id: supplierIds[product.supplier],
       gst_percent: product.gst_percent,
       hsn_code: product.hsn_code,
       reorder_point: product.reorder_point,
@@ -284,10 +323,10 @@ async function seedScenarioData() {
   }
 
   for (const promotion of [
-    { code: 'SEED003', promotional_price: 149, start_date: '2026-04-01', end_date: '2026-04-15', label: 'Chilli season promo', is_active: 1 },
-    { code: 'FERT002', promotional_price: 1395, start_date: '2026-04-03', end_date: '2026-04-10', label: 'April DAP promo', is_active: 1 },
-    { code: 'TOOL001', promotional_price: 1990, start_date: '2026-04-01', end_date: '2026-04-07', label: 'Sprayer launch offer', is_active: 1 },
-    { code: 'PEST002', promotional_price: 315, start_date: '2026-03-01', end_date: '2026-03-20', label: 'Pre-season fungicide promo', is_active: 1 }
+    { code: 'SEED003', promotional_price: 149, start_date: dateOnlyIST(shiftDays(now, -6)), end_date: dateOnlyIST(shiftDays(now, 8)), label: 'Chilli season promo', is_active: 1 },
+    { code: 'FERT002', promotional_price: 1395, start_date: dateOnlyIST(shiftDays(now, -4)), end_date: dateOnlyIST(shiftDays(now, 3)), label: 'April DAP promo', is_active: 1 },
+    { code: 'TOOL001', promotional_price: 1990, start_date: dateOnlyIST(shiftDays(now, -6)), end_date: dateOnlyIST(shiftDays(now, 1)), label: 'Sprayer launch offer', is_active: 1 },
+    { code: 'PEST002', promotional_price: 315, start_date: dateOnlyIST(shiftDays(now, -30)), end_date: dateOnlyIST(shiftDays(now, -10)), label: 'Pre-season fungicide promo', is_active: 1 }
   ]) {
     await insertRow('product_promotions', {
       product_id: productIds[promotion.code],
@@ -302,10 +341,10 @@ async function seedScenarioData() {
   }
 
   for (const specialPrice of [
-    { customerId: customers.lakshmi, code: 'FERT002', price_per_unit: 1375, start_date: '2026-04-01', end_date: '2026-04-30', notes: 'Contract farming price' },
-    { customerId: customers.greenValley, code: 'PEST001', price_per_unit: 625, start_date: '2026-04-01', end_date: '2026-04-20', notes: 'Dealer resale rate' },
-    { customerId: customers.sriDurga, code: 'SEED002', price_per_unit: 66, start_date: '2026-04-01', end_date: '2026-04-30', notes: 'Paddy season rate' },
-    { customerId: customers.venkata, code: 'TOOL002', price_per_unit: 225, start_date: '2026-04-01', end_date: null, notes: 'Loyalty hardware rate' }
+    { customerId: customers.lakshmi, code: 'FERT002', price_per_unit: 1375, start_date: dateOnlyIST(shiftDays(now, -6)), end_date: dateOnlyIST(shiftDays(now, 23)), notes: 'Contract farming price' },
+    { customerId: customers.greenValley, code: 'PEST001', price_per_unit: 625, start_date: dateOnlyIST(shiftDays(now, -6)), end_date: dateOnlyIST(shiftDays(now, 13)), notes: 'Dealer resale rate' },
+    { customerId: customers.sriDurga, code: 'SEED002', price_per_unit: 66, start_date: dateOnlyIST(shiftDays(now, -6)), end_date: dateOnlyIST(shiftDays(now, 23)), notes: 'Paddy season rate' },
+    { customerId: customers.venkata, code: 'TOOL002', price_per_unit: 225, start_date: dateOnlyIST(shiftDays(now, -6)), end_date: null, notes: 'Loyalty hardware rate' }
   ]) {
     await insertRow('customer_pricing', {
       customer_id: specialPrice.customerId,
@@ -320,26 +359,28 @@ async function seedScenarioData() {
   }
 
   const purchaseRows = [
-    { id: 'PUR-DEL-001', code: 'SEED001', quantity: 150, delivered: 150, price: 80, supplier: 'Rasi Seeds Pvt Ltd', status: 'delivered', date: formatIST(shiftDays(now, -25)), actor: admin.id },
-    { id: 'PUR-DEL-002', code: 'SEED002', quantity: 320, delivered: 320, price: 45, supplier: 'Mahyco Seeds', status: 'delivered', date: formatIST(shiftDays(now, -24)), actor: admin.id },
-    { id: 'PUR-DEL-003', code: 'SEED003', quantity: 35, delivered: 35, price: 110, supplier: 'Rasi Seeds Pvt Ltd', status: 'delivered', date: formatIST(shiftDays(now, -20)), actor: operator.id },
-    { id: 'PUR-DEL-004', code: 'FERT001', quantity: 180, delivered: 180, price: 300, supplier: 'IFFCO Agri Inputs', status: 'delivered', date: formatIST(shiftDays(now, -18)), actor: admin.id },
-    { id: 'PUR-DEL-005', code: 'FERT002', quantity: 20, delivered: 20, price: 1250, supplier: 'Tata Chemicals', status: 'delivered', date: formatIST(shiftDays(now, -16)), actor: admin.id },
-    { id: 'PUR-DEL-006', code: 'FERT003', quantity: 90, delivered: 90, price: 38, supplier: 'IFFCO Agri Inputs', status: 'delivered', date: formatIST(shiftDays(now, -15)), actor: operator.id },
-    { id: 'PUR-DEL-007', code: 'PEST001', quantity: 48, delivered: 48, price: 540, supplier: 'BioCrop Crop Science', status: 'delivered', date: formatIST(shiftDays(now, -14)), actor: admin.id },
-    { id: 'PUR-DEL-008', code: 'PEST002', quantity: 70, delivered: 70, price: 260, supplier: 'BioCrop Crop Science', status: 'delivered', date: formatIST(shiftDays(now, -13)), actor: operator.id },
-    { id: 'PUR-DEL-009', code: 'TOOL001', quantity: 18, delivered: 18, price: 1650, supplier: 'Kisan Tools Depot', status: 'delivered', date: formatIST(shiftDays(now, -12)), actor: admin.id },
-    { id: 'PUR-DEL-010', code: 'TOOL002', quantity: 60, delivered: 60, price: 180, supplier: 'Kisan Tools Depot', status: 'delivered', date: formatIST(shiftDays(now, -11)), actor: operator.id },
-    { id: 'PUR-PART-001', code: 'FERT001', quantity: 100, delivered: 40, price: 310, supplier: 'IFFCO Agri Inputs', status: 'ordered', date: formatIST(shiftDays(now, -8)), delivery_date: formatIST(shiftDays(now, -2)), advance_amount: 4000, actor: admin.id },
-    { id: 'PUR-ORD-001', code: 'FERT002', quantity: 40, delivered: 0, price: 1300, supplier: 'Tata Chemicals', status: 'ordered', date: formatIST(shiftDays(now, -5)), advance_amount: 5000, actor: operator.id },
-    { id: 'PUR-ORD-002', code: 'PEST001', quantity: 24, delivered: 0, price: 530, supplier: 'BioCrop Crop Science', status: 'ordered', date: formatIST(shiftDays(now, -4)), advance_amount: 2500, actor: operator.id },
-    { id: 'PUR-CAN-001', code: 'SEED001', quantity: 60, delivered: 0, price: 82, supplier: 'Rasi Seeds Pvt Ltd', status: 'cancelled', date: formatIST(shiftDays(now, -12)), advance_amount: 1200, actor: admin.id }
+    { key: 'seedDeliveredOne', id: buildPurchaseId(shiftDays(now, -25), 'D01'), code: 'SEED001', quantity: 150, delivered: 150, price: 80, supplier: 'Rasi Seeds Pvt Ltd', status: 'delivered', date: formatIST(shiftDays(now, -25)), actor: admin.id },
+    { key: 'seedDeliveredTwo', id: buildPurchaseId(shiftDays(now, -24), 'D02'), code: 'SEED002', quantity: 320, delivered: 320, price: 45, supplier: 'Mahyco Seeds', status: 'delivered', date: formatIST(shiftDays(now, -24)), actor: admin.id },
+    { key: 'seedDeliveredThree', id: buildPurchaseId(shiftDays(now, -20), 'D03'), code: 'SEED003', quantity: 35, delivered: 35, price: 110, supplier: 'Rasi Seeds Pvt Ltd', status: 'delivered', date: formatIST(shiftDays(now, -20)), actor: operator.id },
+    { key: 'fertDeliveredOne', id: buildPurchaseId(shiftDays(now, -18), 'D04'), code: 'FERT001', quantity: 180, delivered: 180, price: 300, supplier: 'IFFCO Agri Inputs', status: 'delivered', date: formatIST(shiftDays(now, -18)), actor: admin.id },
+    { key: 'fertDeliveredTwo', id: buildPurchaseId(shiftDays(now, -16), 'D05'), code: 'FERT002', quantity: 20, delivered: 20, price: 1250, supplier: 'Tata Chemicals', status: 'delivered', date: formatIST(shiftDays(now, -16)), actor: admin.id },
+    { key: 'fertDeliveredThree', id: buildPurchaseId(shiftDays(now, -15), 'D06'), code: 'FERT003', quantity: 90, delivered: 90, price: 38, supplier: 'IFFCO Agri Inputs', status: 'delivered', date: formatIST(shiftDays(now, -15)), actor: operator.id },
+    { key: 'pestDeliveredOne', id: buildPurchaseId(shiftDays(now, -14), 'D07'), code: 'PEST001', quantity: 48, delivered: 48, price: 540, supplier: 'BioCrop Crop Science', status: 'delivered', date: formatIST(shiftDays(now, -14)), actor: admin.id },
+    { key: 'pestDeliveredTwo', id: buildPurchaseId(shiftDays(now, -13), 'D08'), code: 'PEST002', quantity: 70, delivered: 70, price: 260, supplier: 'BioCrop Crop Science', status: 'delivered', date: formatIST(shiftDays(now, -13)), actor: operator.id },
+    { key: 'toolDeliveredOne', id: buildPurchaseId(shiftDays(now, -12), 'D09'), code: 'TOOL001', quantity: 18, delivered: 18, price: 1650, supplier: 'Kisan Tools Depot', status: 'delivered', date: formatIST(shiftDays(now, -12)), actor: admin.id },
+    { key: 'toolDeliveredTwo', id: buildPurchaseId(shiftDays(now, -11), 'D10'), code: 'TOOL002', quantity: 60, delivered: 60, price: 180, supplier: 'Kisan Tools Depot', status: 'delivered', date: formatIST(shiftDays(now, -11)), actor: operator.id },
+    { key: 'partialFertOrder', id: buildPurchaseId(shiftDays(now, -8), 'P01'), code: 'FERT001', quantity: 100, delivered: 40, price: 310, supplier: 'IFFCO Agri Inputs', status: 'ordered', date: formatIST(shiftDays(now, -8)), delivery_date: formatIST(shiftDays(now, -2)), advance_amount: 4000, actor: admin.id },
+    { key: 'pendingFertOrder', id: buildPurchaseId(shiftDays(now, -5), 'O01'), code: 'FERT002', quantity: 40, delivered: 0, price: 1300, supplier: 'Tata Chemicals', status: 'ordered', date: formatIST(shiftDays(now, -5)), advance_amount: 5000, actor: operator.id },
+    { key: 'pendingPestOrder', id: buildPurchaseId(shiftDays(now, -4), 'O02'), code: 'PEST001', quantity: 24, delivered: 0, price: 530, supplier: 'BioCrop Crop Science', status: 'ordered', date: formatIST(shiftDays(now, -4)), advance_amount: 2500, actor: operator.id },
+    { key: 'cancelledSeedOrder', id: buildPurchaseId(shiftDays(now, -12), 'C01'), code: 'SEED001', quantity: 60, delivered: 0, price: 82, supplier: 'Rasi Seeds Pvt Ltd', status: 'cancelled', date: formatIST(shiftDays(now, -12)), advance_amount: 1200, actor: admin.id }
   ];
 
+  const purchaseRowsByKey = Object.fromEntries(purchaseRows.map((purchase) => [purchase.key, purchase]));
+
   const supplierPaymentIds = {};
-  supplierPaymentIds.partial = await insertRow('supplier_payments', { supplier_name: 'IFFCO Agri Inputs', amount: 4000, payment_mode: 'bank', bank_account_id: bankAccountIds.ops, description: 'Advance payment for purchase PUR-PART-001', payment_date: dateOnlyIST(shiftDays(now, -8)), created_by: admin.id, created_at: formatIST(shiftDays(now, -8)) });
-  supplierPaymentIds.pending = await insertRow('supplier_payments', { supplier_name: 'Tata Chemicals', amount: 5000, payment_mode: 'bank', bank_account_id: bankAccountIds.main, description: 'Advance payment for purchase PUR-ORD-001', payment_date: dateOnlyIST(shiftDays(now, -5)), created_by: operator.id, created_at: formatIST(shiftDays(now, -5)) });
-  supplierPaymentIds.biocrop = await insertRow('supplier_payments', { supplier_name: 'BioCrop Crop Science', amount: 2500, payment_mode: 'bank', bank_account_id: bankAccountIds.main, description: 'Advance payment for purchase PUR-ORD-002', payment_date: dateOnlyIST(shiftDays(now, -4)), created_by: operator.id, created_at: formatIST(shiftDays(now, -4)) });
+  supplierPaymentIds.partial = await insertRow('supplier_payments', { supplier_name: 'IFFCO Agri Inputs', supplier_id: supplierIds['IFFCO Agri Inputs'], amount: 4000, payment_mode: 'bank', bank_account_id: bankAccountIds.ops, description: `Advance payment for purchase ${purchaseRowsByKey.partialFertOrder.id}`, payment_date: dateOnlyIST(shiftDays(now, -8)), created_by: admin.id, created_at: formatIST(shiftDays(now, -8)) });
+  supplierPaymentIds.pending = await insertRow('supplier_payments', { supplier_name: 'Tata Chemicals', supplier_id: supplierIds['Tata Chemicals'], amount: 5000, payment_mode: 'bank', bank_account_id: bankAccountIds.main, description: `Advance payment for purchase ${purchaseRowsByKey.pendingFertOrder.id}`, payment_date: dateOnlyIST(shiftDays(now, -5)), created_by: operator.id, created_at: formatIST(shiftDays(now, -5)) });
+  supplierPaymentIds.biocrop = await insertRow('supplier_payments', { supplier_name: 'BioCrop Crop Science', supplier_id: supplierIds['BioCrop Crop Science'], amount: 2500, payment_mode: 'bank', bank_account_id: bankAccountIds.main, description: `Advance payment for purchase ${purchaseRowsByKey.pendingPestOrder.id}`, payment_date: dateOnlyIST(shiftDays(now, -4)), created_by: operator.id, created_at: formatIST(shiftDays(now, -4)) });
 
   for (const paymentId of Object.values(supplierPaymentIds)) {
     const payment = await getRow('SELECT * FROM supplier_payments WHERE id = ?', [paymentId]);
@@ -366,16 +407,17 @@ async function seedScenarioData() {
       price_per_unit: purchase.price,
       total_amount: purchase.quantity * purchase.price,
       supplier: purchase.supplier,
+      supplier_id: supplierIds[purchase.supplier],
       purchase_date: purchase.date,
       delivery_date: purchase.delivery_date || (purchase.status === 'delivered' ? purchase.date : null),
       purchase_status: purchase.status,
       advance_amount: purchase.advance_amount || 0,
       quantity_delivered: purchase.delivered,
-      advance_payment_id: purchase.id === 'PUR-PART-001'
+      advance_payment_id: purchase.key === 'partialFertOrder'
         ? supplierPaymentIds.partial
-        : purchase.id === 'PUR-ORD-001'
+        : purchase.key === 'pendingFertOrder'
           ? supplierPaymentIds.pending
-          : purchase.id === 'PUR-ORD-002'
+          : purchase.key === 'pendingPestOrder'
             ? supplierPaymentIds.biocrop
             : null,
       added_by: purchase.actor,
@@ -388,9 +430,10 @@ async function seedScenarioData() {
 
   const saleRows = [
     {
-      saleId: 'SALE-20260404-001',
+      key: 'walkInCash',
+      saleId: buildSaleId(shiftDays(now, -1), '001'),
       date: formatIST(shiftDays(now, -1)),
-      receiptNumber: 'R-20260404-WALKIN-01',
+      receiptNumber: buildReceiptNumber(shiftDays(now, -1), 'Walk-in Farmer', '01'),
       customerName: 'Walk-in Farmer',
       customerMobile: '9000000001',
       customerAddress: 'Mandal Main Road',
@@ -405,9 +448,10 @@ async function seedScenarioData() {
       ]
     },
     {
-      saleId: 'SALE-20260403-002',
+      key: 'rameshUpi',
+      saleId: buildSaleId(shiftDays(now, -2), '002'),
       date: formatIST(shiftDays(now, -2)),
-      receiptNumber: 'R-20260403-RAMESH-02',
+      receiptNumber: buildReceiptNumber(shiftDays(now, -2), 'Ramesh Farms', '02'),
       customerName: 'Ramesh Farms',
       customerMobile: '9000000003',
       customerAddress: 'Village Tank Bund',
@@ -421,9 +465,10 @@ async function seedScenarioData() {
       ]
     },
     {
-      saleId: 'SALE-20260220-003',
+      key: 'lakshmiCredit',
+      saleId: buildSaleId(shiftDays(now, -45), '003'),
       date: formatIST(shiftDays(now, -45)),
-      receiptNumber: 'R-20260220-LAKSHMI-03',
+      receiptNumber: buildReceiptNumber(shiftDays(now, -45), 'Lakshmi Agro Services', '03'),
       customerName: 'Lakshmi Agro Services',
       customerMobile: '9000000002',
       customerAddress: 'Market Yard, Khammam',
@@ -438,9 +483,10 @@ async function seedScenarioData() {
       ]
     },
     {
-      saleId: 'SALE-20260405-004',
+      key: 'greenValleyBank',
+      saleId: buildSaleId(shiftDays(now, 0), '004'),
       date: formatIST(shiftDays(now, 0)),
-      receiptNumber: 'R-20260405-GREEN-04',
+      receiptNumber: buildReceiptNumber(shiftDays(now, 0), 'Green Valley Traders', '04'),
       customerName: 'Green Valley Traders',
       customerMobile: '9000000004',
       customerAddress: 'RTC Cross Road',
@@ -455,9 +501,10 @@ async function seedScenarioData() {
       ]
     },
     {
-      saleId: 'SALE-20260401-005',
+      key: 'durgaCash',
+      saleId: buildSaleId(shiftDays(now, -4), '005'),
       date: formatIST(shiftDays(now, -4)),
-      receiptNumber: 'R-20260401-DURGA-05',
+      receiptNumber: buildReceiptNumber(shiftDays(now, -4), 'Sri Durga Farms', '05'),
       customerName: 'Sri Durga Farms',
       customerMobile: '9000000005',
       customerAddress: 'Narasaraopet Rural',
@@ -472,6 +519,8 @@ async function seedScenarioData() {
       ]
     }
   ];
+
+  const saleRowsByKey = Object.fromEntries(saleRows.map((sale) => [sale.key, sale]));
 
   const saleMeta = {};
   for (const sale of saleRows) {
@@ -509,7 +558,7 @@ async function seedScenarioData() {
       payment_status: sale.paymentStatus,
       customer_id: sale.customerId,
       receipt_date: sale.date,
-      printed: sale.saleId === 'SALE-20260404-001' ? 1 : 0,
+      printed: sale.key === 'walkInCash' ? 1 : 0,
       created_at: sale.date
     });
 
@@ -544,7 +593,7 @@ async function seedScenarioData() {
       });
     }
 
-    saleMeta[sale.saleId] = { receiptId, total: receiptTotal };
+    saleMeta[sale.key] = { saleId: sale.saleId, receiptId, total: receiptTotal };
   }
 
   await insertRow('customer_payments', {
@@ -552,7 +601,7 @@ async function seedScenarioData() {
     amount: 2500,
     payment_mode: 'bank',
     bank_account_id: bankAccountIds.main,
-    reference_note: 'Part payment against February credit sale',
+    reference_note: 'Part payment against prior credit sale',
     payment_date: formatIST(shiftDays(now, -10)),
     collected_by: admin.id,
     created_at: formatIST(shiftDays(now, -10))
@@ -571,11 +620,11 @@ async function seedScenarioData() {
   });
 
   const returnRows = [
-    { returnId: 'RET-20260404-001', saleId: 'SALE-20260403-002', code: 'SEED002', quantity: 2, price: 70, refund: 147, mode: 'bank', bankAccountId: bankAccountIds.upi, reason: 'Damaged packets returned by customer', returnedBy: operator.id, date: formatIST(shiftDays(now, -1)) },
-    { returnId: 'RET-20260330-002', saleId: 'SALE-20260220-003', code: 'FERT002', quantity: 1, price: 1450, refund: 1522.5, mode: 'credit', bankAccountId: null, reason: 'Customer returned one damaged bag', returnedBy: admin.id, date: formatIST(shiftDays(now, -6)) }
+    { returnId: buildReturnId(shiftDays(now, -1), '001'), saleId: saleRowsByKey.rameshUpi.saleId, code: 'SEED002', quantity: 2, price: 70, refund: 147, mode: 'bank', bankAccountId: bankAccountIds.upi, reason: 'Damaged packets returned by customer', returnedBy: operator.id, date: formatIST(shiftDays(now, -1)) },
+    { returnId: buildReturnId(shiftDays(now, -6), '002'), saleId: saleRowsByKey.lakshmiCredit.saleId, code: 'FERT002', quantity: 1, price: 1450, refund: 1522.5, mode: 'credit', bankAccountId: null, reason: 'Customer returned one damaged bag', returnedBy: admin.id, date: formatIST(shiftDays(now, -6)) }
   ];
 
-  let lakshmiOutstanding = saleMeta['SALE-20260220-003'].total - 2500;
+  let lakshmiOutstanding = saleMeta.lakshmiCredit.total - 2500;
   for (const salesReturn of returnRows) {
     await insertRow('sales_returns', {
       return_id: salesReturn.returnId,
@@ -609,7 +658,7 @@ async function seedScenarioData() {
       });
     }
 
-    if (salesReturn.saleId === 'SALE-20260220-003' && salesReturn.mode === 'credit') {
+    if (salesReturn.saleId === saleRowsByKey.lakshmiCredit.saleId && salesReturn.mode === 'credit') {
       lakshmiOutstanding -= salesReturn.refund;
     }
   }
@@ -638,11 +687,11 @@ async function seedScenarioData() {
   await updateRow('customers', { outstanding_balance: Number(lakshmiOutstanding.toFixed(2)) }, 'id = ?', [customers.lakshmi]);
 
   const quotationIds = {};
-  quotationIds.draft = await insertRow('quotations', { quotation_number: 'Q-20260402-A1', customer_id: customers.greenValley, customer_name: 'Green Valley Traders', customer_mobile: '9000000004', customer_address: 'RTC Cross Road', total_amount: 3020, discount_amount: 0, tax_amount: 151, net_amount: 3171, status: 'draft', valid_until: '2026-04-16', notes: 'Initial quotation for vegetable seed and fertilizer combo', created_by: admin.id, created_at: formatIST(shiftDays(now, -3)), updated_at: formatIST(shiftDays(now, -3)) });
-  quotationIds.sent = await insertRow('quotations', { quotation_number: 'Q-20260329-B2', customer_id: customers.lakshmi, customer_name: 'Lakshmi Agro Services', customer_mobile: '9000000002', customer_address: 'Market Yard, Khammam', total_amount: 6875, discount_amount: 0, tax_amount: 343.75, net_amount: 7218.75, status: 'sent', valid_until: '2026-04-12', notes: 'Sent and awaiting response', created_by: operator.id, created_at: formatIST(shiftDays(now, -7)), updated_at: formatIST(shiftDays(now, -6)) });
-  quotationIds.converted = await insertRow('quotations', { quotation_number: 'Q-20260218-C3', customer_id: customers.lakshmi, customer_name: 'Lakshmi Agro Services', customer_mobile: '9000000002', customer_address: 'Market Yard, Khammam', total_amount: 8080, discount_amount: 0, tax_amount: 404, net_amount: saleMeta['SALE-20260220-003'].total, status: 'converted', valid_until: '2026-03-05', notes: 'Converted to sale', converted_sale_id: 'SALE-20260220-003', created_by: admin.id, created_at: formatIST(shiftDays(now, -47)), updated_at: formatIST(shiftDays(now, -45)) });
-  quotationIds.accepted = await insertRow('quotations', { quotation_number: 'Q-20260401-D4', customer_id: customers.greenValley, customer_name: 'Green Valley Traders', customer_mobile: '9000000004', customer_address: 'RTC Cross Road', total_amount: 5740, discount_amount: 0, tax_amount: 1033.2, net_amount: 6773.2, status: 'accepted', valid_until: '2026-04-18', notes: 'Accepted and scheduled for pickup', created_by: admin.id, created_at: formatIST(shiftDays(now, -4)), updated_at: formatIST(shiftDays(now, -2)) });
-  quotationIds.expired = await insertRow('quotations', { quotation_number: 'Q-20260320-E5', customer_id: customers.venkata, customer_name: 'Venkata Rythu Seva', customer_mobile: '9000000006', customer_address: 'Sattenapalli Main Road', total_amount: 2820, discount_amount: 0, tax_amount: 507.6, net_amount: 3327.6, status: 'expired', valid_until: '2026-03-27', notes: 'Expired seasonal tools offer', created_by: operator.id, created_at: formatIST(shiftDays(now, -16)), updated_at: formatIST(shiftDays(now, -8)) });
+  quotationIds.draft = await insertRow('quotations', { quotation_number: buildQuotationNumber(shiftDays(now, -3), 'A1'), customer_id: customers.greenValley, customer_name: 'Green Valley Traders', customer_mobile: '9000000004', customer_address: 'RTC Cross Road', total_amount: 3020, discount_amount: 0, tax_amount: 151, net_amount: 3171, status: 'draft', valid_until: dateOnlyIST(shiftDays(now, 9)), notes: 'Initial quotation for vegetable seed and fertilizer combo', created_by: admin.id, created_at: formatIST(shiftDays(now, -3)), updated_at: formatIST(shiftDays(now, -3)) });
+  quotationIds.sent = await insertRow('quotations', { quotation_number: buildQuotationNumber(shiftDays(now, -7), 'B2'), customer_id: customers.lakshmi, customer_name: 'Lakshmi Agro Services', customer_mobile: '9000000002', customer_address: 'Market Yard, Khammam', total_amount: 6875, discount_amount: 0, tax_amount: 343.75, net_amount: 7218.75, status: 'sent', valid_until: dateOnlyIST(shiftDays(now, 5)), notes: 'Sent and awaiting response', created_by: operator.id, created_at: formatIST(shiftDays(now, -7)), updated_at: formatIST(shiftDays(now, -6)) });
+  quotationIds.converted = await insertRow('quotations', { quotation_number: buildQuotationNumber(shiftDays(now, -47), 'C3'), customer_id: customers.lakshmi, customer_name: 'Lakshmi Agro Services', customer_mobile: '9000000002', customer_address: 'Market Yard, Khammam', total_amount: 8080, discount_amount: 0, tax_amount: 404, net_amount: saleMeta.lakshmiCredit.total, status: 'converted', valid_until: dateOnlyIST(shiftDays(now, -32)), notes: 'Converted to sale', converted_sale_id: saleRowsByKey.lakshmiCredit.saleId, created_by: admin.id, created_at: formatIST(shiftDays(now, -47)), updated_at: formatIST(shiftDays(now, -45)) });
+  quotationIds.accepted = await insertRow('quotations', { quotation_number: buildQuotationNumber(shiftDays(now, -4), 'D4'), customer_id: customers.greenValley, customer_name: 'Green Valley Traders', customer_mobile: '9000000004', customer_address: 'RTC Cross Road', total_amount: 5740, discount_amount: 0, tax_amount: 1033.2, net_amount: 6773.2, status: 'accepted', valid_until: dateOnlyIST(shiftDays(now, 11)), notes: 'Accepted and scheduled for pickup', created_by: admin.id, created_at: formatIST(shiftDays(now, -4)), updated_at: formatIST(shiftDays(now, -2)) });
+  quotationIds.expired = await insertRow('quotations', { quotation_number: buildQuotationNumber(shiftDays(now, -16), 'E5'), customer_id: customers.venkata, customer_name: 'Venkata Rythu Seva', customer_mobile: '9000000006', customer_address: 'Sattenapalli Main Road', total_amount: 2820, discount_amount: 0, tax_amount: 507.6, net_amount: 3327.6, status: 'expired', valid_until: dateOnlyIST(shiftDays(now, -9)), notes: 'Expired seasonal tools offer', created_by: operator.id, created_at: formatIST(shiftDays(now, -16)), updated_at: formatIST(shiftDays(now, -8)) });
 
   const quotationItems = [
     { quotationId: quotationIds.draft, code: 'SEED001', quantity: 10, price: 112, discount: 0, tax: 5, total: 1176, pricingRuleType: 'tier', pricingRuleLabel: 'Bulk farmer price (10+)' },
@@ -733,8 +782,8 @@ async function seedScenarioData() {
   await insertRow('notifications', { actor_id: operator.id, actor_name: 'operator', actor_role: 'operator', type: 'sale', title: 'Sales return processed', description: 'Customer returned part of a UPI sale and a refund was posted to the bank.', is_read: 1, created_at: formatIST(shiftDays(now, -1)) });
   await insertRow('notifications', { actor_id: admin.id, actor_name: 'admin', actor_role: 'admin', type: 'pricing', title: 'Customer pricing active for Green Valley', description: 'Dealer pricing is active for Confidor insecticide through 20 April.', is_read: 0, created_at: formatIST(shiftDays(now, 0)) });
 
-  await insertRow('audit_log', { user_id: admin.id, username: 'admin', action: 'create', entity_type: 'sale', entity_id: 'SALE-20260220-003', details: JSON.stringify({ total: saleMeta['SALE-20260220-003'].total, payment_mode: 'credit' }), ip: '127.0.0.1', created_at: formatIST(shiftDays(now, -45)) });
-  await insertRow('audit_log', { user_id: operator.id, username: 'operator', action: 'partial_delivery', entity_type: 'purchase', entity_id: 'PUR-PART-001', details: JSON.stringify({ quantity_delivered: 40, remaining: 60 }), ip: '127.0.0.1', created_at: formatIST(shiftDays(now, -2)) });
+  await insertRow('audit_log', { user_id: admin.id, username: 'admin', action: 'create', entity_type: 'sale', entity_id: saleRowsByKey.lakshmiCredit.saleId, details: JSON.stringify({ total: saleMeta.lakshmiCredit.total, payment_mode: 'credit' }), ip: '127.0.0.1', created_at: formatIST(shiftDays(now, -45)) });
+  await insertRow('audit_log', { user_id: operator.id, username: 'operator', action: 'partial_delivery', entity_type: 'purchase', entity_id: purchaseRowsByKey.partialFertOrder.id, details: JSON.stringify({ quantity_delivered: 40, remaining: 60 }), ip: '127.0.0.1', created_at: formatIST(shiftDays(now, -2)) });
   await insertRow('audit_log', { user_id: admin.id, username: 'admin', action: 'stock_adjustment', entity_type: 'product', entity_id: 'FERT003', details: JSON.stringify({ before: 85, after: 88, reason: 'Physical count found extra stock' }), ip: '127.0.0.1', created_at: formatIST(shiftDays(now, -2)) });
   await insertRow('audit_log', { user_id: admin.id, username: 'admin', action: 'pricing_update', entity_type: 'product', entity_id: 'PEST001', details: JSON.stringify({ customer: 'Green Valley Traders', price_per_unit: 625 }), ip: '127.0.0.1', created_at: formatIST(shiftDays(now, -4)) });
 

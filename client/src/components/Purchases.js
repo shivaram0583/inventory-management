@@ -8,6 +8,14 @@ import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
 import { fmtDateTime, getISTDateString } from '../utils/dateUtils';
 import {
+  buildProductCreationPayload,
+  getEmptyProductCreationForm,
+  GST_OPTIONS,
+  PRODUCT_CREATION_MODE,
+  UNIT_OPTIONS,
+  validateProductCreationForm
+} from '../utils/productCreation';
+import {
   Truck,
   Plus,
   Search,
@@ -26,27 +34,10 @@ import {
   Clock3
 } from 'lucide-react';
 
-const UNIT_OPTIONS = [
-  { value: 'kg', label: 'kg' },
-  { value: 'grams', label: 'grams' },
-  { value: 'packet', label: 'packet' },
-  { value: 'bag', label: 'bag' },
-  { value: 'liters', label: 'liters' },
-  { value: 'ml', label: 'ml' },
-  { value: 'pieces', label: 'pieces' },
-  { value: 'bottles', label: 'bottles' },
-  { value: 'tonnes', label: 'tonnes' }
-];
-
 const PURCHASE_STATUS = {
   ORDERED: 'ordered',
   DELIVERED: 'delivered',
   CANCELLED: 'cancelled'
-};
-
-const PRODUCT_CREATION_MODE = {
-  INVENTORY: 'inventory',
-  ORDER: 'order'
 };
 
 const num = (value) => {
@@ -91,23 +82,6 @@ const getPurchaseStatusMeta = (status, productDeleted) => {
   };
 };
 
-const getEmptyNewProductForm = () => ({
-  product_id: '',
-  category: '',
-  product_name: '',
-  variety: '',
-  quantity_available: '0',
-  unit: 'kg',
-  purchase_price: '',
-  selling_price: '',
-  supplier: '',
-  creation_mode: PRODUCT_CREATION_MODE.INVENTORY,
-  order_quantity: '',
-  order_date: getISTDateString(),
-  advance_amount: '',
-  bank_account_id: ''
-});
-
 const Purchases = () => {
   const { user, dailySetupStatus } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -149,7 +123,7 @@ const Purchases = () => {
   const [partialSubmitting, setPartialSubmitting] = useState(false);
 
   const [showNewProductModal, setShowNewProductModal] = useState(false);
-  const [newProductForm, setNewProductForm] = useState(getEmptyNewProductForm());
+  const [newProductForm, setNewProductForm] = useState(getEmptyProductCreationForm());
   const [newProductSubmitting, setNewProductSubmitting] = useState(false);
 
   const [suppliers, setSuppliers] = useState([]);
@@ -194,6 +168,27 @@ const Purchases = () => {
     setFormAdvanceAmount('');
     setProductSearch('');
   }, []);
+
+  const getPreferredBankAccountId = () => String(dailySetupStatus?.selectedBankAccountId || bankAccounts[0]?.id || '');
+
+  const createNewProductForm = (defaultCategory = categories[0]?.name || '') => getEmptyProductCreationForm({
+    defaultCategory,
+    defaultBankAccountId: getPreferredBankAccountId()
+  });
+
+  const openNewProductModal = () => {
+    const defaultCategory = categories[0]?.name || '';
+    setNewProductForm(createNewProductForm(defaultCategory));
+    if (defaultCategory) {
+      fetchNextProductId(defaultCategory);
+    }
+    setShowNewProductModal(true);
+  };
+
+  const closeNewProductModal = () => {
+    setShowNewProductModal(false);
+    setNewProductForm(createNewProductForm());
+  };
 
   const fetchNextProductId = async (category) => {
     if (!category) return;
@@ -466,51 +461,18 @@ const Purchases = () => {
   const handleCreateProduct = async (event) => {
     event.preventDefault();
     const creationMode = newProductForm.creation_mode || PRODUCT_CREATION_MODE.INVENTORY;
-    const newProductPurchasePrice = num(newProductForm.purchase_price);
-    const newProductOrderQty = num(newProductForm.order_quantity);
-    const newProductAdvance = num(newProductForm.advance_amount);
-
-    if (creationMode === PRODUCT_CREATION_MODE.INVENTORY && num(newProductForm.quantity_available) <= 0) {
-      setError('Enter opening stock when adding the new product directly to inventory');
-      return;
-    }
-
-    if (creationMode === PRODUCT_CREATION_MODE.ORDER && newProductOrderQty <= 0) {
-      setError('Enter the order quantity for the new product');
-      return;
-    }
-
-    if (creationMode === PRODUCT_CREATION_MODE.ORDER && newProductAdvance > (newProductOrderQty * newProductPurchasePrice)) {
-      setError('Advance amount cannot be more than the total order amount');
-      return;
-    }
-
-    if (creationMode === PRODUCT_CREATION_MODE.ORDER && newProductAdvance > 0 && !newProductForm.supplier.trim()) {
-      setError('Supplier is required when recording an advance payment');
-      return;
-    }
-
-    if (creationMode === PRODUCT_CREATION_MODE.ORDER && newProductAdvance > 0 && !newProductForm.bank_account_id) {
-      setError('Select a bank account for the advance payment');
+    const validationMessage = validateProductCreationForm(newProductForm);
+    if (validationMessage) {
+      setError(validationMessage);
       return;
     }
 
     setNewProductSubmitting(true);
     setError('');
     try {
-      const res = await axios.post('/api/inventory', {
-        ...newProductForm,
-        quantity_available: creationMode === PRODUCT_CREATION_MODE.ORDER ? 0 : num(newProductForm.quantity_available),
-        purchase_price: newProductPurchasePrice,
-        selling_price: num(newProductForm.selling_price),
-        order_quantity: creationMode === PRODUCT_CREATION_MODE.ORDER ? newProductOrderQty : undefined,
-        advance_amount: creationMode === PRODUCT_CREATION_MODE.ORDER ? newProductAdvance : undefined,
-        bank_account_id: creationMode === PRODUCT_CREATION_MODE.ORDER && newProductAdvance > 0
-          ? Number(newProductForm.bank_account_id)
-          : undefined
-      });
-      setShowNewProductModal(false);
-      setNewProductForm(getEmptyNewProductForm());
+      const payload = buildProductCreationPayload(newProductForm);
+      const res = await axios.post('/api/inventory', payload);
+      closeNewProductModal();
       await fetchAll();
       if (res.data?.id && creationMode === PRODUCT_CREATION_MODE.INVENTORY) {
         setFormProductId(String(res.data.id));
@@ -674,8 +636,7 @@ const Purchases = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setNewProductForm(getEmptyNewProductForm());
-                  setShowNewProductModal(true);
+                    openNewProductModal();
                 }}
                 className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm hover:shadow-md active:scale-95 transition-all duration-150"
                 style={{ background: 'linear-gradient(135deg,#059669,#10b981)' }}
@@ -759,8 +720,7 @@ const Purchases = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      setNewProductForm(getEmptyNewProductForm());
-                      setShowNewProductModal(true);
+                      openNewProductModal();
                     }}
                     className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm active:scale-95 transition-all"
                     style={{ background: 'linear-gradient(135deg,#059669,#10b981)' }}
@@ -1727,7 +1687,7 @@ const Purchases = () => {
 
       {showNewProductModal && renderPortalModal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col animate-scale-in border border-indigo-100/80 overflow-hidden" style={{ maxHeight: '85vh' }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col animate-scale-in border border-indigo-100/80 overflow-hidden" style={{ maxHeight: '85vh' }}>
             <div className="px-6 py-4 border-b border-indigo-100 flex-shrink-0" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
               <div className="flex items-center gap-3">
                 <span className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow">
@@ -1736,7 +1696,7 @@ const Purchases = () => {
                 <div>
                   <h3 className="text-base font-bold text-gray-900">Create New Product</h3>
                 </div>
-                <button onClick={() => setShowNewProductModal(false)} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-indigo-300 hover:text-indigo-700 hover:bg-white/80 transition-all">
+                <button onClick={closeNewProductModal} className="ml-auto h-9 w-9 rounded-2xl flex items-center justify-center text-indigo-300 hover:text-indigo-700 hover:bg-white/80 transition-all">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1802,12 +1762,13 @@ const Purchases = () => {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      {newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'Opening Stock' : 'Quantity To Add'}
+                      {newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'Opening Stock' : 'Quantity'}
                     </label>
                     <input
                       type="number"
                       min="0"
                       step="1"
+                      required={newProductForm.creation_mode === PRODUCT_CREATION_MODE.INVENTORY}
                       className={`input-field !text-sm !rounded-2xl ${newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
                       value={newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? '0' : newProductForm.quantity_available}
                       onChange={(e) => setNewProductForm((current) => ({ ...current, quantity_available: e.target.value }))}
@@ -1836,6 +1797,92 @@ const Purchases = () => {
                     value={newProductForm.supplier}
                     onChange={(e) => setNewProductForm((current) => ({ ...current, supplier: e.target.value }))}
                   />
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">GST %</label>
+                    <CustomSelect
+                      options={GST_OPTIONS}
+                      value={newProductForm.gst_percent}
+                      onChange={(value) => setNewProductForm((current) => ({ ...current, gst_percent: value }))}
+                      placeholder="GST Rate"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">HSN Code</label>
+                    <input
+                      type="text"
+                      className="input-field !text-sm !rounded-2xl"
+                      placeholder="e.g. 31052000"
+                      value={newProductForm.hsn_code}
+                      onChange={(e) => setNewProductForm((current) => ({ ...current, hsn_code: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Barcode</label>
+                    <input
+                      type="text"
+                      className="input-field !text-sm !rounded-2xl"
+                      placeholder="Optional"
+                      value={newProductForm.barcode}
+                      onChange={(e) => setNewProductForm((current) => ({ ...current, barcode: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Reorder Point</label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="input-field !text-sm !rounded-2xl"
+                      value={newProductForm.reorder_point}
+                      onChange={(e) => setNewProductForm((current) => ({ ...current, reorder_point: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Reorder Qty</label>
+                    <input
+                      type="number"
+                      min="0"
+                      className="input-field !text-sm !rounded-2xl"
+                      value={newProductForm.reorder_quantity}
+                      onChange={(e) => setNewProductForm((current) => ({ ...current, reorder_quantity: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Expiry Date</label>
+                    <input
+                      type="date"
+                      className="input-field !text-sm !rounded-2xl"
+                      value={newProductForm.expiry_date}
+                      onChange={(e) => setNewProductForm((current) => ({ ...current, expiry_date: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Batch / Lot Number</label>
+                    <input
+                      type="text"
+                      className="input-field !text-sm !rounded-2xl"
+                      placeholder="e.g. BATCH-2024-001"
+                      value={newProductForm.batch_number}
+                      onChange={(e) => setNewProductForm((current) => ({ ...current, batch_number: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Manufacturing Date</label>
+                    <input
+                      type="date"
+                      className="input-field !text-sm !rounded-2xl"
+                      value={newProductForm.manufacturing_date}
+                      onChange={(e) => setNewProductForm((current) => ({ ...current, manufacturing_date: e.target.value }))}
+                    />
+                  </div>
                 </div>
 
                 {newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER && (
@@ -1896,24 +1943,24 @@ const Purchases = () => {
                     </div>
 
                     <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-700">
-                      This will create the product with zero on-hand stock and immediately create a pending purchase order for it.
+                      This will create the product with zero stock and record a pending purchase order for it.
                     </div>
                   </>
                 )}
 
                 {newProductForm.creation_mode === PRODUCT_CREATION_MODE.INVENTORY && (
                   <div className="rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-700">
-                    This will create the product and add the entered quantity directly into inventory right away.
+                    This will create the product and add the entered quantity directly into inventory now.
                   </div>
                 )}
               </div>
 
               <div className="px-6 py-4 border-t border-indigo-100 flex gap-3 flex-shrink-0" style={{ background: 'linear-gradient(90deg,#f8faff,#f5f3ff)' }}>
-                <button type="button" onClick={() => setShowNewProductModal(false)} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                <button type="button" onClick={closeNewProductModal} className="flex-1 py-2.5 rounded-2xl font-semibold text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
                   Cancel
                 </button>
                 <button type="submit" disabled={newProductSubmitting} className="flex-1 py-2.5 rounded-2xl font-bold text-sm text-white shadow-lg hover:shadow-xl active:scale-95 transition-all disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>
-                  {newProductSubmitting ? 'Creating...' : newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'Create Product & Order' : 'Create Product & Add Stock'}
+                  {newProductSubmitting ? 'Creating...' : newProductForm.creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'Create Product & Order' : 'Add Product To Inventory'}
                 </button>
               </div>
             </form>

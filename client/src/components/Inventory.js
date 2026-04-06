@@ -7,6 +7,15 @@ import CustomSelect from './shared/CustomSelect';
 import InventoryFlowPanel from './InventoryFlowPanel';
 import useSortableData from '../hooks/useSortableData';
 import SortableHeader from './shared/SortableHeader';
+import { getISTDateString } from '../utils/dateUtils';
+import {
+  buildProductCreationPayload,
+  getEmptyProductCreationForm,
+  GST_OPTIONS,
+  PRODUCT_CREATION_MODE,
+  UNIT_OPTIONS,
+  validateProductCreationForm
+} from '../utils/productCreation';
 import {
   Package,
   Plus,
@@ -19,29 +28,10 @@ import {
   X
 } from 'lucide-react';
 
-const UNIT_OPTIONS = [
-  { value: 'kg', label: 'kg' },
-  { value: 'grams', label: 'grams' },
-  { value: 'packet', label: 'packet' },
-  { value: 'bag', label: 'bag' },
-  { value: 'liters', label: 'liters' },
-  { value: 'ml', label: 'ml' },
-  { value: 'pieces', label: 'pieces' },
-  { value: 'bottles', label: 'bottles' },
-  { value: 'tonnes', label: 'tonnes' },
-];
-
-const PRODUCT_CREATION_MODE = {
-  INVENTORY: 'inventory',
-  ORDER: 'order'
-};
-
 const PURCHASE_STATUS = {
   ORDERED: 'ordered',
   DELIVERED: 'delivered'
 };
-
-const getCurrentISTDate = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 const num = (value) => {
   const parsed = Number(value);
@@ -53,42 +43,13 @@ const fmtMoney = (value) => `₹${num(value).toLocaleString('en-IN', {
   maximumFractionDigits: 2
 })}`;
 
-const GST_OPTIONS = [
-  { value: '0', label: '0%' },
-  { value: '5', label: '5%' },
-  { value: '12', label: '12%' },
-  { value: '18', label: '18%' },
-  { value: '28', label: '28%' },
-];
-
 const getEmptyFormData = (defaultCategory = 'seeds') => ({
-  product_id: '',
-  category: defaultCategory,
-  product_name: '',
-  variety: '',
-  quantity_available: '',
-  unit: 'kg',
-  purchase_price: '',
-  selling_price: '',
-  supplier: '',
-  gst_percent: '0',
-  hsn_code: '',
-  reorder_point: '10',
-  reorder_quantity: '',
-  barcode: '',
-  expiry_date: '',
-  batch_number: '',
-  manufacturing_date: '',
-  creation_mode: PRODUCT_CREATION_MODE.INVENTORY,
-  order_quantity: '',
-  order_date: getCurrentISTDate(),
-  advance_amount: '',
-  bank_account_id: '',
+  ...getEmptyProductCreationForm({ defaultCategory }),
   addStock: '',
   addStockMode: PURCHASE_STATUS.DELIVERED,
   addStockPricePerUnit: '',
   addStockSupplier: '',
-  addStockDate: getCurrentISTDate(),
+  addStockDate: getISTDateString(),
   addStockAdvanceAmount: '',
   addStockBankAccountId: ''
 });
@@ -180,68 +141,23 @@ const Inventory = () => {
   const handleAddProduct = async (e) => {
     e.preventDefault();
     const { product_name, product_id, creation_mode } = formData;
-    const inventoryQuantity = num(formData.quantity_available);
-    const orderQuantity = num(formData.order_quantity);
-    const advanceAmount = num(formData.advance_amount);
-    const purchasePrice = num(formData.purchase_price);
-
-    if (creation_mode === PRODUCT_CREATION_MODE.INVENTORY && inventoryQuantity <= 0) {
-      setError('Enter stock quantity when adding the new product directly to inventory');
-      showActionModal('Add Product Failed', 'Enter stock quantity when adding the new product directly to inventory', 'error');
-      return;
-    }
-
-    if (creation_mode === PRODUCT_CREATION_MODE.ORDER && orderQuantity <= 0) {
-      setError('Enter order quantity when creating a pending order');
-      showActionModal('Add Product Failed', 'Enter order quantity when creating a pending order', 'error');
-      return;
-    }
-
-    if (creation_mode === PRODUCT_CREATION_MODE.ORDER && advanceAmount > (orderQuantity * purchasePrice)) {
-      setError('Advance amount cannot be more than the total order amount');
-      showActionModal('Add Product Failed', 'Advance amount cannot be more than the total order amount', 'error');
-      return;
-    }
-
-    if (creation_mode === PRODUCT_CREATION_MODE.ORDER && advanceAmount > 0 && !String(formData.supplier || '').trim()) {
-      setError('Supplier is required when paying an advance amount');
-      showActionModal('Add Product Failed', 'Supplier is required when paying an advance amount', 'error');
-      return;
-    }
-
-    if (creation_mode === PRODUCT_CREATION_MODE.ORDER && advanceAmount > 0 && !formData.bank_account_id) {
-      setError('Select a bank account for the advance payment');
-      showActionModal('Add Product Failed', 'Select a bank account for the advance payment', 'error');
+    const validationMessage = validateProductCreationForm(formData);
+    if (validationMessage) {
+      setError(validationMessage);
+      showActionModal('Add Product Failed', validationMessage, 'error');
       return;
     }
 
     try {
-      await axios.post('/api/inventory', {
-        ...formData,
-        quantity_available: creation_mode === PRODUCT_CREATION_MODE.ORDER ? 0 : inventoryQuantity,
-        purchase_price: purchasePrice,
-        selling_price: num(formData.selling_price),
-        gst_percent: num(formData.gst_percent),
-        hsn_code: formData.hsn_code || undefined,
-        reorder_point: num(formData.reorder_point) || 10,
-        reorder_quantity: num(formData.reorder_quantity) || 0,
-        barcode: formData.barcode || undefined,
-        expiry_date: formData.expiry_date || undefined,
-        batch_number: formData.batch_number || undefined,
-        manufacturing_date: formData.manufacturing_date || undefined,
-        order_quantity: creation_mode === PRODUCT_CREATION_MODE.ORDER ? orderQuantity : undefined,
-        advance_amount: creation_mode === PRODUCT_CREATION_MODE.ORDER ? advanceAmount : undefined,
-        bank_account_id: creation_mode === PRODUCT_CREATION_MODE.ORDER && advanceAmount > 0
-          ? Number(formData.bank_account_id)
-          : undefined
-      });
+      const payload = buildProductCreationPayload(formData);
+      await axios.post('/api/inventory', payload);
       setShowAddModal(false);
       resetForm();
       await fetchProducts();
       showActionModal(
         creation_mode === PRODUCT_CREATION_MODE.ORDER ? 'Product Ordered' : 'Product Added',
         creation_mode === PRODUCT_CREATION_MODE.ORDER
-          ? `Created "${product_name}" (${product_id}) and recorded a pending order for ${orderQuantity}.`
+          ? `Created "${product_name}" (${product_id}) and recorded a pending order for ${payload.order_quantity}.`
           : `Added "${product_name}" (${product_id}) to inventory.`
       );
     } catch (error) {
@@ -404,14 +320,14 @@ const Inventory = () => {
       manufacturing_date: product.manufacturing_date || '',
       creation_mode: PRODUCT_CREATION_MODE.INVENTORY,
       order_quantity: '',
-      order_date: getCurrentISTDate(),
+      order_date: getISTDateString(),
       advance_amount: '',
       bank_account_id: dailySetupStatus?.selectedBankAccountId ? String(dailySetupStatus.selectedBankAccountId) : '',
       addStock: '',
       addStockMode: PURCHASE_STATUS.DELIVERED,
       addStockPricePerUnit: String(product.purchase_price || ''),
       addStockSupplier: product.supplier || '',
-      addStockDate: getCurrentISTDate(),
+      addStockDate: getISTDateString(),
       addStockAdvanceAmount: '',
       addStockBankAccountId: dailySetupStatus?.selectedBankAccountId ? String(dailySetupStatus.selectedBankAccountId) : ''
     });
@@ -426,7 +342,7 @@ const Inventory = () => {
       addStockMode: PURCHASE_STATUS.DELIVERED,
       addStockPricePerUnit: String(product.purchase_price || ''),
       addStockSupplier: product.supplier || '',
-      addStockDate: getCurrentISTDate(),
+      addStockDate: getISTDateString(),
       addStockAdvanceAmount: '',
       addStockBankAccountId: dailySetupStatus?.selectedBankAccountId
         ? String(dailySetupStatus.selectedBankAccountId)
