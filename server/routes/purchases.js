@@ -20,6 +20,7 @@ const {
   reverseSupplierPaymentBankEffects
 } = require('../services/bankLedger');
 const { resolveSupplier } = require('../services/supplierDirectory');
+const { syncPurchaseLotForPurchase } = require('../services/purchaseLotLedger');
 const { logAudit } = require('../middleware/auditLog');
 
 const router = express.Router();
@@ -35,6 +36,13 @@ const purchaseSelect = `
     COALESCE(pur.purchase_status, 'delivered') AS purchase_status,
     COALESCE(pur.advance_amount, 0) AS advance_amount,
     MAX(COALESCE(pur.total_amount, 0) - COALESCE(pur.advance_amount, 0), 0) AS balance_due,
+    COALESCE(pl.quantity_received, COALESCE(NULLIF(pur.quantity_delivered, 0), pur.quantity, 0)) AS quantity_received,
+    COALESCE(pl.quantity_sold, 0) AS quantity_sold,
+    COALESCE(pl.quantity_returned, 0) AS quantity_returned,
+    COALESCE(pl.quantity_adjusted, 0) AS quantity_adjusted,
+    COALESCE(pl.quantity_remaining, CASE WHEN COALESCE(pur.purchase_status, 'delivered') = 'delivered' THEN COALESCE(NULLIF(pur.quantity_delivered, 0), pur.quantity, 0) ELSE 0 END) AS quantity_remaining,
+    COALESCE(pl.quantity_sold, 0) * COALESCE(pur.price_per_unit, 0) AS sold_amount,
+    COALESCE(pl.quantity_returned, 0) * COALESCE(pur.price_per_unit, 0) AS returned_amount,
     p.product_id AS product_code,
     COALESCE(p.product_name, '[Deleted Product]') AS product_name,
     p.variety,
@@ -45,6 +53,7 @@ const purchaseSelect = `
   FROM purchases pur
   LEFT JOIN products p ON pur.product_id = p.id
   LEFT JOIN users u ON pur.added_by = u.id
+  LEFT JOIN purchase_lots pl ON pl.purchase_id = pur.id
 `;
 
 const toNumber = (value) => {
@@ -312,8 +321,10 @@ router.post('/', [
            delivery_date,
            purchase_status,
            advance_amount,
+           quantity_delivered,
+           updated_at,
            added_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           purchaseId,
           product_id,
@@ -326,6 +337,8 @@ router.post('/', [
           deliveryDate,
           purchaseStatus,
           advanceAmount,
+          purchaseStatus === PURCHASE_STATUS.DELIVERED ? quantityValue : 0,
+          eventTimestamp,
           req.user.id
         ]
       );
@@ -360,6 +373,19 @@ router.post('/', [
            WHERE id = ?`,
           [quantityValue, pricePerUnitValue, canonicalSupplierName, supplierId, eventTimestamp, product_id]
         );
+
+        await syncPurchaseLotForPurchase({
+          purchaseId: purchaseRowId,
+          productId: product_id,
+          supplierId,
+          supplierName: canonicalSupplierName,
+          deliveredQuantity: quantityValue,
+          pricePerUnit: pricePerUnitValue,
+          gstPercent: product.gst_percent,
+          purchaseDate: storedDate,
+          deliveryDate,
+          eventTimestamp
+        }, { getRow, getAll, runQuery });
         } else if (canonicalSupplierName) {
           await runQuery(
             'UPDATE products SET supplier = ?, supplier_id = ?, updated_at = ? WHERE id = ?',
@@ -420,6 +446,9 @@ router.put('/:id', [
     const purchase = await getRow('SELECT * FROM purchases WHERE id = ?', [req.params.id]);
     if (!purchase) return res.status(404).json({ message: 'Purchase not found' });
 
+  const product = await getRow('SELECT * FROM products WHERE id = ?', [purchase.product_id]);
+  if (!product) return res.status(404).json({ message: 'Product not found' });
+
     const { quantity, price_per_unit, supplier, purchase_date } = req.body;
     const quantityValue = toNumber(quantity);
     const pricePerUnitValue = toNumber(price_per_unit);
@@ -427,6 +456,9 @@ router.put('/:id', [
     const supplierName = supplier ? String(supplier).trim() : '';
     const purchaseStatus = normalizePurchaseStatus(purchase.purchase_status);
     const existingAdvance = toNumber(purchase.advance_amount);
+    const nextQuantityDelivered = purchaseStatus === PURCHASE_STATUS.DELIVERED
+      ? quantityValue
+      : toNumber(purchase.quantity_delivered);
 
     if (existingAdvance > totalAmount) {
       return res.status(400).json({ message: 'Total amount cannot be less than the recorded advance payment' });
@@ -494,7 +526,9 @@ router.put('/:id', [
            supplier = ?,
            supplier_id = ?,
            purchase_date = ?,
-           delivery_date = ?
+           delivery_date = ?,
+           quantity_delivered = ?,
+           updated_at = ?
          WHERE id = ?`,
         [
           quantityValue,
@@ -504,9 +538,26 @@ router.put('/:id', [
           supplierId,
           storedDate,
           nextDeliveryDate || null,
+          nextQuantityDelivered,
+          eventTimestamp,
           req.params.id
         ]
       );
+
+      if (purchaseStatus === PURCHASE_STATUS.DELIVERED) {
+        await syncPurchaseLotForPurchase({
+          purchaseId: purchase.id,
+          productId: purchase.product_id,
+          supplierId,
+          supplierName: canonicalSupplierName,
+          deliveredQuantity: nextQuantityDelivered,
+          pricePerUnit: pricePerUnitValue,
+          gstPercent: product.gst_percent,
+          purchaseDate: storedDate,
+          deliveryDate: nextDeliveryDate || storedDate,
+          eventTimestamp
+        }, { getRow, getAll, runQuery });
+      }
 
       await runQuery('COMMIT');
     } catch (transactionError) {
@@ -569,6 +620,10 @@ router.post('/:id/mark-delivered', [
     }
 
     const eventTimestamp = nowIST();
+    const product = await getRow('SELECT id, gst_percent FROM products WHERE id = ?', [purchase.product_id]);
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
     const suppliedDeliveryDate = req.body.delivery_date;
     const deliveryDate = suppliedDeliveryDate && String(suppliedDeliveryDate).length === 10
       ? combineISTDateWithCurrentTime(suppliedDeliveryDate, eventTimestamp)
@@ -622,6 +677,19 @@ router.post('/:id/mark-delivered', [
         ]
       );
 
+      await syncPurchaseLotForPurchase({
+        purchaseId: purchase.id,
+        productId: purchase.product_id,
+        supplierId: supplierReference.supplierId,
+        supplierName: supplierReference.supplierName,
+        deliveredQuantity: totalQuantity,
+        pricePerUnit: toNumber(purchase.price_per_unit),
+        gstPercent: product.gst_percent,
+        purchaseDate: purchase.purchase_date || eventTimestamp,
+        deliveryDate,
+        eventTimestamp
+      }, { getRow, getAll, runQuery });
+
       await runQuery('COMMIT');
     } catch (transactionError) {
       try {
@@ -659,18 +727,52 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
   try {
     const suppliers = await getAll(`
       SELECT
-        COALESCE(s.id, pu.supplier_id) AS supplier_id,
-        COALESCE(s.name, pu.supplier) AS supplier,
-        COUNT(pu.id) AS total_purchases,
-        SUM(pu.quantity) AS total_quantity,
-        SUM(pu.total_amount) AS total_spent,
-        COUNT(DISTINCT pu.product_id) AS products_supplied,
-        MAX(pu.purchase_date) AS last_purchase_date
-      FROM purchases pu
-      LEFT JOIN suppliers s ON pu.supplier_id = s.id
-      WHERE COALESCE(TRIM(COALESCE(s.name, pu.supplier)), '') != ''
-      GROUP BY COALESCE(CAST(pu.supplier_id AS TEXT), LOWER(TRIM(pu.supplier))), COALESCE(s.id, pu.supplier_id), COALESCE(s.name, pu.supplier)
-      ORDER BY total_spent DESC
+        s.id AS supplier_id,
+        s.name AS supplier,
+        COALESCE(order_summary.total_purchases, 0) AS total_purchases,
+        COALESCE(order_summary.total_quantity, 0) AS total_quantity,
+        COALESCE(lot_summary.total_spent, 0) AS total_spent,
+        COALESCE(order_summary.products_supplied, 0) AS products_supplied,
+        COALESCE(order_summary.last_purchase_date, NULL) AS last_purchase_date,
+        COALESCE(lot_summary.total_sold_qty, 0) AS total_sold_qty,
+        COALESCE(lot_summary.total_remaining_qty, 0) AS total_remaining_qty,
+        COALESCE(lot_summary.total_returned_qty, 0) AS total_returned_qty,
+        COALESCE(lot_summary.sold_value, 0) AS sold_value,
+        COALESCE(payment_summary.total_paid, 0) AS total_paid,
+        COALESCE(lot_summary.sold_value, 0) - COALESCE(payment_summary.total_paid, 0) AS balance_due
+      FROM suppliers s
+      LEFT JOIN (
+        SELECT
+          supplier_id,
+          COUNT(*) AS total_purchases,
+          COALESCE(SUM(quantity), 0) AS total_quantity,
+          COUNT(DISTINCT product_id) AS products_supplied,
+          MAX(COALESCE(delivery_date, purchase_date, created_at)) AS last_purchase_date
+        FROM purchases
+        WHERE supplier_id IS NOT NULL
+        GROUP BY supplier_id
+      ) order_summary ON order_summary.supplier_id = s.id
+      LEFT JOIN (
+        SELECT
+          supplier_id,
+          COALESCE(SUM(quantity_received * price_per_unit), 0) AS total_spent,
+          COALESCE(SUM(quantity_sold), 0) AS total_sold_qty,
+          COALESCE(SUM(quantity_remaining), 0) AS total_remaining_qty,
+          COALESCE(SUM(quantity_returned), 0) AS total_returned_qty,
+          COALESCE(SUM(quantity_sold * price_per_unit), 0) AS sold_value
+        FROM purchase_lots
+        WHERE supplier_id IS NOT NULL
+        GROUP BY supplier_id
+      ) lot_summary ON lot_summary.supplier_id = s.id
+      LEFT JOIN (
+        SELECT
+          supplier_id,
+          COALESCE(SUM(amount), 0) AS total_paid
+        FROM supplier_payments
+        WHERE supplier_id IS NOT NULL
+        GROUP BY supplier_id
+      ) payment_summary ON payment_summary.supplier_id = s.id
+      ORDER BY sold_value DESC, total_spent DESC, s.name ASC
     `);
     res.json(suppliers);
   } catch (error) {
@@ -709,13 +811,24 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
         p.variety,
         p.category,
         p.unit,
-        SUM(pu.quantity) AS total_quantity,
-        SUM(pu.total_amount) AS total_spent,
-        COUNT(pu.id) AS purchase_count,
-        MAX(pu.purchase_date) AS last_purchase_date
-      FROM purchases pu
-      JOIN products p ON pu.product_id = p.id
-      WHERE ${productFilter.clause} ${dateFilter}
+        COALESCE(SUM(pl.quantity_received), 0) AS total_quantity,
+        COALESCE(SUM(pl.quantity_sold), 0) AS total_sold_qty,
+        COALESCE(SUM(pl.quantity_remaining), 0) AS total_remaining_qty,
+        COALESCE(SUM(pl.quantity_returned), 0) AS total_returned_qty,
+        COALESCE(SUM(pl.quantity_received * pl.price_per_unit), 0) AS total_spent,
+        COALESCE(SUM(pl.quantity_sold * pl.price_per_unit), 0) AS sold_value,
+        COUNT(DISTINCT pu.id) AS purchase_count,
+        MAX(COALESCE(pl.delivery_date, pl.purchase_date, pl.created_at)) AS last_purchase_date
+      FROM purchase_lots pl
+      JOIN products p ON pl.product_id = p.id
+      LEFT JOIN purchases pu ON pu.id = pl.purchase_id
+      WHERE ${buildSupplierFilter({
+        alias: 'pl',
+        nameColumn: 'supplier_name',
+        idColumn: 'supplier_id',
+        supplierRecord,
+        supplierName
+      }).clause} ${dateFilter.replace(/pu\.purchase_date/g, 'COALESCE(pl.delivery_date, pl.purchase_date, pl.created_at)')}
       GROUP BY p.id, p.product_id, p.product_name, p.variety, p.category, p.unit
       ORDER BY total_spent DESC
     `, params);
@@ -750,9 +863,15 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
         pu.delivery_date,
         COALESCE(pu.purchase_status, 'delivered') AS purchase_status,
         COALESCE(pu.advance_amount, 0) AS advance_amount,
+        COALESCE(pl.quantity_received, COALESCE(NULLIF(pu.quantity_delivered, 0), pu.quantity, 0)) AS quantity_received,
+        COALESCE(pl.quantity_sold, 0) AS quantity_sold,
+        COALESCE(pl.quantity_returned, 0) AS quantity_returned,
+        COALESCE(pl.quantity_remaining, 0) AS quantity_remaining,
+        COALESCE(pl.quantity_sold * pu.price_per_unit, 0) AS sold_amount,
         u.username AS added_by
       FROM purchases pu
       JOIN products p ON pu.product_id = p.id
+      LEFT JOIN purchase_lots pl ON pl.purchase_id = pu.id
       LEFT JOIN users u ON pu.added_by = u.id
       WHERE ${historyFilter.clause} ${historyDateFilter}
       ORDER BY pu.purchase_date DESC
@@ -774,12 +893,94 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
 
     const summary = await getRow(`
       SELECT
-        COUNT(*) AS total_purchases,
-        SUM(quantity) AS total_items,
-        SUM(total_amount) AS total_cost
-      FROM purchases
-      WHERE ${summaryFilter.clause} ${summaryDateFilter}
+        COUNT(DISTINCT pu.id) AS total_purchases,
+        COUNT(DISTINCT pl.product_id) AS products_supplied,
+        COALESCE(SUM(pl.quantity_received), 0) AS total_items,
+        COALESCE(SUM(pl.quantity_sold), 0) AS total_sold_qty,
+        COALESCE(SUM(pl.quantity_remaining), 0) AS total_remaining_qty,
+        COALESCE(SUM(pl.quantity_returned), 0) AS total_returned_qty,
+        COALESCE(SUM(pl.quantity_received * pl.price_per_unit), 0) AS total_cost,
+        COALESCE(SUM(pl.quantity_sold * pl.price_per_unit), 0) AS sold_value
+      FROM purchase_lots pl
+      LEFT JOIN purchases pu ON pu.id = pl.purchase_id
+      WHERE ${buildSupplierFilter({
+        alias: 'pl',
+        nameColumn: 'supplier_name',
+        idColumn: 'supplier_id',
+        supplierRecord,
+        supplierName
+      }).clause} ${summaryDateFilter.replace(/purchase_date/g, 'COALESCE(pl.delivery_date, pl.purchase_date, pl.created_at)')}
     `, summaryParams);
+
+    const paymentFilter = buildSupplierFilter({
+      alias: 'sp',
+      nameColumn: 'supplier_name',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+    const paymentSummary = await getRow(
+      `SELECT COALESCE(SUM(sp.amount), 0) AS total_paid
+       FROM supplier_payments sp
+       WHERE ${paymentFilter.clause}`,
+      paymentFilter.params
+    );
+
+    const lotFilter = buildSupplierFilter({
+      alias: 'pl',
+      nameColumn: 'supplier_name',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+    const openLots = await getAll(`
+      SELECT
+        pl.id,
+        pl.purchase_id,
+        pu.purchase_id AS purchase_reference,
+        pl.source_type,
+        pl.quantity_received,
+        pl.quantity_sold,
+        pl.quantity_returned,
+        pl.quantity_adjusted,
+        pl.quantity_remaining,
+        pl.price_per_unit,
+        pl.gst_percent,
+        pl.purchase_date,
+        pl.delivery_date,
+        p.product_id AS product_code,
+        p.product_name,
+        p.variety,
+        p.category,
+        p.unit
+      FROM purchase_lots pl
+      JOIN products p ON p.id = pl.product_id
+      LEFT JOIN purchases pu ON pu.id = pl.purchase_id
+      WHERE ${lotFilter.clause}
+        AND pl.quantity_remaining > 0
+      ORDER BY COALESCE(pl.delivery_date, pl.purchase_date, pl.created_at) ASC, pl.id ASC
+    `, lotFilter.params);
+
+    const supplierReturnFilter = buildSupplierFilter({
+      alias: 'sr',
+      nameColumn: 'supplier_name',
+      idColumn: 'supplier_id',
+      supplierRecord,
+      supplierName
+    });
+    const supplierReturns = await getAll(`
+      SELECT
+        sr.return_id,
+        sr.total_quantity,
+        sr.total_amount,
+        sr.notes,
+        sr.return_date,
+        u.username AS created_by_name
+      FROM supplier_returns sr
+      LEFT JOIN users u ON u.id = sr.created_by
+      WHERE ${supplierReturnFilter.clause}
+      ORDER BY sr.return_date DESC
+    `, supplierReturnFilter.params);
 
     res.json({
       supplier: supplierRecord?.name || supplierName,
@@ -787,10 +988,19 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
       summary: {
         total_purchases: summary?.total_purchases || 0,
         total_items: summary?.total_items || 0,
-        total_cost: summary?.total_cost || 0
+        products_supplied: summary?.products_supplied || 0,
+        total_sold_qty: summary?.total_sold_qty || 0,
+        total_remaining_qty: summary?.total_remaining_qty || 0,
+        total_returned_qty: summary?.total_returned_qty || 0,
+        total_cost: summary?.total_cost || 0,
+        sold_value: summary?.sold_value || 0,
+        total_paid: paymentSummary?.total_paid || 0,
+        balance_due: toNumber(summary?.sold_value) - toNumber(paymentSummary?.total_paid)
       },
       products,
-      history
+      history,
+      open_lots: openLots,
+      returns: supplierReturns
     });
   } catch (error) {
     console.error('Get supplier detail error:', error);
@@ -1064,6 +1274,8 @@ router.post('/:id/partial-delivery', [
     }
 
     const eventTimestamp = nowIST();
+    const product = await getRow('SELECT id, gst_percent FROM products WHERE id = ?', [purchase.product_id]);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
     const suppliedDate = req.body.delivery_date;
     const deliveryDate = suppliedDate && String(suppliedDate).length === 10
       ? combineISTDateWithCurrentTime(suppliedDate, eventTimestamp)
@@ -1122,6 +1334,19 @@ router.post('/:id/partial-delivery', [
           req.params.id
         ]
       );
+
+      await syncPurchaseLotForPurchase({
+        purchaseId: purchase.id,
+        productId: purchase.product_id,
+        supplierId: supplierReference.supplierId,
+        supplierName: supplierReference.supplierName,
+        deliveredQuantity: newDelivered,
+        pricePerUnit: toNumber(purchase.price_per_unit),
+        gstPercent: product.gst_percent,
+        purchaseDate: purchase.purchase_date || eventTimestamp,
+        deliveryDate,
+        eventTimestamp
+      }, { getRow, getAll, runQuery });
 
       await runQuery('COMMIT');
     } catch (txErr) {

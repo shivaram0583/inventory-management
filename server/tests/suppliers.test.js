@@ -115,4 +115,80 @@ describe('Supplier Directory Sync', () => {
     );
     expect(updatedTransfer.description).toBe('Supplier payment to New Supplier');
   });
+
+  test('should return remaining supplier stock and keep payable amount based on sold quantity only', async () => {
+    const product = await createTestProduct(testDb, {
+      product_id: 'SUP_RET001',
+      product_name: 'Supplier Return Product',
+      quantity_available: 0,
+      purchase_price: 50,
+      selling_price: 100,
+      supplier: null
+    });
+
+    const purchaseRes = await request(app)
+      .post('/api/purchases')
+      .set('Authorization', `Bearer ${adminAuth.token}`)
+      .send({
+        product_id: product.id,
+        quantity: 10,
+        price_per_unit: 50,
+        supplier: 'Return Supplier',
+        purchase_status: 'delivered'
+      });
+
+    expect(purchaseRes.status).toBe(201);
+
+    const saleRes = await request(app)
+      .post('/api/sales')
+      .set('Authorization', `Bearer ${adminAuth.token}`)
+      .send({
+        items: [{ product_id: product.id, quantity: 4 }],
+        customer_name: 'Supplier Return Customer',
+        payment_mode: 'cash'
+      });
+
+    expect(saleRes.status).toBe(201);
+
+    const supplier = await testDb.getRow('SELECT * FROM suppliers WHERE LOWER(name) = LOWER(?)', ['Return Supplier']);
+    const purchaseLot = await testDb.getRow('SELECT * FROM purchase_lots WHERE purchase_id = ?', [purchaseRes.body.id]);
+
+    const detailBeforeReturn = await request(app)
+      .get(`/api/suppliers/${supplier.id}`)
+      .set('Authorization', `Bearer ${adminAuth.token}`);
+
+    expect(detailBeforeReturn.status).toBe(200);
+    expect(Number(detailBeforeReturn.body.summary.total_sold_qty)).toBe(4);
+    expect(Number(detailBeforeReturn.body.summary.total_remaining_qty)).toBe(6);
+    expect(Number(detailBeforeReturn.body.summary.sold_value)).toBe(200);
+    expect(Number(detailBeforeReturn.body.summary.balance_due)).toBe(200);
+
+    const returnRes = await request(app)
+      .post(`/api/suppliers/${supplier.id}/returns`)
+      .set('Authorization', `Bearer ${adminAuth.token}`)
+      .send({
+        items: [{ purchase_lot_id: purchaseLot.id, quantity_returned: 6 }],
+        return_date: '2026-04-04',
+        notes: 'Financial year closing return'
+      });
+
+    expect(returnRes.status).toBe(201);
+    expect(Number(returnRes.body.total_quantity)).toBe(6);
+    expect(Number(returnRes.body.total_amount)).toBe(300);
+
+    const updatedProduct = await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [product.id]);
+    expect(Number(updatedProduct.quantity_available)).toBe(0);
+
+    const detailAfterReturn = await request(app)
+      .get(`/api/suppliers/${supplier.id}`)
+      .set('Authorization', `Bearer ${adminAuth.token}`);
+
+    expect(detailAfterReturn.status).toBe(200);
+    expect(Number(detailAfterReturn.body.summary.total_remaining_qty)).toBe(0);
+    expect(Number(detailAfterReturn.body.summary.total_returned_qty)).toBe(6);
+    expect(Number(detailAfterReturn.body.summary.sold_value)).toBe(200);
+    expect(Number(detailAfterReturn.body.summary.balance_due)).toBe(200);
+    expect(Array.isArray(detailAfterReturn.body.returns)).toBe(true);
+    expect(detailAfterReturn.body.returns.length).toBeGreaterThan(0);
+  });
 });

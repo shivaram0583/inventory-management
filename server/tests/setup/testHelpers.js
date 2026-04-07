@@ -100,17 +100,18 @@ async function createTestProduct(testDb, overrides = {}) {
     unit: 'kg',
     purchase_price: 50,
     selling_price: 80,
-    supplier: 'Test Supplier'
+    supplier: 'Test Supplier',
+    gst_percent: 0
   };
 
   const product = { ...defaults, ...overrides };
 
   const result = await testDb.runQuery(
-    `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO products (product_id, category, product_name, variety, quantity_available, unit, purchase_price, selling_price, supplier, gst_percent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [product.product_id, product.category, product.product_name, product.variety,
       product.quantity_available, product.unit, product.purchase_price,
-      product.selling_price, product.supplier]
+      product.selling_price, product.supplier, product.gst_percent]
   );
 
   return testDb.getRow('SELECT * FROM products WHERE id = ?', [result.id]);

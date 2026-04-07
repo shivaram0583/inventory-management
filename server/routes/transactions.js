@@ -711,15 +711,19 @@ router.delete('/supplier-payments/:id', [authenticateToken, authorizeRole(['admi
 // GET supplier ledger: total purchased vs total paid, remaining balance
 router.get('/supplier-balances', authenticateToken, async (req, res) => {
   try {
-    const purchased = await getAll(`
+    const sold = await getAll(`
       SELECT
-        COALESCE(s.id, p.supplier_id) AS supplier_id,
-        COALESCE(s.name, p.supplier) AS supplier_name,
-        SUM(p.total_amount) AS total_purchased
-      FROM purchases p
-      LEFT JOIN suppliers s ON p.supplier_id = s.id
-      WHERE COALESCE(TRIM(COALESCE(s.name, p.supplier)), '') != ''
-      GROUP BY COALESCE(CAST(p.supplier_id AS TEXT), LOWER(TRIM(p.supplier))), COALESCE(s.id, p.supplier_id), COALESCE(s.name, p.supplier)
+        COALESCE(s.id, pl.supplier_id) AS supplier_id,
+        COALESCE(s.name, pl.supplier_name) AS supplier_name,
+        COALESCE(SUM(pl.quantity_received * pl.price_per_unit), 0) AS total_received_value,
+        COALESCE(SUM(pl.quantity_sold * pl.price_per_unit), 0) AS sold_value,
+        COALESCE(SUM(pl.quantity_sold), 0) AS total_sold_qty,
+        COALESCE(SUM(pl.quantity_remaining), 0) AS total_remaining_qty,
+        COALESCE(SUM(pl.quantity_returned), 0) AS total_returned_qty
+      FROM purchase_lots pl
+      LEFT JOIN suppliers s ON pl.supplier_id = s.id
+      WHERE COALESCE(TRIM(COALESCE(s.name, pl.supplier_name)), '') != ''
+      GROUP BY COALESCE(CAST(pl.supplier_id AS TEXT), LOWER(TRIM(pl.supplier_name))), COALESCE(s.id, pl.supplier_id), COALESCE(s.name, pl.supplier_name)
     `);
 
     const paid = await getAll(`
@@ -749,7 +753,11 @@ router.get('/supplier-balances', authenticateToken, async (req, res) => {
         balancesMap.set(key, {
           supplier_id: row.supplier_id || null,
           supplier_name: row.supplier_name,
-          total_purchased: 0,
+          total_received_value: 0,
+          sold_value: 0,
+          total_sold_qty: 0,
+          total_remaining_qty: 0,
+          total_returned_qty: 0,
           total_paid: 0,
           remaining_balance: 0
         });
@@ -758,9 +766,13 @@ router.get('/supplier-balances', authenticateToken, async (req, res) => {
       return balancesMap.get(key);
     };
 
-    for (const row of purchased) {
+    for (const row of sold) {
       const entry = ensureBalanceEntry(row);
-      entry.total_purchased = toNumber(row.total_purchased);
+      entry.total_received_value = toNumber(row.total_received_value);
+      entry.sold_value = toNumber(row.sold_value);
+      entry.total_sold_qty = toNumber(row.total_sold_qty);
+      entry.total_remaining_qty = toNumber(row.total_remaining_qty);
+      entry.total_returned_qty = toNumber(row.total_returned_qty);
     }
 
     for (const row of paid) {
@@ -771,7 +783,7 @@ router.get('/supplier-balances', authenticateToken, async (req, res) => {
     const balances = Array.from(balancesMap.values())
       .map((entry) => ({
         ...entry,
-        remaining_balance: entry.total_purchased - entry.total_paid
+        remaining_balance: entry.sold_value - entry.total_paid
       }))
       .sort((a, b) => b.remaining_balance - a.remaining_balance);
 

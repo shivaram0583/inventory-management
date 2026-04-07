@@ -216,7 +216,7 @@ const Suppliers = () => {
                 {s.address && <p className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-gray-400" />{s.address}</p>}
               </div>
               <div className="flex items-center justify-between text-xs text-gray-500 border-t pt-2">
-                <span>{s.total_orders || 0} orders • ₹{fmt(s.total_spent)}</span>
+                <span>{s.total_orders || 0} orders • Due ₹{fmt(Math.max(Number(s.remaining_balance || 0), 0))}</span>
                 <div className="flex items-center gap-1">
                   <button onClick={() => viewDetail(s)} className="p-1.5 rounded-lg hover:bg-gray-100" title="View Details">
                     <Eye className="h-3.5 w-3.5 text-gray-500" />
@@ -263,6 +263,37 @@ const Suppliers = () => {
             </div>
             {supplierDetail.address && <p className="text-sm text-gray-600"><span className="text-gray-500">Address:</span> {supplierDetail.address}</p>}
 
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl bg-teal-50 px-3 py-2"><span className="text-gray-500">Sold Value:</span> <span className="font-bold text-teal-700">₹{fmt(supplierDetail.summary?.sold_value)}</span></div>
+              <div className="rounded-xl bg-violet-50 px-3 py-2"><span className="text-gray-500">Paid:</span> <span className="font-bold text-violet-700">₹{fmt(supplierDetail.summary?.total_paid)}</span></div>
+              <div className="rounded-xl bg-amber-50 px-3 py-2"><span className="text-gray-500">Balance Due:</span> <span className="font-bold text-amber-700">₹{fmt(Math.max(Number(supplierDetail.summary?.balance_due || 0), 0))}</span></div>
+              <div className="rounded-xl bg-rose-50 px-3 py-2"><span className="text-gray-500">Stock On Hand:</span> <span className="font-bold text-rose-700">{Number(supplierDetail.summary?.total_remaining_qty || 0)}</span></div>
+            </div>
+
+            {supplierDetail.open_lots?.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">Open Lots</h4>
+                <div className="max-h-40 overflow-y-auto border rounded-lg">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0"><tr>
+                      <th className="px-2 py-1.5 text-left">Product</th>
+                      <th className="px-2 py-1.5 text-right">Remaining</th>
+                      <th className="px-2 py-1.5 text-right">Rate</th>
+                    </tr></thead>
+                    <tbody>
+                      {supplierDetail.open_lots.map((lot) => (
+                        <tr key={lot.id} className="border-t">
+                          <td className="px-2 py-1.5">{lot.product_name}</td>
+                          <td className="px-2 py-1.5 text-right">{lot.quantity_remaining} {lot.unit}</td>
+                          <td className="px-2 py-1.5 text-right">₹{fmt(lot.price_per_unit)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {supplierDetail.purchases?.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-2">Recent Purchases</h4>
@@ -271,6 +302,8 @@ const Suppliers = () => {
                     <thead className="bg-gray-50 sticky top-0"><tr>
                       <th className="px-2 py-1.5 text-left">Product</th>
                       <th className="px-2 py-1.5 text-right">Qty</th>
+                      <th className="px-2 py-1.5 text-right">Sold</th>
+                      <th className="px-2 py-1.5 text-right">On Hand</th>
                       <th className="px-2 py-1.5 text-right">Amount</th>
                       <th className="px-2 py-1.5 text-center">Status</th>
                     </tr></thead>
@@ -279,6 +312,8 @@ const Suppliers = () => {
                         <tr key={i} className="border-t">
                           <td className="px-2 py-1.5">{p.product_name}{p.variety ? ` (${p.variety})` : ''}</td>
                           <td className="px-2 py-1.5 text-right">{p.quantity}</td>
+                          <td className="px-2 py-1.5 text-right">{p.quantity_sold || 0}</td>
+                          <td className="px-2 py-1.5 text-right">{p.quantity_remaining || 0}</td>
                           <td className="px-2 py-1.5 text-right">₹{fmt(p.total_amount)}</td>
                           <td className="px-2 py-1.5 text-center">
                             <span className={`px-1.5 py-0.5 rounded text-xs ${p.purchase_status === 'delivered' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>

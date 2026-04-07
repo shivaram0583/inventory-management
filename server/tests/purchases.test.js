@@ -49,6 +49,10 @@ describe('Purchase Management', () => {
 
       const newQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
       expect(newQty).toBe(initialQty + 20);
+
+      const purchaseLot = await testDb.getRow('SELECT * FROM purchase_lots WHERE purchase_id = ?', [res.body.id]);
+      expect(Number(purchaseLot.quantity_received)).toBe(20);
+      expect(Number(purchaseLot.quantity_remaining)).toBe(20);
     });
 
     test('should record an ordered purchase without stock update', async () => {
@@ -233,6 +237,10 @@ describe('Purchase Management', () => {
 
       const newQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
       expect(newQty).toBe(initialQty + 25);
+
+      const purchaseLot = await testDb.getRow('SELECT * FROM purchase_lots WHERE purchase_id = ?', [orderedPurchase.id]);
+      expect(Number(purchaseLot.quantity_received)).toBe(25);
+      expect(Number(purchaseLot.quantity_remaining)).toBe(25);
     });
 
     test('should reject already delivered purchase', async () => {
@@ -311,6 +319,10 @@ describe('Purchase Management', () => {
 
       const newQty = (await testDb.getRow('SELECT quantity_available FROM products WHERE id = ?', [testProduct.id])).quantity_available;
       expect(newQty).toBe(initialQty + 40);
+
+      const purchaseLot = await testDb.getRow('SELECT * FROM purchase_lots WHERE purchase_id = ?', [orderedPurchase.id]);
+      expect(Number(purchaseLot.quantity_received)).toBe(40);
+      expect(Number(purchaseLot.quantity_remaining)).toBe(40);
     });
   });
 

@@ -2,6 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const { backfillPurchaseLotLedger } = require('../services/purchaseLotLedger');
 
 const dbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, 'inventory.db');
 
@@ -571,6 +572,53 @@ function initializeDatabase() {
     }
   });
 
+  db.run(`CREATE TABLE IF NOT EXISTS purchase_lots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER UNIQUE,
+    product_id INTEGER NOT NULL,
+    supplier_id INTEGER,
+    supplier_name TEXT,
+    source_type TEXT NOT NULL DEFAULT 'purchase' CHECK (source_type IN ('purchase', 'opening', 'adjustment')),
+    quantity_received REAL NOT NULL DEFAULT 0,
+    quantity_sold REAL NOT NULL DEFAULT 0,
+    quantity_returned REAL NOT NULL DEFAULT 0,
+    quantity_adjusted REAL NOT NULL DEFAULT 0,
+    quantity_remaining REAL NOT NULL DEFAULT 0,
+    price_per_unit REAL NOT NULL DEFAULT 0,
+    gst_percent REAL NOT NULL DEFAULT 0,
+    purchase_date DATETIME,
+    delivery_date DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (purchase_id) REFERENCES purchases (id),
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating purchase_lots table:', err.message);
+    }
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS sale_allocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_line_id INTEGER NOT NULL,
+    sale_id TEXT NOT NULL,
+    product_id INTEGER NOT NULL,
+    purchase_lot_id INTEGER NOT NULL,
+    quantity_allocated REAL NOT NULL,
+    quantity_returned REAL NOT NULL DEFAULT 0,
+    unit_cost REAL NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sale_line_id) REFERENCES sales (id),
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (purchase_lot_id) REFERENCES purchase_lots (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating sale_allocations table:', err.message);
+    }
+  });
+
   // Create bank_accounts table
   db.run(`CREATE TABLE IF NOT EXISTS bank_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -726,6 +774,45 @@ function initializeDatabase() {
       console.error('Error creating supplier_payments table:', err.message);
     } else {
       console.log('Supplier payments table created successfully');
+    }
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS supplier_returns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id TEXT UNIQUE NOT NULL,
+    supplier_id INTEGER,
+    supplier_name TEXT,
+    total_quantity REAL NOT NULL DEFAULT 0,
+    total_amount REAL NOT NULL DEFAULT 0,
+    notes TEXT,
+    return_date DATETIME NOT NULL,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating supplier_returns table:', err.message);
+    }
+  });
+
+  db.run(`CREATE TABLE IF NOT EXISTS supplier_return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_return_id INTEGER NOT NULL,
+    purchase_lot_id INTEGER NOT NULL,
+    purchase_id INTEGER,
+    product_id INTEGER NOT NULL,
+    quantity_returned REAL NOT NULL,
+    price_per_unit REAL NOT NULL,
+    total_amount REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_return_id) REFERENCES supplier_returns (id) ON DELETE CASCADE,
+    FOREIGN KEY (purchase_lot_id) REFERENCES purchase_lots (id),
+    FOREIGN KEY (purchase_id) REFERENCES purchases (id),
+    FOREIGN KEY (product_id) REFERENCES products (id)
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating supplier_return_items table:', err.message);
     }
   });
 
@@ -1047,9 +1134,11 @@ function initializeDatabase() {
   });
 
   createDefaultUsers();
-  runTimestampMigrations().catch((error) => {
-    console.error('Error running timestamp migrations:', error.message);
-  });
+  runTimestampMigrations()
+    .then(() => runPurchaseLotLedgerBackfill())
+    .catch((error) => {
+      console.error('Error running timestamp migrations:', error.message);
+    });
 }
 
 function createDefaultUsers() {
@@ -1209,6 +1298,65 @@ function runOneTimeMigration(name, statements) {
           runStatement(0);
         });
       });
+    });
+  });
+}
+
+function runOneTimeTask(name, task) {
+  return new Promise((resolve) => {
+    db.serialize(() => {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS app_migrations (
+          name TEXT PRIMARY KEY,
+          executed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (tableErr) => {
+        if (tableErr) {
+          console.error(`Error creating app_migrations for ${name}:`, tableErr.message);
+          resolve(false);
+          return;
+        }
+
+        db.get('SELECT name FROM app_migrations WHERE name = ?', [name], async (checkErr, row) => {
+          if (checkErr) {
+            console.error(`Error checking task ${name}:`, checkErr.message);
+            resolve(false);
+            return;
+          }
+
+          if (row) {
+            resolve(false);
+            return;
+          }
+
+          try {
+            await task();
+            db.run('INSERT INTO app_migrations (name) VALUES (?)', [name], (insertErr) => {
+              if (insertErr) {
+                console.error(`Error recording task ${name}:`, insertErr.message);
+                resolve(false);
+              } else {
+                console.log(`Applied task: ${name}`);
+                resolve(true);
+              }
+            });
+          } catch (error) {
+            console.error(`Error applying task ${name}:`, error.message);
+            resolve(false);
+          }
+        });
+      });
+    });
+  });
+}
+
+async function runPurchaseLotLedgerBackfill() {
+  await runOneTimeTask('purchase-lot-ledger-v1', async () => {
+    await backfillPurchaseLotLedger({
+      getRow,
+      getAll,
+      runQuery,
+      nowIST
     });
   });
 }

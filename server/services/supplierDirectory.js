@@ -93,6 +93,26 @@ async function syncSupplierForeignKeys(eventTimestamp = nowIST()) {
      WHERE supplier_id IS NULL
        AND supplier_name IS NOT NULL
        AND TRIM(supplier_name) != ''`,
+    `UPDATE purchase_lots
+     SET supplier_id = (
+       SELECT s.id
+       FROM suppliers s
+       WHERE LOWER(TRIM(s.name)) = LOWER(TRIM(purchase_lots.supplier_name))
+       LIMIT 1
+     )
+     WHERE supplier_id IS NULL
+       AND supplier_name IS NOT NULL
+       AND TRIM(supplier_name) != ''`,
+    `UPDATE supplier_returns
+     SET supplier_id = (
+       SELECT s.id
+       FROM suppliers s
+       WHERE LOWER(TRIM(s.name)) = LOWER(TRIM(supplier_returns.supplier_name))
+       LIMIT 1
+     )
+     WHERE supplier_id IS NULL
+       AND supplier_name IS NOT NULL
+       AND TRIM(supplier_name) != ''`,
     `UPDATE products
      SET supplier = (
        SELECT s.name
@@ -115,6 +135,21 @@ async function syncSupplierForeignKeys(eventTimestamp = nowIST()) {
        FROM suppliers s
        WHERE s.id = supplier_payments.supplier_id
      )
+     WHERE supplier_id IS NOT NULL`,
+    `UPDATE purchase_lots
+     SET supplier_name = (
+       SELECT s.name
+       FROM suppliers s
+       WHERE s.id = purchase_lots.supplier_id
+     ),
+         updated_at = '${eventTimestamp}'
+     WHERE supplier_id IS NOT NULL`,
+    `UPDATE supplier_returns
+     SET supplier_name = (
+       SELECT s.name
+       FROM suppliers s
+       WHERE s.id = supplier_returns.supplier_id
+     )
      WHERE supplier_id IS NOT NULL`
   ];
 
@@ -132,6 +167,10 @@ async function backfillSupplierDirectory(eventTimestamp = nowIST()) {
       SELECT supplier AS name FROM products WHERE supplier IS NOT NULL
       UNION ALL
       SELECT supplier_name AS name FROM supplier_payments WHERE supplier_name IS NOT NULL
+      UNION ALL
+      SELECT supplier_name AS name FROM purchase_lots WHERE supplier_name IS NOT NULL
+      UNION ALL
+      SELECT supplier_name AS name FROM supplier_returns WHERE supplier_name IS NOT NULL
     ) refs
     WHERE TRIM(name) != ''
     ORDER BY supplier_name COLLATE NOCASE ASC
@@ -208,6 +247,22 @@ async function renameSupplierReferences({ supplierId, oldName, newName, eventTim
     [normalizedNewName, normalizedSupplierId, normalizedSupplierId, normalizedOldName]
   );
 
+  const updatedLots = await runQuery(
+    `UPDATE purchase_lots
+     SET supplier_name = ?, supplier_id = COALESCE(supplier_id, ?), updated_at = ?
+     WHERE (supplier_id = ?)
+        OR (supplier_name IS NOT NULL AND LOWER(TRIM(supplier_name)) = LOWER(?))`,
+    [normalizedNewName, normalizedSupplierId, eventTimestamp, normalizedSupplierId, normalizedOldName]
+  );
+
+  const updatedReturns = await runQuery(
+    `UPDATE supplier_returns
+     SET supplier_name = ?, supplier_id = COALESCE(supplier_id, ?)
+     WHERE (supplier_id = ?)
+        OR (supplier_name IS NOT NULL AND LOWER(TRIM(supplier_name)) = LOWER(?))`,
+    [normalizedNewName, normalizedSupplierId, normalizedSupplierId, normalizedOldName]
+  );
+
   const updatedTransfers = await runQuery(
     `UPDATE bank_transfers
      SET description = REPLACE(description, ?, ?)
@@ -232,6 +287,8 @@ async function renameSupplierReferences({ supplierId, oldName, newName, eventTim
     purchasesUpdated: updatedPurchases.changes || 0,
     productsUpdated: updatedProducts.changes || 0,
     paymentsUpdated: updatedPayments.changes || 0,
+    lotsUpdated: updatedLots.changes || 0,
+    returnsUpdated: updatedReturns.changes || 0,
     transfersUpdated: updatedTransfers.changes || 0
   };
 }

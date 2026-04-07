@@ -4,7 +4,13 @@ import axios from 'axios';
 import { Download, X, FileText, Loader } from 'lucide-react';
 import CustomSelect from './shared/CustomSelect';
 import { downloadCSV } from '../utils/csvExport';
-import { getISTDateString, fmtDateTime } from '../utils/dateUtils';
+import {
+  getISTDateString,
+  fmtDateTime,
+  getFinancialYearForDate,
+  getFinancialYearLabel,
+  getFinancialYearOptions
+} from '../utils/dateUtils';
 
 const REPORT_TYPES = [
   { id: 'inventory', label: 'Inventory Stock', needsRange: false },
@@ -15,6 +21,7 @@ const REPORT_TYPES = [
   { id: 'transactions', label: 'Transactions Report', needsRange: true },
   { id: 'suppliers', label: 'Supplier Summary', needsRange: true },
   { id: 'supplier-details', label: 'Supplier Items Breakdown', needsRange: true },
+  { id: 'supplier-settlement', label: 'Supplier Settlement', needsFinancialYear: true },
   { id: 'audit', label: 'Audit Report', needsRange: true },
   { id: 'bank-accounts', label: 'Bank Account Details', needsRange: false },
 ];
@@ -118,6 +125,22 @@ const COLUMNS = {
     { key: 'total_spent', label: 'Total Spent (₹)' },
     { key: 'purchase_count', label: 'Purchases' },
     { key: 'last_purchase_fmt', label: 'Last Purchase (IST)' },
+  ],
+  'supplier-settlement': [
+    { key: 'period_label', label: 'Period' },
+    { key: 'financial_year', label: 'Financial Year' },
+    { key: 'supplier', label: 'Supplier' },
+    { key: 'opening_due', label: 'Opening Due (₹)' },
+    { key: 'sold_liability', label: 'Sold Liability (₹)' },
+    { key: 'payments_made', label: 'Payments Made (₹)' },
+    { key: 'returned_value', label: 'Supplier Returns (₹)' },
+    { key: 'closing_due', label: 'Closing Due (₹)' },
+    { key: 'received_value', label: 'Received Value (₹)' },
+    { key: 'received_qty', label: 'Received Qty' },
+    { key: 'returned_qty', label: 'Returned Qty' },
+    { key: 'purchase_count', label: 'Purchase Count' },
+    { key: 'payment_count', label: 'Payment Count' },
+    { key: 'return_count', label: 'Return Count' },
   ],
   audit: [
     { key: 'section', label: 'Section' },
@@ -368,10 +391,12 @@ const ReportDownloader = () => {
   const [reportType, setReportType] = useState('inventory');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [financialYear, setFinancialYear] = useState(() => getFinancialYearForDate(today));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const selectedType = REPORT_TYPES.find(t => t.id === reportType);
+  const financialYearOptions = getFinancialYearOptions(6, today);
 
   const handleDownload = async () => {
     setError('');
@@ -433,6 +458,15 @@ const ReportDownloader = () => {
           ...d,
           last_purchase_fmt: fmtDateTime(d.last_purchase),
         }));
+      } else if (reportType === 'supplier-settlement') {
+        const res = await axios.get('/api/reports/supplier-settlement', {
+          params: { financial_year: financialYear }
+        });
+        rows = (res.data?.rows || []).map((row) => ({
+          ...row,
+          financial_year: res.data?.range?.financial_year || financialYear,
+          period_label: res.data?.range?.label || getFinancialYearLabel(financialYear)
+        }));
       } else if (reportType === 'audit') {
         const res = await axios.get('/api/reports/audit', {
           params: { start_date: startDate, end_date: endDate }
@@ -452,7 +486,9 @@ const ReportDownloader = () => {
         return;
       }
 
-      const dateTag = selectedType.needsRange
+      const dateTag = selectedType?.needsFinancialYear
+        ? `_${financialYear}`
+        : selectedType.needsRange
         ? `_${startDate}_to_${endDate}`
         : `_${today}`;
       const filename = `${reportType}${dateTag}.csv`;
@@ -499,6 +535,17 @@ const ReportDownloader = () => {
                   onChange={(val) => setReportType(val)}
                 />
               </div>
+
+              {selectedType?.needsFinancialYear && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Financial Year</label>
+                  <CustomSelect
+                    options={financialYearOptions.map(option => ({ value: option.value, label: option.label }))}
+                    value={financialYear}
+                    onChange={(value) => setFinancialYear(value)}
+                  />
+                </div>
+              )}
 
               {selectedType?.needsRange && (
                 <div className="grid grid-cols-2 gap-3">

@@ -96,6 +96,321 @@ async function getCustomerSalesSelect() {
   `;
 }
 
+const SUPPLIER_ID_KEY_PREFIX = 'id:';
+const SUPPLIER_NAME_KEY_PREFIX = 'name:';
+const CURRENCY_PRECISION = 100;
+const QUANTITY_PRECISION = 1000000;
+
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const roundCurrency = (value) => Math.round(toNumber(value) * CURRENCY_PRECISION) / CURRENCY_PRECISION;
+const roundQuantity = (value) => Math.round(toNumber(value) * QUANTITY_PRECISION) / QUANTITY_PRECISION;
+const normalizeSupplierName = (value) => String(value || '').trim();
+
+function createReportError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function buildSupplierAggregationKey({ supplierId, supplierName }) {
+  const parsedSupplierId = Number(supplierId);
+  if (Number.isInteger(parsedSupplierId) && parsedSupplierId > 0) {
+    return `${SUPPLIER_ID_KEY_PREFIX}${parsedSupplierId}`;
+  }
+
+  const normalizedName = normalizeSupplierName(supplierName).toLowerCase();
+  return normalizedName ? `${SUPPLIER_NAME_KEY_PREFIX}${normalizedName}` : null;
+}
+
+function registerSupplierAggregate(map, row) {
+  const supplierName = normalizeSupplierName(row?.supplier_name || row?.supplier);
+  const supplierKey = buildSupplierAggregationKey({
+    supplierId: row?.supplier_id,
+    supplierName
+  });
+
+  if (!supplierKey) {
+    return null;
+  }
+
+  const parsedSupplierId = Number(row?.supplier_id);
+  const normalizedSupplierId = Number.isInteger(parsedSupplierId) && parsedSupplierId > 0
+    ? parsedSupplierId
+    : null;
+
+  if (!map.has(supplierKey)) {
+    map.set(supplierKey, {
+      supplier_id: normalizedSupplierId,
+      supplier: supplierName || 'Unknown Supplier'
+    });
+  } else {
+    const existingEntry = map.get(supplierKey);
+    if (!existingEntry.supplier_id && normalizedSupplierId) {
+      existingEntry.supplier_id = normalizedSupplierId;
+    }
+    if ((!existingEntry.supplier || existingEntry.supplier === 'Unknown Supplier') && supplierName) {
+      existingEntry.supplier = supplierName;
+    }
+  }
+
+  return supplierKey;
+}
+
+function getFinancialYearLabel(startYear, endYear) {
+  return `FY ${startYear}-${String(endYear).slice(-2)}`;
+}
+
+function parseFinancialYear(financialYear) {
+  const match = /^(\d{4})-(\d{4})$/.exec(String(financialYear || '').trim());
+  if (!match) {
+    return null;
+  }
+
+  const startYear = Number(match[1]);
+  const endYear = Number(match[2]);
+  if (endYear !== startYear + 1) {
+    return null;
+  }
+
+  return { startYear, endYear };
+}
+
+function resolveSupplierSettlementRange({ startDate, endDate, financialYear }) {
+  const parsedFinancialYear = parseFinancialYear(financialYear);
+  if (parsedFinancialYear) {
+    return {
+      startDate: `${parsedFinancialYear.startYear}-04-01`,
+      endDate: `${parsedFinancialYear.endYear}-03-31`,
+      financialYear: `${parsedFinancialYear.startYear}-${parsedFinancialYear.endYear}`,
+      label: getFinancialYearLabel(parsedFinancialYear.startYear, parsedFinancialYear.endYear)
+    };
+  }
+
+  if (startDate || endDate) {
+    if (!startDate || !endDate) {
+      throw createReportError(400, 'Start date and end date are required');
+    }
+
+    const isValidStartDate = moment(startDate, 'YYYY-MM-DD', true).isValid();
+    const isValidEndDate = moment(endDate, 'YYYY-MM-DD', true).isValid();
+    if (!isValidStartDate || !isValidEndDate || startDate > endDate) {
+      throw createReportError(400, 'Invalid date range');
+    }
+
+    return {
+      startDate,
+      endDate,
+      financialYear: null,
+      label: `${startDate} to ${endDate}`
+    };
+  }
+
+  const today = moment().utcOffset('+05:30');
+  const startYear = today.month() >= 3 ? today.year() : today.year() - 1;
+  const endYear = startYear + 1;
+
+  return {
+    startDate: `${startYear}-04-01`,
+    endDate: `${endYear}-03-31`,
+    financialYear: `${startYear}-${endYear}`,
+    label: getFinancialYearLabel(startYear, endYear)
+  };
+}
+
+function getPreviousDate(dateString) {
+  return moment(dateString, 'YYYY-MM-DD', true).subtract(1, 'day').format('YYYY-MM-DD');
+}
+
+async function getSupplierSoldSnapshot(endDate) {
+  const allocations = await getAll(
+    `SELECT
+       sa.id,
+       sa.sale_id,
+       sa.product_id,
+       sa.quantity_allocated,
+       sa.unit_cost,
+       COALESCE(s.id, pl.supplier_id) AS supplier_id,
+       COALESCE(s.name, pl.supplier_name) AS supplier_name
+     FROM sale_allocations sa
+     JOIN sales sl ON sl.id = sa.sale_line_id
+     JOIN purchase_lots pl ON pl.id = sa.purchase_lot_id
+     LEFT JOIN suppliers s ON pl.supplier_id = s.id
+     WHERE DATE(sl.sale_date) <= ?
+       AND COALESCE(TRIM(COALESCE(s.name, pl.supplier_name)), '') != ''
+     ORDER BY DATE(sl.sale_date) ASC, sa.id ASC`,
+    [endDate]
+  );
+
+  const salesReturns = await getAll(
+    `SELECT id, sale_id, product_id, quantity_returned
+     FROM sales_returns
+     WHERE DATE(return_date) <= ?
+     ORDER BY DATE(return_date) ASC, id ASC`,
+    [endDate]
+  );
+
+  const allocationsBySaleProduct = new Map();
+  allocations.forEach((allocation) => {
+    const saleProductKey = `${allocation.sale_id}::${allocation.product_id}`;
+    if (!allocationsBySaleProduct.has(saleProductKey)) {
+      allocationsBySaleProduct.set(saleProductKey, []);
+    }
+
+    allocationsBySaleProduct.get(saleProductKey).push({
+      supplier_id: allocation.supplier_id,
+      supplier_name: allocation.supplier_name,
+      unit_cost: toNumber(allocation.unit_cost),
+      quantity_remaining: roundQuantity(allocation.quantity_allocated)
+    });
+  });
+
+  salesReturns.forEach((salesReturn) => {
+    const saleProductKey = `${salesReturn.sale_id}::${salesReturn.product_id}`;
+    const relatedAllocations = allocationsBySaleProduct.get(saleProductKey) || [];
+    let quantityToReverse = roundQuantity(salesReturn.quantity_returned);
+
+    for (const allocation of relatedAllocations) {
+      if (quantityToReverse <= 0) {
+        break;
+      }
+
+      const reversibleQuantity = roundQuantity(allocation.quantity_remaining);
+      if (reversibleQuantity <= 0) {
+        continue;
+      }
+
+      const reversedQuantity = roundQuantity(Math.min(quantityToReverse, reversibleQuantity));
+      allocation.quantity_remaining = roundQuantity(reversibleQuantity - reversedQuantity);
+      quantityToReverse = roundQuantity(quantityToReverse - reversedQuantity);
+    }
+  });
+
+  const soldSnapshot = new Map();
+  for (const relatedAllocations of allocationsBySaleProduct.values()) {
+    for (const allocation of relatedAllocations) {
+      if (allocation.quantity_remaining <= 0) {
+        continue;
+      }
+
+      const supplierKey = registerSupplierAggregate(soldSnapshot, allocation);
+      if (!supplierKey) {
+        continue;
+      }
+
+      const supplierEntry = soldSnapshot.get(supplierKey);
+      supplierEntry.sold_qty = roundQuantity(toNumber(supplierEntry.sold_qty) + allocation.quantity_remaining);
+      supplierEntry.sold_value = roundCurrency(
+        toNumber(supplierEntry.sold_value) + (allocation.quantity_remaining * allocation.unit_cost)
+      );
+    }
+  }
+
+  return soldSnapshot;
+}
+
+async function getSupplierPaymentSnapshot(endDate) {
+  const paymentRows = await getAll(
+    `SELECT
+       COALESCE(s.id, sp.supplier_id) AS supplier_id,
+       COALESCE(s.name, sp.supplier_name) AS supplier_name,
+       SUM(sp.amount) AS paid_value,
+       COUNT(*) AS payment_count
+     FROM supplier_payments sp
+     LEFT JOIN suppliers s ON sp.supplier_id = s.id
+     WHERE DATE(sp.payment_date) <= ?
+       AND COALESCE(TRIM(COALESCE(s.name, sp.supplier_name)), '') != ''
+     GROUP BY COALESCE(CAST(COALESCE(s.id, sp.supplier_id) AS TEXT), LOWER(TRIM(COALESCE(s.name, sp.supplier_name)))), COALESCE(s.id, sp.supplier_id), COALESCE(s.name, sp.supplier_name)
+     ORDER BY COALESCE(s.name, sp.supplier_name) ASC`,
+    [endDate]
+  );
+
+  const paymentSnapshot = new Map();
+  paymentRows.forEach((paymentRow) => {
+    const supplierKey = registerSupplierAggregate(paymentSnapshot, paymentRow);
+    if (!supplierKey) {
+      return;
+    }
+
+    const supplierEntry = paymentSnapshot.get(supplierKey);
+    supplierEntry.paid_value = roundCurrency(paymentRow.paid_value);
+    supplierEntry.payment_count = Number(paymentRow.payment_count || 0);
+  });
+
+  return paymentSnapshot;
+}
+
+async function getSupplierReceivedActivity(startDate, endDate) {
+  const purchaseRows = await getAll(
+    `SELECT
+       COALESCE(s.id, pl.supplier_id) AS supplier_id,
+       COALESCE(s.name, pl.supplier_name) AS supplier_name,
+       SUM(pl.quantity_received) AS received_qty,
+       SUM(pl.quantity_received * pl.price_per_unit) AS received_value,
+       COUNT(*) AS purchase_count
+     FROM purchase_lots pl
+     LEFT JOIN suppliers s ON pl.supplier_id = s.id
+     WHERE pl.source_type = 'purchase'
+       AND DATE(COALESCE(pl.delivery_date, pl.purchase_date, pl.created_at)) BETWEEN ? AND ?
+       AND COALESCE(TRIM(COALESCE(s.name, pl.supplier_name)), '') != ''
+     GROUP BY COALESCE(CAST(COALESCE(s.id, pl.supplier_id) AS TEXT), LOWER(TRIM(COALESCE(s.name, pl.supplier_name)))), COALESCE(s.id, pl.supplier_id), COALESCE(s.name, pl.supplier_name)
+     ORDER BY COALESCE(s.name, pl.supplier_name) ASC`,
+    [startDate, endDate]
+  );
+
+  const receivedActivity = new Map();
+  purchaseRows.forEach((purchaseRow) => {
+    const supplierKey = registerSupplierAggregate(receivedActivity, purchaseRow);
+    if (!supplierKey) {
+      return;
+    }
+
+    const supplierEntry = receivedActivity.get(supplierKey);
+    supplierEntry.received_qty = roundQuantity(purchaseRow.received_qty);
+    supplierEntry.received_value = roundCurrency(purchaseRow.received_value);
+    supplierEntry.purchase_count = Number(purchaseRow.purchase_count || 0);
+  });
+
+  return receivedActivity;
+}
+
+async function getSupplierReturnActivity(startDate, endDate) {
+  const supplierReturnRows = await getAll(
+    `SELECT
+       COALESCE(s.id, sr.supplier_id) AS supplier_id,
+       COALESCE(s.name, sr.supplier_name) AS supplier_name,
+       SUM(sri.quantity_returned) AS returned_qty,
+       SUM(sri.total_amount) AS returned_value,
+       COUNT(DISTINCT sr.id) AS return_count
+     FROM supplier_returns sr
+     JOIN supplier_return_items sri ON sri.supplier_return_id = sr.id
+     LEFT JOIN suppliers s ON sr.supplier_id = s.id
+     WHERE DATE(sr.return_date) BETWEEN ? AND ?
+       AND COALESCE(TRIM(COALESCE(s.name, sr.supplier_name)), '') != ''
+     GROUP BY COALESCE(CAST(COALESCE(s.id, sr.supplier_id) AS TEXT), LOWER(TRIM(COALESCE(s.name, sr.supplier_name)))), COALESCE(s.id, sr.supplier_id), COALESCE(s.name, sr.supplier_name)
+     ORDER BY COALESCE(s.name, sr.supplier_name) ASC`,
+    [startDate, endDate]
+  );
+
+  const returnActivity = new Map();
+  supplierReturnRows.forEach((supplierReturnRow) => {
+    const supplierKey = registerSupplierAggregate(returnActivity, supplierReturnRow);
+    if (!supplierKey) {
+      return;
+    }
+
+    const supplierEntry = returnActivity.get(supplierKey);
+    supplierEntry.returned_qty = roundQuantity(supplierReturnRow.returned_qty);
+    supplierEntry.returned_value = roundCurrency(supplierReturnRow.returned_value);
+    supplierEntry.return_count = Number(supplierReturnRow.return_count || 0);
+  });
+
+  return returnActivity;
+}
+
 // Daily sales report
 router.get('/daily-sales', authenticateToken, async (req, res) => {
   try {
@@ -544,6 +859,163 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Supplier report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.get('/supplier-settlement', authenticateToken, async (req, res) => {
+  try {
+    const requestedSupplier = normalizeSupplierName(req.query.supplier);
+    const supplierRecord = requestedSupplier
+      ? await resolveSupplier({ supplierName: requestedSupplier })
+      : null;
+    const range = resolveSupplierSettlementRange({
+      startDate: req.query.start_date,
+      endDate: req.query.end_date,
+      financialYear: req.query.financial_year
+    });
+    const openingCutoffDate = getPreviousDate(range.startDate);
+
+    const [openingSoldSnapshot, closingSoldSnapshot, openingPaymentSnapshot, closingPaymentSnapshot, receivedActivity, supplierReturnActivity] = await Promise.all([
+      getSupplierSoldSnapshot(openingCutoffDate),
+      getSupplierSoldSnapshot(range.endDate),
+      getSupplierPaymentSnapshot(openingCutoffDate),
+      getSupplierPaymentSnapshot(range.endDate),
+      getSupplierReceivedActivity(range.startDate, range.endDate),
+      getSupplierReturnActivity(range.startDate, range.endDate)
+    ]);
+
+    const supplierKeys = new Set([
+      ...openingSoldSnapshot.keys(),
+      ...closingSoldSnapshot.keys(),
+      ...openingPaymentSnapshot.keys(),
+      ...closingPaymentSnapshot.keys(),
+      ...receivedActivity.keys(),
+      ...supplierReturnActivity.keys()
+    ]);
+
+    let rows = Array.from(supplierKeys).map((supplierKey) => {
+      const supplierMeta = closingSoldSnapshot.get(supplierKey)
+        || closingPaymentSnapshot.get(supplierKey)
+        || receivedActivity.get(supplierKey)
+        || supplierReturnActivity.get(supplierKey)
+        || openingSoldSnapshot.get(supplierKey)
+        || openingPaymentSnapshot.get(supplierKey)
+        || { supplier_id: null, supplier: 'Unknown Supplier' };
+
+      const openingSoldValue = roundCurrency(openingSoldSnapshot.get(supplierKey)?.sold_value || 0);
+      const closingSoldValue = roundCurrency(closingSoldSnapshot.get(supplierKey)?.sold_value || 0);
+      const openingPaidValue = roundCurrency(openingPaymentSnapshot.get(supplierKey)?.paid_value || 0);
+      const closingPaidValue = roundCurrency(closingPaymentSnapshot.get(supplierKey)?.paid_value || 0);
+
+      return {
+        supplier_id: supplierMeta.supplier_id || null,
+        supplier: supplierMeta.supplier || 'Unknown Supplier',
+        opening_due: roundCurrency(openingSoldValue - openingPaidValue),
+        sold_liability: roundCurrency(closingSoldValue - openingSoldValue),
+        payments_made: roundCurrency(closingPaidValue - openingPaidValue),
+        closing_due: roundCurrency(closingSoldValue - closingPaidValue),
+        received_qty: roundQuantity(receivedActivity.get(supplierKey)?.received_qty || 0),
+        received_value: roundCurrency(receivedActivity.get(supplierKey)?.received_value || 0),
+        returned_qty: roundQuantity(supplierReturnActivity.get(supplierKey)?.returned_qty || 0),
+        returned_value: roundCurrency(supplierReturnActivity.get(supplierKey)?.returned_value || 0),
+        purchase_count: Number(receivedActivity.get(supplierKey)?.purchase_count || 0),
+        payment_count: Math.max(
+          0,
+          Number(closingPaymentSnapshot.get(supplierKey)?.payment_count || 0)
+            - Number(openingPaymentSnapshot.get(supplierKey)?.payment_count || 0)
+        ),
+        return_count: Number(supplierReturnActivity.get(supplierKey)?.return_count || 0),
+        opening_sold_value: openingSoldValue,
+        closing_sold_value: closingSoldValue,
+        opening_paid_value: openingPaidValue,
+        closing_paid_value: closingPaidValue
+      };
+    });
+
+    if (requestedSupplier) {
+      const requestedSupplierKey = buildSupplierAggregationKey({
+        supplierId: supplierRecord?.id,
+        supplierName: requestedSupplier
+      });
+      rows = rows.filter((row) => buildSupplierAggregationKey({
+        supplierId: row.supplier_id,
+        supplierName: row.supplier
+      }) === requestedSupplierKey);
+    }
+
+    rows = rows
+      .filter((row) => {
+        const hasFinancialMovement = [
+          row.opening_due,
+          row.sold_liability,
+          row.payments_made,
+          row.closing_due,
+          row.received_value,
+          row.returned_value,
+          row.received_qty,
+          row.returned_qty,
+          row.purchase_count,
+          row.payment_count,
+          row.return_count
+        ].some((value) => Math.abs(toNumber(value)) > 0);
+
+        return hasFinancialMovement;
+      })
+      .sort((leftRow, rightRow) => {
+        const dueDelta = toNumber(rightRow.closing_due) - toNumber(leftRow.closing_due);
+        if (Math.abs(dueDelta) > 0.001) {
+          return dueDelta;
+        }
+
+        const liabilityDelta = toNumber(rightRow.sold_liability) - toNumber(leftRow.sold_liability);
+        if (Math.abs(liabilityDelta) > 0.001) {
+          return liabilityDelta;
+        }
+
+        return String(leftRow.supplier || '').localeCompare(String(rightRow.supplier || ''));
+      });
+
+    const summary = rows.reduce((accumulator, row) => ({
+      total_suppliers: accumulator.total_suppliers + 1,
+      suppliers_with_due: accumulator.suppliers_with_due + (toNumber(row.closing_due) > 0 ? 1 : 0),
+      total_opening_due: roundCurrency(accumulator.total_opening_due + toNumber(row.opening_due)),
+      total_sold_liability: roundCurrency(accumulator.total_sold_liability + toNumber(row.sold_liability)),
+      total_payments_made: roundCurrency(accumulator.total_payments_made + toNumber(row.payments_made)),
+      total_closing_due: roundCurrency(accumulator.total_closing_due + toNumber(row.closing_due)),
+      total_received_value: roundCurrency(accumulator.total_received_value + toNumber(row.received_value)),
+      total_returned_value: roundCurrency(accumulator.total_returned_value + toNumber(row.returned_value)),
+      total_received_qty: roundQuantity(accumulator.total_received_qty + toNumber(row.received_qty)),
+      total_returned_qty: roundQuantity(accumulator.total_returned_qty + toNumber(row.returned_qty))
+    }), {
+      total_suppliers: 0,
+      suppliers_with_due: 0,
+      total_opening_due: 0,
+      total_sold_liability: 0,
+      total_payments_made: 0,
+      total_closing_due: 0,
+      total_received_value: 0,
+      total_returned_value: 0,
+      total_received_qty: 0,
+      total_returned_qty: 0
+    });
+
+    res.json({
+      rows,
+      summary,
+      range: {
+        start_date: range.startDate,
+        end_date: range.endDate,
+        financial_year: range.financialYear,
+        label: range.label,
+        opening_cutoff_date: openingCutoffDate
+      }
+    });
+  } catch (error) {
+    console.error('Supplier settlement report error:', error);
+    if (error.status) {
+      return res.status(error.status).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });

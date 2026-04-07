@@ -80,6 +80,100 @@ describe('Sales Flow', () => {
       expect(res.body.totalAmount).toBe(700); // 3*100 + 2*200
     });
 
+    test('should not add extra GST on customer sales', async () => {
+      const gstProduct = await createTestProduct(testDb, {
+        product_id: 'SALE_GST001',
+        product_name: 'GST Inclusive Product',
+        quantity_available: 10,
+        selling_price: 150,
+        gst_percent: 18
+      });
+
+      const res = await request(app)
+        .post('/api/sales')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          items: [{ product_id: gstProduct.id, quantity: 2 }],
+          customer_name: 'GST Customer',
+          payment_mode: 'cash'
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.totalAmount).toBe(300);
+      expect(res.body.tax).toBe(0);
+      expect(Number(res.body.receipt.tax_amount)).toBe(0);
+
+      const saleLine = await testDb.getRow(
+        'SELECT gst_percent, tax_amount FROM sales WHERE sale_id = ? AND product_id = ?',
+        [res.body.saleId, gstProduct.id]
+      );
+      expect(Number(saleLine.gst_percent)).toBe(0);
+      expect(Number(saleLine.tax_amount)).toBe(0);
+    });
+
+    test('should allocate sales across supplier lots in FIFO order', async () => {
+      const fifoProduct = await createTestProduct(testDb, {
+        product_id: 'SALE_FIFO001',
+        product_name: 'FIFO Product',
+        quantity_available: 0,
+        purchase_price: 50,
+        selling_price: 100,
+        supplier: null
+      });
+
+      await request(app)
+        .post('/api/purchases')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          product_id: fifoProduct.id,
+          quantity: 10,
+          price_per_unit: 50,
+          supplier: 'Supplier FIFO A',
+          purchase_status: 'delivered'
+        });
+
+      await request(app)
+        .post('/api/purchases')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          product_id: fifoProduct.id,
+          quantity: 10,
+          price_per_unit: 40,
+          supplier: 'Supplier FIFO B',
+          purchase_status: 'delivered'
+        });
+
+      const res = await request(app)
+        .post('/api/sales')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          items: [{ product_id: fifoProduct.id, quantity: 12 }],
+          customer_name: 'FIFO Buyer',
+          payment_mode: 'cash'
+        });
+
+      expect(res.status).toBe(201);
+
+      const lots = await testDb.getAll(
+        'SELECT supplier_name, quantity_sold, quantity_remaining FROM purchase_lots WHERE product_id = ? ORDER BY id ASC',
+        [fifoProduct.id]
+      );
+      const supplierALot = lots.find((lot) => lot.supplier_name === 'Supplier FIFO A');
+      const supplierBLot = lots.find((lot) => lot.supplier_name === 'Supplier FIFO B');
+
+      expect(Number(supplierALot.quantity_sold)).toBe(10);
+      expect(Number(supplierALot.quantity_remaining)).toBe(0);
+      expect(Number(supplierBLot.quantity_sold)).toBe(2);
+      expect(Number(supplierBLot.quantity_remaining)).toBe(8);
+
+      const allocations = await testDb.getAll(
+        'SELECT quantity_allocated FROM sale_allocations WHERE sale_id = ? ORDER BY id ASC',
+        [res.body.saleId]
+      );
+      expect(allocations).toHaveLength(2);
+      expect(allocations.reduce((sum, allocation) => sum + Number(allocation.quantity_allocated || 0), 0)).toBe(12);
+    });
+
     test('should create customer_sales archive entries', async () => {
       const archives = await testDb.getAll(
         "SELECT * FROM customer_sales WHERE customer_name = 'Test Customer'"

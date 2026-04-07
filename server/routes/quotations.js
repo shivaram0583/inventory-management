@@ -49,7 +49,7 @@ router.post('/', [
         ? Number(item.price_per_unit)
         : (resolvedPricing?.effective_price || product.selling_price);
       const discountPct = item.discount_percent || 0;
-      const taxPct = item.tax_percent || product.gst_percent || 0;
+      const taxPct = 0;
 
       const lineTotal = item.quantity * pricePerUnit;
       const lineDiscount = lineTotal * (discountPct / 100);

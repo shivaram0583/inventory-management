@@ -10,6 +10,7 @@ const { getDailySetupStatus, getISTDateString } = require('../services/dailySetu
 const { logAudit } = require('../middleware/auditLog');
 const { buildReceiptVerificationLink } = require('../services/communications');
 const { resolveEffectivePrice } = require('../services/pricing');
+const { allocateSaleToLots } = require('../services/purchaseLotLedger');
 
 const router = express.Router();
 
@@ -90,6 +91,13 @@ router.post('/', [
     let totalAmount = 0;
     let totalTax = 0;
     const saleItems = [];
+    const requestedByProduct = new Map();
+    const checkedProductStock = new Set();
+
+    for (const item of items) {
+      const currentRequested = requestedByProduct.get(item.product_id) || 0;
+      requestedByProduct.set(item.product_id, currentRequested + Number(item.quantity || 0));
+    }
 
     // Validate each item and check stock
     for (const item of items) {
@@ -99,10 +107,14 @@ router.post('/', [
         return res.status(404).json({ message: `Product with ID ${item.product_id} not found` });
       }
 
-      if (product.quantity_available < item.quantity) {
-        return res.status(400).json({ 
-          message: `Insufficient stock for ${product.product_name}. Available: ${product.quantity_available} ${product.unit}` 
-        });
+      if (!checkedProductStock.has(product.id)) {
+        const totalRequested = Number(requestedByProduct.get(product.id) || 0);
+        if (product.quantity_available < totalRequested) {
+          return res.status(400).json({
+            message: `Insufficient stock for ${product.product_name}. Available: ${product.quantity_available} ${product.unit}`
+          });
+        }
+        checkedProductStock.add(product.id);
       }
 
       const manualPriceOverride = Boolean(item.manual_price_override || quotation_id);
@@ -120,9 +132,9 @@ router.post('/', [
       const itemSubtotal = item.quantity * pricePerUnit;
       const itemDiscount = item.discount_amount || (item.discount_percent ? itemSubtotal * item.discount_percent / 100 : 0);
       const afterDiscount = itemSubtotal - itemDiscount;
-      const gstPercent = item.tax_percent !== undefined ? item.tax_percent : (product.gst_percent || 0);
-      const itemTax = afterDiscount * (gstPercent / 100);
-      const itemTotal = afterDiscount + itemTax;
+      const gstPercent = 0;
+      const itemTax = 0;
+      const itemTotal = afterDiscount;
 
       totalAmount += itemTotal;
       totalTax += itemTax;
@@ -150,7 +162,7 @@ router.post('/', [
     await runTransaction(async () => {
       // Create sale records and update stock
       for (const saleItem of saleItems) {
-        await runQuery(
+        const saleLine = await runQuery(
           `INSERT INTO sales (
              sale_id, product_id, quantity_sold, price_per_unit, total_amount, discount_amount,
              tax_amount, gst_percent, pricing_rule_type, pricing_rule_label, sale_date, operator_id
@@ -172,10 +184,18 @@ router.post('/', [
           ]
         );
 
-        const newQuantity = saleItem.product.quantity_available - saleItem.quantity;
+        await allocateSaleToLots({
+          saleLineId: saleLine.id,
+          saleId,
+          productId: saleItem.product.id,
+          quantity: saleItem.quantity,
+          saleDate: saleTimestamp,
+          eventTimestamp: saleTimestamp
+        }, { getRow, getAll, runQuery, nowIST });
+
         await runQuery(
-          'UPDATE products SET quantity_available = ?, updated_at = ? WHERE id = ?',
-          [newQuantity, saleTimestamp, saleItem.product.id]
+          'UPDATE products SET quantity_available = quantity_available - ?, updated_at = ? WHERE id = ?',
+          [saleItem.quantity, saleTimestamp, saleItem.product.id]
         );
       }
 

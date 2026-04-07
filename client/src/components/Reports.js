@@ -6,7 +6,15 @@ import {
 } from 'recharts';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
-import { getISTDateString, fmtDateTime } from '../utils/dateUtils';
+import {
+  getISTDateString,
+  fmtDateTime,
+  fmtDate,
+  getFinancialYearForDate,
+  getFinancialYearLabel,
+  getFinancialYearRange,
+  getFinancialYearOptions
+} from '../utils/dateUtils';
 import { downloadPDF } from '../utils/pdfExport';
 import SharedModal from './shared/Modal';
 import useSortableData from '../hooks/useSortableData';
@@ -41,10 +49,16 @@ const Reports = () => {
   const [activeTab, setActiveTab] = useState('daily');
   const [startDate, setStartDate] = useState(getISTDateString());
   const [endDate, setEndDate] = useState(getISTDateString());
+  const [settlementFinancialYear, setSettlementFinancialYear] = useState(() => getFinancialYearForDate(getISTDateString()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleteModal, setDeleteModal] = useState({ open: false, id: null, label: '' });
+  const settlementFinancialYearOptions = useMemo(() => getFinancialYearOptions(6), []);
+  const settlementFinancialYearRange = useMemo(
+    () => getFinancialYearRange(settlementFinancialYear),
+    [settlementFinancialYear]
+  );
 
   const { sortedItems: sortedSales, sortConfig: salesSort, requestSort: sortSales } = useSortableData(data?.sales || [], { key: 'total_amount', direction: 'desc' });
   const { sortedItems: sortedCustSales, sortConfig: custSalesSort, requestSort: sortCustSales } = useSortableData(data?.customerSales || [], { key: 'sale_date', direction: 'desc' });
@@ -55,6 +69,7 @@ const Reports = () => {
   const { sortedItems: sortedArchive, sortConfig: archiveSort, requestSort: sortArchive } = useSortableData(data?.records || [], { key: 'sale_date', direction: 'desc' });
   const { sortedItems: sortedSuppliers, sortConfig: suppliersSort, requestSort: sortSuppliers } = useSortableData(Array.isArray(data?.suppliers) ? data.suppliers : [], { key: 'total_spent', direction: 'desc' });
   const { sortedItems: sortedSupplierDetails, sortConfig: supplierDetailsSort, requestSort: sortSupplierDetails } = useSortableData(Array.isArray(data?.details) ? data.details : [], { key: 'supplier', direction: 'asc' });
+  const { sortedItems: sortedSupplierSettlementRows, sortConfig: supplierSettlementSort, requestSort: sortSupplierSettlement } = useSortableData(Array.isArray(data?.rows) ? data.rows : [], { key: 'closing_due', direction: 'desc' });
 
   // Audit sub-table sorts
   const { sortedItems: sortedCfDaily, sortConfig: cfDailySort, requestSort: sortCfDaily } = useSortableData(data?.cashFlow?.daily || [], { key: 'business_date', direction: 'asc' });
@@ -210,6 +225,10 @@ const Reports = () => {
             params = { start_date: startDate, end_date: endDate };
           }
           break;
+        case 'supplierSettlement':
+          url = '/api/reports/supplier-settlement';
+          params = { financial_year: settlementFinancialYear };
+          break;
         case 'audit':
           url = '/api/reports/audit';
           params = { start_date: startDate, end_date: endDate };
@@ -240,7 +259,7 @@ const Reports = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, startDate, endDate]);
+  }, [activeTab, startDate, endDate, settlementFinancialYear]);
 
   useEffect(() => {
     fetchReportData();
@@ -1109,6 +1128,175 @@ const Reports = () => {
     );
   };
 
+  const renderSupplierSettlementReport = () => {
+    if (!data) return null;
+
+    const summary = data.summary || {};
+    const periodLabel = data.range?.label || getFinancialYearLabel(settlementFinancialYear);
+    const periodWindow = data.range
+      ? `${fmtDate(data.range.start_date)} to ${fmtDate(data.range.end_date)}`
+      : settlementFinancialYearRange
+        ? `${fmtDate(settlementFinancialYearRange.startDate)} to ${fmtDate(settlementFinancialYearRange.endDate)}`
+        : '-';
+
+    const downloadRows = sortedSupplierSettlementRows.map((row) => ({
+      ...row,
+      period_label: periodLabel,
+      financial_year: data.range?.financial_year || settlementFinancialYear
+    }));
+
+    return (
+      <div className="space-y-6">
+        <div className="card !p-5 border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-emerald-50">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Supplier Settlement</p>
+              <h3 className="mt-1 text-xl font-bold text-slate-900">{periodLabel}</h3>
+              <p className="mt-1 text-sm text-slate-600">{periodWindow}</p>
+            </div>
+            <div className="max-w-2xl text-sm text-slate-600">
+              Closing due reflects sold supplier cost up to the end of the selected period minus supplier payments recorded up to the same date. Unsold stock returned to suppliers is shown separately and does not create payable balance.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+          <div className="stat-card border-slate-500 bg-slate-50">
+            <div className="flex items-center">
+              <Truck className="h-6 w-6 text-slate-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Suppliers Tracked</p>
+                <p className="text-2xl font-bold text-gray-900">{summary.total_suppliers || 0}</p>
+              </div>
+            </div>
+          </div>
+          <div className="stat-card border-amber-500 bg-amber-50">
+            <div className="flex items-center">
+              <IndianRupee className="h-6 w-6 text-amber-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Opening Due</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(summary.total_opening_due)}</p>
+              </div>
+            </div>
+          </div>
+          <div className="stat-card border-blue-500 bg-blue-50">
+            <div className="flex items-center">
+              <ArrowUpRight className="h-6 w-6 text-blue-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Sold Liability Added</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(summary.total_sold_liability)}</p>
+              </div>
+            </div>
+          </div>
+          <div className="stat-card border-emerald-500 bg-emerald-50">
+            <div className="flex items-center">
+              <ArrowDownLeft className="h-6 w-6 text-emerald-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Payments Made</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(summary.total_payments_made)}</p>
+              </div>
+            </div>
+          </div>
+          <div className="stat-card border-rose-500 bg-rose-50">
+            <div className="flex items-center">
+              <Landmark className="h-6 w-6 text-rose-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Closing Due</p>
+                <p className="text-2xl font-bold text-gray-900">₹{formatCurrency(summary.total_closing_due)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="card !py-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Received Value in Period</p>
+            <p className="mt-2 text-xl font-bold text-gray-900">₹{formatCurrency(summary.total_received_value)}</p>
+            <p className="mt-1 text-xs text-gray-500">Qty received: {summary.total_received_qty || 0}</p>
+          </div>
+          <div className="card !py-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Returned to Suppliers</p>
+            <p className="mt-2 text-xl font-bold text-gray-900">₹{formatCurrency(summary.total_returned_value)}</p>
+            <p className="mt-1 text-xs text-gray-500">Qty returned: {summary.total_returned_qty || 0}</p>
+          </div>
+          <div className="card !py-4">
+            <p className="text-xs uppercase tracking-wide text-gray-500">Suppliers With Closing Due</p>
+            <p className="mt-2 text-xl font-bold text-gray-900">{summary.suppliers_with_due || 0}</p>
+            <p className="mt-1 text-xs text-gray-500">Rows are sorted by highest remaining due.</p>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Supplier Settlement Breakdown</h3>
+              <p className="text-sm text-gray-500">Financial-year settlement view with sold-only liability, payments, and supplier returns.</p>
+            </div>
+            <DownloadBtn onClick={() => downloadPDF(downloadRows, [
+              { key: 'period_label', label: 'Period' },
+              { key: 'financial_year', label: 'Financial Year' },
+              { key: 'supplier', label: 'Supplier' },
+              { key: 'opening_due', label: 'Opening Due' },
+              { key: 'sold_liability', label: 'Sold Liability' },
+              { key: 'payments_made', label: 'Payments Made' },
+              { key: 'returned_value', label: 'Supplier Returns' },
+              { key: 'closing_due', label: 'Closing Due' },
+              { key: 'received_value', label: 'Received Value' },
+              { key: 'received_qty', label: 'Received Qty' },
+              { key: 'returned_qty', label: 'Returned Qty' },
+              { key: 'purchase_count', label: 'Purchase Count' },
+              { key: 'payment_count', label: 'Payment Count' },
+              { key: 'return_count', label: 'Return Count' }
+            ], `supplier-settlement_${data.range?.financial_year || settlementFinancialYear}.pdf`)} />
+          </div>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <SortableHeader label="Supplier" sortKey="supplier" sortConfig={supplierSettlementSort} onSort={sortSupplierSettlement} />
+                  <SortableHeader label="Opening Due" sortKey="opening_due" sortConfig={supplierSettlementSort} onSort={sortSupplierSettlement} />
+                  <SortableHeader label="Sold Liability" sortKey="sold_liability" sortConfig={supplierSettlementSort} onSort={sortSupplierSettlement} />
+                  <SortableHeader label="Payments Made" sortKey="payments_made" sortConfig={supplierSettlementSort} onSort={sortSupplierSettlement} />
+                  <SortableHeader label="Supplier Returns" sortKey="returned_value" sortConfig={supplierSettlementSort} onSort={sortSupplierSettlement} />
+                  <SortableHeader label="Closing Due" sortKey="closing_due" sortConfig={supplierSettlementSort} onSort={sortSupplierSettlement} />
+                  <SortableHeader label="Received Value" sortKey="received_value" sortConfig={supplierSettlementSort} onSort={sortSupplierSettlement} />
+                  <th>Activity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedSupplierSettlementRows.map((row) => (
+                  <tr key={`${row.supplier_id || row.supplier}`} className={Number(row.closing_due) > 0 ? 'bg-amber-50/70' : ''}>
+                    <td className="font-medium">{row.supplier}</td>
+                    <td>₹{formatCurrency(row.opening_due)}</td>
+                    <td className="text-blue-700 font-medium">₹{formatCurrency(row.sold_liability)}</td>
+                    <td className="text-emerald-700 font-medium">₹{formatCurrency(row.payments_made)}</td>
+                    <td>₹{formatCurrency(row.returned_value)}</td>
+                    <td className={`font-semibold ${Number(row.closing_due) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      ₹{formatCurrency(row.closing_due)}
+                    </td>
+                    <td>₹{formatCurrency(row.received_value)}</td>
+                    <td>
+                      <div className="space-y-1 text-xs text-gray-600">
+                        <div className="flex justify-between gap-4"><span>Received Qty</span><span className="font-medium text-gray-800">{row.received_qty || 0}</span></div>
+                        <div className="flex justify-between gap-4"><span>Returned Qty</span><span className="font-medium text-gray-800">{row.returned_qty || 0}</span></div>
+                        <div className="flex justify-between gap-4"><span>Purchases</span><span className="font-medium text-gray-800">{row.purchase_count || 0}</span></div>
+                        <div className="flex justify-between gap-4"><span>Payments</span><span className="font-medium text-gray-800">{row.payment_count || 0}</span></div>
+                        <div className="flex justify-between gap-4"><span>Returns</span><span className="font-medium text-gray-800">{row.return_count || 0}</span></div>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {sortedSupplierSettlementRows.length === 0 && (
+              <div className="text-center py-8 text-gray-500">No supplier settlement activity found for the selected period</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ═══════════════ AUDIT TAB ═══════════════
   const renderAuditReport = () => {
     if (!data) return null;
@@ -1877,6 +2065,8 @@ const Reports = () => {
         return renderCustomerSalesArchive();
       case 'suppliers':
         return renderSuppliersReport();
+      case 'supplierSettlement':
+        return renderSupplierSettlementReport();
       case 'audit':
         return renderAuditReport();
       case 'transactions':
@@ -2040,7 +2230,7 @@ const Reports = () => {
     );
   };
 
-  const tabHasFilters = ['daily', 'performance', 'purchases', 'customerSales', 'suppliers', 'audit', 'transactions', 'gst', 'profitLoss'].includes(activeTab);
+  const tabHasFilters = ['daily', 'performance', 'purchases', 'customerSales', 'suppliers', 'supplierSettlement', 'audit', 'transactions', 'gst', 'profitLoss'].includes(activeTab);
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -2066,6 +2256,7 @@ const Reports = () => {
             { id: 'performance', label: 'Performance', icon: TrendingUp },
             { id: 'customerSales', label: 'Sales Archive', icon: Users },
             { id: 'suppliers', label: 'Suppliers', icon: Truck },
+            { id: 'supplierSettlement', label: 'Settlement', icon: Landmark },
             { id: 'transactions', label: 'Transactions', icon: ClipboardList },
             { id: 'audit', label: 'Audit', icon: Shield },
             { id: 'gst', label: 'GST', icon: IndianRupee },
@@ -2128,6 +2319,30 @@ const Reports = () => {
                   <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">To</label>
                   <input type="date" className="input-field" value={endDate}
                     onChange={(e) => setEndDate(e.target.value)} />
+                </div>
+              </>
+            )}
+            {activeTab === 'supplierSettlement' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-1.5">Financial Year</label>
+                  <select
+                    className="input-field"
+                    value={settlementFinancialYear || ''}
+                    onChange={(e) => setSettlementFinancialYear(e.target.value)}
+                  >
+                    {settlementFinancialYearOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[220px] rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+                  <p className="font-semibold">Selected Period</p>
+                  <p className="mt-1 text-indigo-700">
+                    {settlementFinancialYearRange
+                      ? `${fmtDate(settlementFinancialYearRange.startDate)} to ${fmtDate(settlementFinancialYearRange.endDate)}`
+                      : 'Select a financial year'}
+                  </p>
                 </div>
               </>
             )}

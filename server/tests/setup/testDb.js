@@ -233,6 +233,45 @@ async function initializeTestSchema(testDb) {
     FOREIGN KEY (added_by) REFERENCES users (id)
   )`);
 
+  await runQuery(`CREATE TABLE IF NOT EXISTS purchase_lots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER UNIQUE,
+    product_id INTEGER NOT NULL,
+    supplier_id INTEGER,
+    supplier_name TEXT,
+    source_type TEXT NOT NULL DEFAULT 'purchase' CHECK (source_type IN ('purchase', 'opening', 'adjustment')),
+    quantity_received REAL NOT NULL DEFAULT 0,
+    quantity_sold REAL NOT NULL DEFAULT 0,
+    quantity_returned REAL NOT NULL DEFAULT 0,
+    quantity_adjusted REAL NOT NULL DEFAULT 0,
+    quantity_remaining REAL NOT NULL DEFAULT 0,
+    price_per_unit REAL NOT NULL DEFAULT 0,
+    gst_percent REAL NOT NULL DEFAULT 0,
+    purchase_date DATETIME,
+    delivery_date DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (purchase_id) REFERENCES purchases (id),
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS sale_allocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_line_id INTEGER NOT NULL,
+    sale_id TEXT NOT NULL,
+    product_id INTEGER NOT NULL,
+    purchase_lot_id INTEGER NOT NULL,
+    quantity_allocated REAL NOT NULL,
+    quantity_returned REAL NOT NULL DEFAULT 0,
+    unit_cost REAL NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sale_line_id) REFERENCES sales (id),
+    FOREIGN KEY (product_id) REFERENCES products (id),
+    FOREIGN KEY (purchase_lot_id) REFERENCES purchase_lots (id)
+  )`);
+
   await runQuery(`CREATE TABLE IF NOT EXISTS bank_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_name TEXT NOT NULL,
@@ -303,6 +342,37 @@ async function initializeTestSchema(testDb) {
     FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
     FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id),
     FOREIGN KEY (created_by) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS supplier_returns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id TEXT UNIQUE NOT NULL,
+    supplier_id INTEGER,
+    supplier_name TEXT,
+    total_quantity REAL NOT NULL DEFAULT 0,
+    total_amount REAL NOT NULL DEFAULT 0,
+    notes TEXT,
+    return_date DATETIME NOT NULL,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+  )`);
+
+  await runQuery(`CREATE TABLE IF NOT EXISTS supplier_return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_return_id INTEGER NOT NULL,
+    purchase_lot_id INTEGER NOT NULL,
+    purchase_id INTEGER,
+    product_id INTEGER NOT NULL,
+    quantity_returned REAL NOT NULL,
+    price_per_unit REAL NOT NULL,
+    total_amount REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_return_id) REFERENCES supplier_returns (id) ON DELETE CASCADE,
+    FOREIGN KEY (purchase_lot_id) REFERENCES purchase_lots (id),
+    FOREIGN KEY (purchase_id) REFERENCES purchases (id),
+    FOREIGN KEY (product_id) REFERENCES products (id)
   )`);
 
   await runQuery(`CREATE TABLE IF NOT EXISTS suppliers (

@@ -6,6 +6,7 @@ const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = requ
 const { addReviewNotification } = require('../services/reviewNotifications');
 const { createSupplierPaymentRecord } = require('../services/bankLedger');
 const { resolveSupplier } = require('../services/supplierDirectory');
+const { syncPurchaseLotForPurchase } = require('../services/purchaseLotLedger');
 const { logAudit } = require('../middleware/auditLog');
 const crypto = require('crypto');
 const moment = require('moment');
@@ -750,8 +751,10 @@ router.post('/', [
              delivery_date,
              purchase_status,
              advance_amount,
+             quantity_delivered,
+             updated_at,
              added_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
           [
             purchaseId,
             newProduct.id,
@@ -764,10 +767,25 @@ router.post('/', [
             eventTimestamp,
             PURCHASE_STATUS.DELIVERED,
             0,
+            inventoryQuantity,
+            eventTimestamp,
             req.user.id
           ]
         );
         createdPurchase = await getRow('SELECT * FROM purchases WHERE id = ?', [purchaseResult.id]);
+
+        await syncPurchaseLotForPurchase({
+          purchaseId: purchaseResult.id,
+          productId: newProduct.id,
+          supplierId,
+          supplierName: canonicalSupplierName,
+          deliveredQuantity: inventoryQuantity,
+          pricePerUnit: toNumber(purchase_price),
+          gstPercent: newProduct.gst_percent,
+          purchaseDate: eventTimestamp,
+          deliveryDate: eventTimestamp,
+          eventTimestamp
+        }, { getRow, getAll, runQuery, nowIST });
       }
 
       if (creationMode === PRODUCT_CREATION_MODE.ORDER) {
@@ -790,8 +808,10 @@ router.post('/', [
              delivery_date,
              purchase_status,
              advance_amount,
+             quantity_delivered,
+             updated_at,
              added_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
           [
             purchaseId,
             newProduct.id,
@@ -804,6 +824,8 @@ router.post('/', [
             null,
             PURCHASE_STATUS.ORDERED,
             advanceAmount,
+            0,
+            eventTimestamp,
             req.user.id
           ]
         );
@@ -1014,9 +1036,10 @@ router.post('/:id/add-stock', [
     }
 
     const newQuantity = product.quantity_available + quantity;
+    const eventTimestamp = nowIST();
     await runQuery(
       'UPDATE products SET quantity_available = ?, updated_at = ? WHERE id = ?',
-      [newQuantity, nowIST(), productId]
+      [newQuantity, eventTimestamp, productId]
     );
 
     const updatedProduct = await getRow('SELECT * FROM products WHERE id = ?', [productId]);
@@ -1024,9 +1047,22 @@ router.post('/:id/add-stock', [
     // Record purchase
     const crypto = require('crypto');
     const purchaseId = 'PUR' + Date.now() + crypto.randomBytes(2).toString('hex').toUpperCase();
-    await runQuery(
-      `INSERT INTO purchases (purchase_id, product_id, quantity, price_per_unit, total_amount, supplier, supplier_id, added_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    const purchaseResult = await runQuery(
+      `INSERT INTO purchases (
+         purchase_id,
+         product_id,
+         quantity,
+         price_per_unit,
+         total_amount,
+         supplier,
+         supplier_id,
+         purchase_date,
+         delivery_date,
+         purchase_status,
+         quantity_delivered,
+         updated_at,
+         added_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         purchaseId,
         updatedProduct.id,
@@ -1035,9 +1071,27 @@ router.post('/:id/add-stock', [
         quantity * updatedProduct.purchase_price,
         updatedProduct.supplier || null,
         updatedProduct.supplier_id || null,
+        eventTimestamp,
+        eventTimestamp,
+        PURCHASE_STATUS.DELIVERED,
+        quantity,
+        eventTimestamp,
         req.user.id
       ]
     );
+
+    await syncPurchaseLotForPurchase({
+      purchaseId: purchaseResult.id,
+      productId: updatedProduct.id,
+      supplierId: updatedProduct.supplier_id || null,
+      supplierName: updatedProduct.supplier || null,
+      deliveredQuantity: quantity,
+      pricePerUnit: updatedProduct.purchase_price,
+      gstPercent: updatedProduct.gst_percent,
+      purchaseDate: eventTimestamp,
+      deliveryDate: eventTimestamp,
+      eventTimestamp
+    }, { getRow, getAll, runQuery, nowIST });
 
     addReviewNotification({
       actorId: req.user.id,
@@ -1046,7 +1100,7 @@ router.post('/:id/add-stock', [
       type: 'inventory',
       title: 'Added stock to inventory',
       description: `${quantity} ${updatedProduct.unit} was added to ${updatedProduct.product_name} (${updatedProduct.product_id}).`,
-      createdAt: nowIST()
+      createdAt: eventTimestamp
     });
 
     res.json({

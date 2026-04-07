@@ -514,6 +514,59 @@ describe('Transactions', () => {
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
     });
+
+    test('should calculate supplier balance from sold stock only', async () => {
+      const product = await createTestProduct(testDb, {
+        product_id: 'TXNSUP001',
+        product_name: 'Supplier Balance Product',
+        quantity_available: 0,
+        purchase_price: 40,
+        selling_price: 100,
+        supplier: null
+      });
+
+      await request(app)
+        .post('/api/purchases')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          product_id: product.id,
+          quantity: 10,
+          price_per_unit: 40,
+          supplier: 'Balance Supplier',
+          purchase_status: 'delivered'
+        });
+
+      await request(app)
+        .post('/api/sales')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          items: [{ product_id: product.id, quantity: 3 }],
+          customer_name: 'Balance Customer',
+          payment_mode: 'cash'
+        });
+
+      await request(app)
+        .post('/api/transactions/supplier-payments')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          supplier_name: 'Balance Supplier',
+          amount: 50,
+          payment_mode: 'cash',
+          payment_date: '2026-04-04'
+        });
+
+      const res = await request(app)
+        .get('/api/transactions/supplier-balances')
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(res.status).toBe(200);
+      const supplierBalance = res.body.find((row) => row.supplier_name === 'Balance Supplier');
+      expect(Number(supplierBalance.total_received_value)).toBe(400);
+      expect(Number(supplierBalance.sold_value)).toBe(120);
+      expect(Number(supplierBalance.total_remaining_qty)).toBe(7);
+      expect(Number(supplierBalance.total_paid)).toBe(50);
+      expect(Number(supplierBalance.remaining_balance)).toBe(70);
+    });
   });
 
   // ─── DAILY SUMMARY ────────────────────────────────────────────────────

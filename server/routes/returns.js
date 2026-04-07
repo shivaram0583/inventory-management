@@ -6,6 +6,7 @@ const { getRow, runQuery, getAll, nowIST, runTransaction, paginate } = require('
 const { logAudit } = require('../middleware/auditLog');
 const { addReviewNotification } = require('../services/reviewNotifications');
 const moment = require('moment');
+const { reverseSaleFromLots } = require('../services/purchaseLotLedger');
 
 const router = express.Router();
 
@@ -45,29 +46,44 @@ router.post('/', [
 
     await runTransaction(async ({ runQuery: txRun, getRow: txGet, getAll: txGetAll }) => {
       for (const item of items) {
-        const saleItem = saleItems.find(s => s.product_id === item.product_id);
-        if (!saleItem) {
+        const matchingSaleItems = saleItems.filter((saleItem) => saleItem.product_id === item.product_id);
+        if (!matchingSaleItems.length) {
           throw new Error(`Product ${item.product_id} not found in sale ${sale_id}`);
         }
+
+        const totalSoldQuantity = matchingSaleItems.reduce((sum, saleItem) => sum + Number(saleItem.quantity_sold || 0), 0);
+        const totalSoldAmount = matchingSaleItems.reduce(
+          (sum, saleItem) => sum + (Number(saleItem.quantity_sold || 0) * Number(saleItem.price_per_unit || 0)),
+          0
+        );
+        const averagePrice = totalSoldQuantity > 0 ? totalSoldAmount / totalSoldQuantity : 0;
+        const primarySaleItem = matchingSaleItems[0];
 
         // Check already returned quantity
         const alreadyReturned = await txGet(
           'SELECT COALESCE(SUM(quantity_returned), 0) as total FROM sales_returns WHERE sale_id = ? AND product_id = ?',
           [sale_id, item.product_id]
         );
-        const maxReturnable = saleItem.quantity_sold - (alreadyReturned?.total || 0);
+        const maxReturnable = totalSoldQuantity - (alreadyReturned?.total || 0);
         if (item.quantity > maxReturnable) {
-          throw new Error(`Cannot return ${item.quantity} of ${saleItem.product_name}. Max returnable: ${maxReturnable}`);
+          throw new Error(`Cannot return ${item.quantity} of ${primarySaleItem.product_name}. Max returnable: ${maxReturnable}`);
         }
 
-        const refundAmount = item.quantity * saleItem.price_per_unit;
+        const refundAmount = item.quantity * averagePrice;
         totalRefund += refundAmount;
+
+        await reverseSaleFromLots({
+          saleId: sale_id,
+          productId: item.product_id,
+          quantity: item.quantity,
+          eventTimestamp: returnDate
+        }, { getRow, getAll, runQuery, nowIST });
 
         // Create return record
         await txRun(
           `INSERT INTO sales_returns (return_id, sale_id, product_id, quantity_returned, price_per_unit, refund_amount, refund_mode, bank_account_id, reason, returned_by, return_date, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [returnId, sale_id, item.product_id, item.quantity, saleItem.price_per_unit, refundAmount,
+          [returnId, sale_id, item.product_id, item.quantity, averagePrice, refundAmount,
            refund_mode, bank_account_id || null, reason || null, req.user.id, returnDate, returnDate]
         );
 
@@ -77,7 +93,7 @@ router.post('/', [
           [item.quantity, returnDate, item.product_id]
         );
 
-        returnedItems.push({ product_id: item.product_id, product_name: saleItem.product_name, quantity: item.quantity, refund: refundAmount });
+        returnedItems.push({ product_id: item.product_id, product_name: primarySaleItem.product_name, quantity: item.quantity, refund: refundAmount });
       }
 
       // Handle bank refund
@@ -117,7 +133,7 @@ router.post('/', [
     });
   } catch (error) {
     console.error('Sales return error:', error);
-    res.status(error.message.includes('Cannot return') ? 400 : 500).json({ message: error.message || 'Server error' });
+    res.status(error.status || (error.message.includes('Cannot return') ? 400 : 500)).json({ message: error.message || 'Server error' });
   }
 });
 

@@ -2,9 +2,10 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
-const { getRow, runQuery, getAll, nowIST, paginate } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST, paginate, runTransaction } = require('../database/db');
 const { logAudit } = require('../middleware/auditLog');
 const { addReviewNotification } = require('../services/reviewNotifications');
+const { applyStockAdjustmentToLots } = require('../services/purchaseLotLedger');
 
 const router = express.Router();
 
@@ -44,16 +45,25 @@ router.post('/', [
 
     const adjustmentDate = nowIST();
 
-    await runQuery(
-      'UPDATE products SET quantity_available = ?, updated_at = ? WHERE id = ?',
-      [newQuantity, adjustmentDate, product_id]
-    );
+    let result;
+    await runTransaction(async () => {
+      await runQuery(
+        'UPDATE products SET quantity_available = ?, updated_at = ? WHERE id = ?',
+        [newQuantity, adjustmentDate, product_id]
+      );
 
-    const result = await runQuery(
-      `INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_adjusted, quantity_before, quantity_after, reason, adjusted_by, adjustment_date, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [product_id, adjustment_type, signedAdjustment, product.quantity_available, newQuantity, reason, req.user.id, adjustmentDate, adjustmentDate]
-    );
+      await applyStockAdjustmentToLots({
+        productId: product_id,
+        quantity: signedAdjustment,
+        eventTimestamp: adjustmentDate
+      }, { getRow, getAll, runQuery, nowIST });
+
+      result = await runQuery(
+        `INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_adjusted, quantity_before, quantity_after, reason, adjusted_by, adjustment_date, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [product_id, adjustment_type, signedAdjustment, product.quantity_available, newQuantity, reason, req.user.id, adjustmentDate, adjustmentDate]
+      );
+    });
 
     addReviewNotification({
       actorId: req.user.id, actorName: req.user.username, actorRole: req.user.role,

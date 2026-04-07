@@ -130,6 +130,13 @@ const Purchases = () => {
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [supplierDetail, setSupplierDetail] = useState(null);
   const [supplierLoading, setSupplierLoading] = useState(false);
+  const [supplierReturnModal, setSupplierReturnModal] = useState({
+    open: false,
+    items: [],
+    return_date: getISTDateString(),
+    notes: ''
+  });
+  const [supplierReturnSubmitting, setSupplierReturnSubmitting] = useState(false);
 
   const [historySearch, setHistorySearch] = useState('');
   const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
@@ -559,6 +566,86 @@ const Purchases = () => {
       setError('Failed to load supplier details');
     } finally {
       setSupplierLoading(false);
+    }
+  };
+
+  const openSupplierReturnModal = () => {
+    const openLots = supplierDetail?.open_lots || [];
+    if (!supplierDetail?.supplier_id || openLots.length === 0) {
+      return;
+    }
+
+    setSupplierReturnModal({
+      open: true,
+      return_date: getISTDateString(),
+      notes: '',
+      items: openLots.map((lot) => ({
+        purchase_lot_id: lot.id,
+        product_name: lot.product_name,
+        product_code: lot.product_code,
+        purchase_reference: lot.purchase_reference,
+        unit: lot.unit,
+        quantity_remaining: num(lot.quantity_remaining),
+        quantity_returned: String(num(lot.quantity_remaining)),
+        price_per_unit: num(lot.price_per_unit)
+      }))
+    });
+  };
+
+  const updateSupplierReturnItem = (purchaseLotId, nextValue) => {
+    setSupplierReturnModal((current) => ({
+      ...current,
+      items: current.items.map((item) => {
+        if (item.purchase_lot_id !== purchaseLotId) {
+          return item;
+        }
+
+        const parsed = nextValue === '' ? '' : Math.max(0, Math.min(num(nextValue), item.quantity_remaining));
+        return {
+          ...item,
+          quantity_returned: String(parsed)
+        };
+      })
+    }));
+  };
+
+  const handleSupplierReturnSubmit = async (event) => {
+    event.preventDefault();
+    if (!supplierDetail?.supplier_id) {
+      setError('Supplier record is not available for this return');
+      return;
+    }
+
+    const items = supplierReturnModal.items
+      .map((item) => ({
+        purchase_lot_id: item.purchase_lot_id,
+        quantity_returned: num(item.quantity_returned)
+      }))
+      .filter((item) => item.quantity_returned > 0);
+
+    if (items.length === 0) {
+      setError('Enter at least one quantity to return');
+      return;
+    }
+
+    setSupplierReturnSubmitting(true);
+    setError('');
+    try {
+      const res = await axios.post(`/api/suppliers/${supplierDetail.supplier_id}/returns`, {
+        items,
+        return_date: supplierReturnModal.return_date,
+        notes: supplierReturnModal.notes
+      });
+
+      setSupplierReturnModal({ open: false, items: [], return_date: getISTDateString(), notes: '' });
+      await fetchAll();
+      await fetchSupplierDetail(selectedSupplier || supplierDetail.supplier);
+      setSuccess(res.data?.message || 'Supplier return recorded successfully');
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (e) {
+      setError(e.response?.data?.message || 'Failed to record supplier return');
+    } finally {
+      setSupplierReturnSubmitting(false);
     }
   };
 
@@ -1077,13 +1164,20 @@ const Purchases = () => {
                           <div className="flex gap-4 mt-1 text-xs text-gray-500 flex-wrap">
                             <span><strong>{supplier.products_supplied}</strong> products</span>
                             <span><strong>{supplier.total_purchases}</strong> purchases</span>
+                            <span><strong>{Number(supplier.total_remaining_qty || 0)}</strong> on hand</span>
                             <span>Last: {supplier.last_purchase_date ? fmtDateTime(supplier.last_purchase_date) : '—'}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-right">
-                            <p className="text-sm font-bold text-teal-700">{fmtMoney(supplier.total_spent || 0)}</p>
-                            <p className="text-xs text-gray-400">{supplier.total_quantity} units</p>
+                            <p className="text-sm font-bold text-teal-700">{fmtMoney(supplier.sold_value || 0)}</p>
+                            <p className="text-xs text-gray-400">Sold liability</p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-sm font-bold ${num(supplier.balance_due) > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                              {fmtMoney(Math.abs(supplier.balance_due || 0))}
+                            </p>
+                            <p className="text-xs text-gray-400">{num(supplier.balance_due) > 0 ? 'Balance due' : 'Credit / settled'}</p>
                           </div>
                           {isAdmin && (
                             <button
@@ -1125,29 +1219,56 @@ const Purchases = () => {
                   <div className="card">
                     <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <h2 className="text-lg font-bold text-gray-900">{supplierDetail.supplier}</h2>
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => setDeleteSupplierModal({ open: true, supplier: supplierDetail.supplier })}
-                          className="inline-flex items-center gap-2 self-start rounded-xl bg-red-50 px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-100 transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete Supplier
-                        </button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canManagePurchases && num(supplierDetail.summary?.total_remaining_qty) > 0 && supplierDetail.supplier_id && (
+                          <button
+                            type="button"
+                            onClick={openSupplierReturnModal}
+                            className="inline-flex items-center gap-2 self-start rounded-xl bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-100 transition-colors"
+                          >
+                            <ArrowLeft className="h-4 w-4" />
+                            Return Remaining Stock
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteSupplierModal({ open: true, supplier: supplierDetail.supplier })}
+                            className="inline-flex items-center gap-2 self-start rounded-xl bg-red-50 px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-100 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete Supplier
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#f0fdfa,#ecfdf5)' }}>
-                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Purchases</p>
-                        <p className="text-2xl font-extrabold text-teal-700">{supplierDetail.summary?.total_purchases || 0}</p>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Received Value</p>
+                        <p className="text-2xl font-extrabold text-teal-700">{fmtMoney(supplierDetail.summary?.total_cost || 0)}</p>
+                        <p className="mt-1 text-xs text-gray-400">{Number(supplierDetail.summary?.total_items || 0)} units received</p>
                       </div>
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
-                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Items</p>
-                        <p className="text-2xl font-extrabold text-blue-700">{Number(supplierDetail.summary?.total_items || 0)}</p>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Sold Liability</p>
+                        <p className="text-2xl font-extrabold text-blue-700">{fmtMoney(supplierDetail.summary?.sold_value || 0)}</p>
+                        <p className="mt-1 text-xs text-gray-400">{Number(supplierDetail.summary?.total_sold_qty || 0)} units sold</p>
                       </div>
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#faf5ff,#f5f3ff)' }}>
-                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Cost</p>
-                        <p className="text-2xl font-extrabold text-purple-700">{fmtMoney(supplierDetail.summary?.total_cost || 0)}</p>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Payments Made</p>
+                        <p className="text-2xl font-extrabold text-purple-700">{fmtMoney(supplierDetail.summary?.total_paid || 0)}</p>
+                        <p className="mt-1 text-xs text-gray-400">Advances and settlements</p>
+                      </div>
+                      <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#fff7ed,#fffbeb)' }}>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Balance Due</p>
+                        <p className={`text-2xl font-extrabold ${num(supplierDetail.summary?.balance_due) > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                          {fmtMoney(Math.abs(supplierDetail.summary?.balance_due || 0))}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-400">{num(supplierDetail.summary?.balance_due) > 0 ? 'Payable for sold stock' : 'Settled or prepaid'}</p>
+                      </div>
+                      <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#fef2f2,#fff1f2)' }}>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Stock On Hand</p>
+                        <p className="text-2xl font-extrabold text-rose-700">{Number(supplierDetail.summary?.total_remaining_qty || 0)}</p>
+                        <p className="mt-1 text-xs text-gray-400">{Number(supplierDetail.summary?.total_returned_qty || 0)} units already returned</p>
                       </div>
                     </div>
                   </div>
@@ -1161,8 +1282,10 @@ const Purchases = () => {
                             <SortableHeader label="Product ID" sortKey="product_code" sortConfig={supProductsSort} onSort={sortSupProducts} />
                             <SortableHeader label="Product" sortKey="product_name" sortConfig={supProductsSort} onSort={sortSupProducts} />
                             <SortableHeader label="Category" sortKey="category" sortConfig={supProductsSort} onSort={sortSupProducts} />
-                            <SortableHeader label="Total Qty" sortKey="total_quantity" sortConfig={supProductsSort} onSort={sortSupProducts} />
-                            <SortableHeader label="Total Spent" sortKey="total_spent" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Received" sortKey="total_quantity" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Sold" sortKey="total_sold_qty" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="On Hand" sortKey="total_remaining_qty" sortConfig={supProductsSort} onSort={sortSupProducts} />
+                            <SortableHeader label="Sold Value" sortKey="sold_value" sortConfig={supProductsSort} onSort={sortSupProducts} />
                             <SortableHeader label="Purchases" sortKey="purchase_count" sortConfig={supProductsSort} onSort={sortSupProducts} />
                             <SortableHeader label="Last Purchase" sortKey="last_purchase_date" sortConfig={supProductsSort} onSort={sortSupProducts} />
                           </tr>
@@ -1177,7 +1300,9 @@ const Purchases = () => {
                               </td>
                               <td className="capitalize">{product.category}</td>
                               <td>{product.total_quantity} {product.unit}</td>
-                              <td className="font-medium">{fmtMoney(product.total_spent || 0)}</td>
+                              <td>{product.total_sold_qty} {product.unit}</td>
+                              <td>{product.total_remaining_qty} {product.unit}</td>
+                              <td className="font-medium">{fmtMoney(product.sold_value || 0)}</td>
                               <td>{product.purchase_count}</td>
                               <td className="text-sm">{fmtDateTime(product.last_purchase_date)}</td>
                             </tr>
@@ -1185,6 +1310,79 @@ const Purchases = () => {
                         </tbody>
                       </table>
                       {sortedSupProducts.length === 0 && <div className="text-center py-6 text-gray-400 text-sm">No products found</div>}
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-base font-bold text-gray-800">Open Supplier Lots</h3>
+                      <span className="text-xs font-semibold text-gray-400">FIFO is used when sales consume stock</span>
+                    </div>
+                    <div className="table-container">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Purchase</th>
+                            <th>Product</th>
+                            <th>Received</th>
+                            <th>Sold</th>
+                            <th>On Hand</th>
+                            <th>Rate</th>
+                            <th>Return Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(supplierDetail.open_lots || []).map((lot) => (
+                            <tr key={lot.id}>
+                              <td>
+                                <p className="font-mono text-xs text-gray-500">{lot.purchase_reference || lot.source_type}</p>
+                                <p className="text-xs text-gray-400">{fmtDateTime(lot.delivery_date || lot.purchase_date)}</p>
+                              </td>
+                              <td>
+                                <p className="font-medium">{lot.product_name}</p>
+                                <p className="text-xs text-gray-400">{lot.product_code}</p>
+                              </td>
+                              <td>{lot.quantity_received} {lot.unit}</td>
+                              <td>{lot.quantity_sold} {lot.unit}</td>
+                              <td className="font-semibold text-amber-700">{lot.quantity_remaining} {lot.unit}</td>
+                              <td>{fmtMoney(lot.price_per_unit)}</td>
+                              <td className="font-medium">{fmtMoney(num(lot.quantity_remaining) * num(lot.price_per_unit))}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {(supplierDetail.open_lots || []).length === 0 && <div className="text-center py-6 text-gray-400 text-sm">No open supplier lots. Everything is sold, returned, or adjusted.</div>}
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <h3 className="text-base font-bold text-gray-800 mb-4">Supplier Returns</h3>
+                    <div className="table-container">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Return ID</th>
+                            <th>Date</th>
+                            <th>Quantity</th>
+                            <th>Amount</th>
+                            <th>Notes</th>
+                            <th>By</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(supplierDetail.returns || []).map((entry) => (
+                            <tr key={entry.return_id}>
+                              <td className="font-mono text-xs">{entry.return_id}</td>
+                              <td>{fmtDateTime(entry.return_date)}</td>
+                              <td>{entry.total_quantity}</td>
+                              <td className="font-medium">{fmtMoney(entry.total_amount || 0)}</td>
+                              <td>{entry.notes || '—'}</td>
+                              <td>{entry.created_by_name || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {(supplierDetail.returns || []).length === 0 && <div className="text-center py-6 text-gray-400 text-sm">No supplier returns recorded yet</div>}
                     </div>
                   </div>
 
@@ -1207,6 +1405,7 @@ const Purchases = () => {
                             <SortableHeader label="Product" sortKey="product_name" sortConfig={supHistorySort} onSort={sortSupHistory} />
                             <th>Status</th>
                             <SortableHeader label="Qty" sortKey="quantity" sortConfig={supHistorySort} onSort={sortSupHistory} />
+                            <th>Sold / On Hand</th>
                             <SortableHeader label="Total" sortKey="total_amount" sortConfig={supHistorySort} onSort={sortSupHistory} />
                             <SortableHeader label="Advance" sortKey="advance_amount" sortConfig={supHistorySort} onSort={sortSupHistory} />
                             <SortableHeader label="Order Date" sortKey="purchase_date" sortConfig={supHistorySort} onSort={sortSupHistory} />
@@ -1230,6 +1429,10 @@ const Purchases = () => {
                                 </td>
                                 <td><span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${statusMeta.badgeClass}`}>{statusMeta.label}</span></td>
                                 <td>{history.quantity} {history.unit}</td>
+                                <td>
+                                  <p className="text-sm text-gray-700">{history.quantity_sold} sold</p>
+                                  <p className="text-xs text-amber-700 font-medium">{history.quantity_remaining} on hand</p>
+                                </td>
                                 <td className="font-medium">{fmtMoney(history.total_amount)}</td>
                                 <td>{num(history.advance_amount) > 0 ? fmtMoney(history.advance_amount) : '-'}</td>
                                 <td className="text-sm">{fmtDateTime(history.purchase_date)}</td>
@@ -1333,6 +1536,94 @@ const Purchases = () => {
         <p className="mt-2 text-xs text-gray-500">
           This will remove the supplier name from purchases and products, and delete that supplier&apos;s payment records from Transactions.
         </p>
+      </SharedModal>
+
+      <SharedModal
+        isOpen={supplierReturnModal.open}
+        onClose={() => setSupplierReturnModal({ open: false, items: [], return_date: getISTDateString(), notes: '' })}
+        title={`Return Stock to ${supplierDetail?.supplier || 'Supplier'}`}
+        type="warning"
+        theme="purchases"
+        confirmText={supplierReturnSubmitting ? 'Saving...' : 'Record Return'}
+        onConfirm={handleSupplierReturnSubmit}
+      >
+        <form onSubmit={handleSupplierReturnSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Return Date</label>
+              <input
+                type="date"
+                className="input-field !text-sm"
+                value={supplierReturnModal.return_date}
+                onChange={(e) => setSupplierReturnModal((current) => ({ ...current, return_date: e.target.value }))}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
+              <input
+                type="text"
+                className="input-field !text-sm"
+                placeholder="e.g. Year-end unsold stock return"
+                value={supplierReturnModal.notes}
+                onChange={(e) => setSupplierReturnModal((current) => ({ ...current, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+            Only the remaining unsold quantities can be returned. The supplier balance will stay based on sold quantity only.
+          </div>
+
+          <div className="max-h-80 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100">
+            {supplierReturnModal.items.map((item) => (
+              <div key={item.purchase_lot_id} className="p-4 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-gray-900">{item.product_name}</p>
+                    <p className="text-xs text-gray-400">{item.product_code} · {item.purchase_reference || 'Opening stock lot'}</p>
+                  </div>
+                  <div className="text-right text-xs text-gray-500">
+                    <p>Available: <span className="font-semibold text-amber-700">{item.quantity_remaining} {item.unit}</span></p>
+                    <p>Rate: {fmtMoney(item.price_per_unit)}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Quantity to Return</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={item.quantity_remaining}
+                      step="1"
+                      className="input-field !text-sm"
+                      value={item.quantity_returned}
+                      onChange={(e) => updateSupplierReturnItem(item.purchase_lot_id, e.target.value)}
+                    />
+                  </div>
+                  <div className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                    Return value: <span className="font-bold text-gray-900">{fmtMoney(num(item.quantity_returned) * item.price_per_unit)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl px-4 py-3" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Total quantity to return</span>
+              <span className="font-bold text-blue-700">
+                {supplierReturnModal.items.reduce((sum, item) => sum + num(item.quantity_returned), 0)}
+              </span>
+            </div>
+            <div className="mt-1 flex justify-between text-sm">
+              <span className="text-gray-500">Estimated return value</span>
+              <span className="font-bold text-blue-700">
+                {fmtMoney(supplierReturnModal.items.reduce((sum, item) => sum + (num(item.quantity_returned) * num(item.price_per_unit)), 0))}
+              </span>
+            </div>
+          </div>
+        </form>
       </SharedModal>
 
       {confirmModal.open && confirmModal.data && renderPortalModal(
