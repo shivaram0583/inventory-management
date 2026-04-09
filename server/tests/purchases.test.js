@@ -214,6 +214,70 @@ describe('Purchase Management', () => {
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
     });
+
+    test('should reduce purchase balance_due after a supplier return', async () => {
+      const product = await createTestProduct(testDb, {
+        product_id: 'PUR_RET001',
+        product_name: 'Purchase Return Balance Product',
+        quantity_available: 0,
+        purchase_price: 100,
+        selling_price: 160,
+        supplier: null
+      });
+
+      const orderRes = await request(app)
+        .post('/api/purchases')
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          product_id: product.id,
+          quantity: 10,
+          price_per_unit: 100,
+          supplier: 'Purchase Return Supplier',
+          purchase_date: '2026-04-04',
+          purchase_status: 'ordered',
+          advance_amount: 200,
+          bank_account_id: bankAccount.id
+        });
+
+      expect(orderRes.status).toBe(201);
+
+      const deliverRes = await request(app)
+        .post(`/api/purchases/${orderRes.body.id}/mark-delivered`)
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({ delivery_date: '2026-04-05' });
+
+      expect(deliverRes.status).toBe(200);
+
+      const supplier = await testDb.getRow(
+        'SELECT * FROM suppliers WHERE LOWER(name) = LOWER(?)',
+        ['Purchase Return Supplier']
+      );
+      const purchaseLot = await testDb.getRow(
+        'SELECT * FROM purchase_lots WHERE purchase_id = ?',
+        [orderRes.body.id]
+      );
+
+      const returnRes = await request(app)
+        .post(`/api/suppliers/${supplier.id}/returns`)
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          items: [{ purchase_lot_id: purchaseLot.id, quantity_returned: 4 }],
+          return_date: '2026-04-06',
+          notes: 'Supplier took back unsold stock'
+        });
+
+      expect(returnRes.status).toBe(201);
+
+      const listRes = await request(app)
+        .get('/api/purchases')
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(listRes.status).toBe(200);
+      const purchaseRow = listRes.body.find((row) => row.id === orderRes.body.id);
+      expect(purchaseRow).toBeDefined();
+      expect(Number(purchaseRow.returned_amount)).toBe(400);
+      expect(Number(purchaseRow.balance_due)).toBe(400);
+    });
   });
 
   describe('POST /api/purchases/:id/mark-delivered', () => {

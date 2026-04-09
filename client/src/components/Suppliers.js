@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import SharedModal from './shared/Modal';
+import { fmtDateTime, getISTDateString } from '../utils/dateUtils';
 import { Truck, Plus, Search, Phone, Mail, MapPin, Eye, Edit2, ToggleLeft, ToggleRight } from 'lucide-react';
 
 const Suppliers = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const canManageSupplierReturns = ['admin', 'operator'].includes(user?.role);
 
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -18,6 +20,13 @@ const Suppliers = () => {
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [supplierDetail, setSupplierDetail] = useState(null);
   const [actionModal, setActionModal] = useState({ open: false, title: '', message: '', type: 'success' });
+  const [supplierReturnModal, setSupplierReturnModal] = useState({
+    open: false,
+    items: [],
+    return_date: getISTDateString(),
+    notes: ''
+  });
+  const [supplierReturnSubmitting, setSupplierReturnSubmitting] = useState(false);
 
   const emptyForm = { name: '', contact_person: '', mobile: '', email: '', address: '', gstin: '' };
   const [formData, setFormData] = useState(emptyForm);
@@ -98,6 +107,117 @@ const Suppliers = () => {
   };
 
   const fmt = (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtMoney = (v) => `₹${fmt(v)}`;
+
+  const openSupplierReturnModal = () => {
+    const openLots = supplierDetail?.open_lots || [];
+    if (!selectedSupplier?.id || openLots.length === 0) {
+      return;
+    }
+
+    setSupplierReturnModal({
+      open: true,
+      return_date: getISTDateString(),
+      notes: '',
+      items: openLots.map((lot) => ({
+        selected: false,
+        purchase_lot_id: lot.id,
+        product_name: lot.product_name,
+        product_code: lot.product_code,
+        purchase_reference: lot.purchase_reference,
+        unit: lot.unit,
+        quantity_remaining: Number(lot.quantity_remaining || 0),
+        quantity_returned: '',
+        price_per_unit: Number(lot.price_per_unit || 0)
+      }))
+    });
+  };
+
+  const toggleSupplierReturnItemSelection = (purchaseLotId, checked) => {
+    setSupplierReturnModal((current) => ({
+      ...current,
+      items: current.items.map((item) => {
+        if (item.purchase_lot_id !== purchaseLotId) {
+          return item;
+        }
+
+        return {
+          ...item,
+          selected: checked,
+          quantity_returned: checked
+            ? (item.quantity_returned === '' ? String(item.quantity_remaining) : item.quantity_returned)
+            : ''
+        };
+      })
+    }));
+  };
+
+  const updateSupplierReturnItem = (purchaseLotId, nextValue) => {
+    setSupplierReturnModal((current) => ({
+      ...current,
+      items: current.items.map((item) => {
+        if (item.purchase_lot_id !== purchaseLotId) {
+          return item;
+        }
+
+        const parsed = nextValue === ''
+          ? ''
+          : Math.max(0, Math.min(Number(nextValue || 0), Number(item.quantity_remaining || 0)));
+
+        return {
+          ...item,
+          selected: item.selected || parsed !== '',
+          quantity_returned: String(parsed)
+        };
+      })
+    }));
+  };
+
+  const handleSupplierReturnSubmit = async (event) => {
+    if (event?.preventDefault) event.preventDefault();
+    if (!selectedSupplier?.id) {
+      setError('Supplier record is not available for this return');
+      return;
+    }
+
+    const items = supplierReturnModal.items
+      .map((item) => ({
+        selected: item.selected,
+        purchase_lot_id: item.purchase_lot_id,
+        quantity_returned: Number(item.quantity_returned || 0)
+      }))
+      .filter((item) => item.selected && item.quantity_returned > 0);
+
+    if (items.length === 0) {
+      setError('Select at least one product and enter a return quantity');
+      return;
+    }
+
+    setSupplierReturnSubmitting(true);
+    setError('');
+    try {
+      const res = await axios.post(`/api/suppliers/${selectedSupplier.id}/returns`, {
+        items,
+        return_date: supplierReturnModal.return_date,
+        notes: supplierReturnModal.notes
+      });
+
+      const detailRes = await axios.get(`/api/suppliers/${selectedSupplier.id}`);
+      setSupplierDetail(detailRes.data);
+      setSupplierReturnModal({ open: false, items: [], return_date: getISTDateString(), notes: '' });
+      await fetchSuppliers();
+      setActionModal({
+        open: true,
+        title: 'Supplier Return Recorded',
+        message: res.data?.message || 'Supplier return recorded successfully',
+        type: 'success'
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to record supplier return');
+    } finally {
+      setSupplierReturnSubmitting(false);
+    }
+  };
 
   const filtered = suppliers.filter(s =>
     s.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -216,7 +336,13 @@ const Suppliers = () => {
                 {s.address && <p className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-gray-400" />{s.address}</p>}
               </div>
               <div className="flex items-center justify-between text-xs text-gray-500 border-t pt-2">
-                <span>{s.total_orders || 0} orders • Due ₹{fmt(Math.max(Number(s.remaining_balance || 0), 0))}</span>
+                <span>
+                  {s.total_orders || 0} orders • {Number(s.remaining_balance || 0) > 0
+                    ? `Due ${fmtMoney(s.remaining_balance)}`
+                    : Number(s.remaining_balance || 0) < 0
+                      ? `Credit ${fmtMoney(Math.abs(Number(s.remaining_balance || 0)))}`
+                      : 'Settled'}
+                </span>
                 <div className="flex items-center gap-1">
                   <button onClick={() => viewDetail(s)} className="p-1.5 rounded-lg hover:bg-gray-100" title="View Details">
                     <Eye className="h-3.5 w-3.5 text-gray-500" />
@@ -251,7 +377,10 @@ const Suppliers = () => {
       </SharedModal>
 
       {/* Detail Modal */}
-      <SharedModal isOpen={showDetailModal} onClose={() => setShowDetailModal(false)}
+      <SharedModal isOpen={showDetailModal} onClose={() => {
+        setShowDetailModal(false);
+        setSupplierReturnModal({ open: false, items: [], return_date: getISTDateString(), notes: '' });
+      }}
         title={`Supplier: ${selectedSupplier?.name || ''}`} type="info">
         {supplierDetail && (
           <div className="space-y-4">
@@ -263,10 +392,24 @@ const Suppliers = () => {
             </div>
             {supplierDetail.address && <p className="text-sm text-gray-600"><span className="text-gray-500">Address:</span> {supplierDetail.address}</p>}
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-xl bg-teal-50 px-3 py-2"><span className="text-gray-500">Sold Value:</span> <span className="font-bold text-teal-700">₹{fmt(supplierDetail.summary?.sold_value)}</span></div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-gray-500">Return remaining supplier lots directly from this view when stock is being sent back.</p>
+              {canManageSupplierReturns && (supplierDetail.open_lots || []).length > 0 && (
+                <button
+                  type="button"
+                  onClick={openSupplierReturnModal}
+                  className="inline-flex items-center rounded-xl bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-100 transition-colors"
+                >
+                  Return Remaining Stock
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl bg-teal-50 px-3 py-2"><span className="text-gray-500">Received Value:</span> <span className="font-bold text-teal-700">₹{fmt(supplierDetail.summary?.total_received_value)}</span></div>
+              <div className="rounded-xl bg-sky-50 px-3 py-2"><span className="text-gray-500">Returned Value:</span> <span className="font-bold text-sky-700">₹{fmt(supplierDetail.summary?.total_returned_value)}</span></div>
               <div className="rounded-xl bg-violet-50 px-3 py-2"><span className="text-gray-500">Paid:</span> <span className="font-bold text-violet-700">₹{fmt(supplierDetail.summary?.total_paid)}</span></div>
-              <div className="rounded-xl bg-amber-50 px-3 py-2"><span className="text-gray-500">Balance Due:</span> <span className="font-bold text-amber-700">₹{fmt(Math.max(Number(supplierDetail.summary?.balance_due || 0), 0))}</span></div>
+              <div className="rounded-xl bg-amber-50 px-3 py-2"><span className="text-gray-500">{Number(supplierDetail.summary?.balance_due || 0) > 0 ? 'Balance Due:' : 'Supplier Credit:'}</span> <span className={`font-bold ${Number(supplierDetail.summary?.balance_due || 0) > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>₹{fmt(Math.abs(Number(supplierDetail.summary?.balance_due || 0)))}</span></div>
               <div className="rounded-xl bg-rose-50 px-3 py-2"><span className="text-gray-500">Stock On Hand:</span> <span className="font-bold text-rose-700">{Number(supplierDetail.summary?.total_remaining_qty || 0)}</span></div>
             </div>
 
@@ -293,6 +436,38 @@ const Suppliers = () => {
                 </div>
               </div>
             )}
+
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2">Supplier Returns</h4>
+              <div className="max-h-40 overflow-y-auto border rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 sticky top-0"><tr>
+                    <th className="px-2 py-1.5 text-left">Product Name</th>
+                    <th className="px-2 py-1.5 text-right">Original Qty</th>
+                    <th className="px-2 py-1.5 text-right">Return Qty</th>
+                    <th className="px-2 py-1.5 text-right">Amount</th>
+                  </tr></thead>
+                  <tbody>
+                    {(supplierDetail.returns || []).map((entry) => (
+                      <tr key={entry.return_item_id || `${entry.return_id}-${entry.product_code || 'item'}`} className="border-t">
+                        <td className="px-2 py-1.5">
+                          <p className="font-medium text-gray-900">{entry.product_name || '—'}</p>
+                          <p className="text-[11px] text-gray-400">{entry.return_id} · {fmtDateTime(entry.return_date)}</p>
+                        </td>
+                        <td className="px-2 py-1.5 text-right">{entry.original_quantity} {entry.unit}</td>
+                        <td className="px-2 py-1.5 text-right">{entry.quantity_returned} {entry.unit}</td>
+                        <td className="px-2 py-1.5 text-right">₹{fmt(entry.item_total_amount)}</td>
+                      </tr>
+                    ))}
+                    {(supplierDetail.returns || []).length === 0 && (
+                      <tr>
+                        <td colSpan="4" className="px-2 py-6 text-center text-gray-400">No supplier returns recorded yet</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
             {supplierDetail.purchases?.length > 0 && (
               <div>
@@ -329,6 +504,104 @@ const Suppliers = () => {
             )}
           </div>
         )}
+      </SharedModal>
+
+      <SharedModal
+        isOpen={supplierReturnModal.open}
+        onClose={() => setSupplierReturnModal({ open: false, items: [], return_date: getISTDateString(), notes: '' })}
+        title={`Return Stock to ${selectedSupplier?.name || 'Supplier'}`}
+        type="warning"
+        confirmText={supplierReturnSubmitting ? 'Saving...' : 'Record Return'}
+        onConfirm={handleSupplierReturnSubmit}
+      >
+        <form onSubmit={handleSupplierReturnSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Return Date</label>
+              <input
+                type="date"
+                className="input-field !text-sm"
+                value={supplierReturnModal.return_date}
+                onChange={(e) => setSupplierReturnModal((current) => ({ ...current, return_date: e.target.value }))}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
+              <input
+                type="text"
+                className="input-field !text-sm"
+                placeholder="e.g. Financial year closing return"
+                value={supplierReturnModal.notes}
+                onChange={(e) => setSupplierReturnModal((current) => ({ ...current, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+            Choose only the products you want to return. Leave the other rows blank or 0. The supplier payable balance will reduce only for the selected returned stock.
+          </div>
+
+          <div className="max-h-80 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100">
+            {supplierReturnModal.items.map((item) => (
+              <div key={item.purchase_lot_id} className="p-4 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(item.selected)}
+                      onChange={(e) => toggleSupplierReturnItemSelection(item.purchase_lot_id, e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                    <p className="font-semibold text-gray-900">{item.product_name}</p>
+                    <p className="text-xs text-gray-400">{item.product_code} · {item.purchase_reference || 'Opening stock lot'}</p>
+                    <p className="mt-1 text-[11px] text-gray-500">Tick this product to include it in the return.</p>
+                    </div>
+                  </div>
+                  <div className="text-right text-xs text-gray-500">
+                    <p>Available: <span className="font-semibold text-amber-700">{item.quantity_remaining} {item.unit}</span></p>
+                    <p>Rate: {fmtMoney(item.price_per_unit)}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Quantity to Return</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={item.quantity_remaining}
+                      step="1"
+                      className="input-field !text-sm"
+                      value={item.quantity_returned}
+                      disabled={!item.selected}
+                      onChange={(e) => updateSupplierReturnItem(item.purchase_lot_id, e.target.value)}
+                      placeholder={item.selected ? `Max ${item.quantity_remaining}` : 'Select the checkbox first'}
+                    />
+                  </div>
+                  <div className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                    Return value: <span className="font-bold text-gray-900">{fmtMoney(Number(item.quantity_returned || 0) * item.price_per_unit)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl px-4 py-3" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Total quantity to return</span>
+              <span className="font-bold text-blue-700">
+                {supplierReturnModal.items.reduce((sum, item) => sum + Number(item.quantity_returned || 0), 0)}
+              </span>
+            </div>
+            <div className="mt-1 flex justify-between text-sm">
+              <span className="text-gray-500">Estimated return value</span>
+              <span className="font-bold text-blue-700">
+                {fmtMoney(supplierReturnModal.items.reduce((sum, item) => sum + (Number(item.quantity_returned || 0) * Number(item.price_per_unit || 0)), 0))}
+              </span>
+            </div>
+          </div>
+        </form>
       </SharedModal>
 
       {/* Action result modal */}

@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
-const { getRow, runQuery, getAll, nowIST } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST, runTransaction } = require('../database/db');
 const moment = require('moment');
 const { addReviewNotification } = require('../services/reviewNotifications');
 const {
@@ -17,11 +17,18 @@ const {
   markBalanceReviewed
 } = require('../services/dailySetup');
 const { resolveSupplier } = require('../services/supplierDirectory');
+const { calculateOutstandingSupplierBalance } = require('../services/supplierFinancials');
 
 const router = express.Router();
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const createHttpError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 };
 
 function buildSupplierFilter({ alias, nameColumn, idColumn, supplierRecord, supplierName }) {
@@ -655,24 +662,27 @@ router.post('/supplier-payments', [
       return res.status(400).json({ message: 'Select a bank account for this payment' });
     }
 
-    const result = await createSupplierPaymentRecord({
-      supplierName: supplier_name,
-      amount: paymentAmount,
-      paymentMode: payment_mode,
-      bankAccountId: accountId,
-      description,
-      paymentDate: payment_date,
-      userId: req.user.id,
-      eventTimestamp
-    });
+    const payment = await runTransaction(async () => {
+      const result = await createSupplierPaymentRecord({
+        supplierName: supplier_name,
+        amount: paymentAmount,
+        paymentMode: payment_mode,
+        bankAccountId: accountId,
+        description,
+        paymentDate: payment_date,
+        userId: req.user.id,
+        eventTimestamp
+      });
 
-    const payment = await getRow(
-      `SELECT sp.*, ba.account_name, ba.bank_name, u.username as created_by_name
-       FROM supplier_payments sp
-       LEFT JOIN bank_accounts ba ON sp.bank_account_id = ba.id
-       LEFT JOIN users u ON sp.created_by = u.id WHERE sp.id = ?`,
-      [result.id]
-    );
+      return getRow(
+        `SELECT sp.*, ba.account_name, ba.bank_name, u.username as created_by_name
+         FROM supplier_payments sp
+         LEFT JOIN bank_accounts ba ON sp.bank_account_id = ba.id
+         LEFT JOIN users u ON u.id = sp.created_by
+         WHERE sp.id = ?`,
+        [result.id]
+      );
+    });
 
     addReviewNotification({
       actorId: req.user.id,
@@ -694,15 +704,21 @@ router.post('/supplier-payments', [
 // DELETE supplier payment (reverses bank balance if paid from bank)
 router.delete('/supplier-payments/:id', [authenticateToken, authorizeRole(['admin'])], async (req, res) => {
   try {
-    const payment = await getRow('SELECT * FROM supplier_payments WHERE id = ?', [req.params.id]);
-    if (!payment) return res.status(404).json({ message: 'Not found' });
+    const eventTimestamp = nowIST();
+    await runTransaction(async () => {
+      const payment = await getRow('SELECT * FROM supplier_payments WHERE id = ?', [req.params.id]);
+      if (!payment) {
+        throw createHttpError(404, 'Not found');
+      }
 
-    await reverseSupplierPaymentBankEffects(payment, nowIST());
-    await runQuery('DELETE FROM supplier_payments WHERE id = ?', [req.params.id]);
+      await reverseSupplierPaymentBankEffects(payment, eventTimestamp);
+      await runQuery('DELETE FROM supplier_payments WHERE id = ?', [req.params.id]);
+    });
+
     res.json({ message: 'Supplier payment deleted' });
   } catch (error) {
     console.error('Delete supplier payment error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(error.status || 500).json({ message: error.message || 'Server error' });
   }
 });
 
@@ -711,11 +727,12 @@ router.delete('/supplier-payments/:id', [authenticateToken, authorizeRole(['admi
 // GET supplier ledger: total purchased vs total paid, remaining balance
 router.get('/supplier-balances', authenticateToken, async (req, res) => {
   try {
-    const sold = await getAll(`
+    const supplierStock = await getAll(`
       SELECT
         COALESCE(s.id, pl.supplier_id) AS supplier_id,
         COALESCE(s.name, pl.supplier_name) AS supplier_name,
         COALESCE(SUM(pl.quantity_received * pl.price_per_unit), 0) AS total_received_value,
+        COALESCE(SUM(pl.quantity_returned * pl.price_per_unit), 0) AS total_returned_value,
         COALESCE(SUM(pl.quantity_sold * pl.price_per_unit), 0) AS sold_value,
         COALESCE(SUM(pl.quantity_sold), 0) AS total_sold_qty,
         COALESCE(SUM(pl.quantity_remaining), 0) AS total_remaining_qty,
@@ -754,6 +771,7 @@ router.get('/supplier-balances', authenticateToken, async (req, res) => {
           supplier_id: row.supplier_id || null,
           supplier_name: row.supplier_name,
           total_received_value: 0,
+          total_returned_value: 0,
           sold_value: 0,
           total_sold_qty: 0,
           total_remaining_qty: 0,
@@ -766,9 +784,10 @@ router.get('/supplier-balances', authenticateToken, async (req, res) => {
       return balancesMap.get(key);
     };
 
-    for (const row of sold) {
+    for (const row of supplierStock) {
       const entry = ensureBalanceEntry(row);
       entry.total_received_value = toNumber(row.total_received_value);
+      entry.total_returned_value = toNumber(row.total_returned_value);
       entry.sold_value = toNumber(row.sold_value);
       entry.total_sold_qty = toNumber(row.total_sold_qty);
       entry.total_remaining_qty = toNumber(row.total_remaining_qty);
@@ -783,7 +802,11 @@ router.get('/supplier-balances', authenticateToken, async (req, res) => {
     const balances = Array.from(balancesMap.values())
       .map((entry) => ({
         ...entry,
-        remaining_balance: entry.sold_value - entry.total_paid
+        remaining_balance: calculateOutstandingSupplierBalance({
+          totalReceivedValue: entry.total_received_value,
+          totalReturnedValue: entry.total_returned_value,
+          totalPaid: entry.total_paid
+        })
       }))
       .sort((a, b) => b.remaining_balance - a.remaining_balance);
 

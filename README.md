@@ -16,10 +16,11 @@ and business analytics for an agricultural inputs trading business (seeds & fert
 4. [Low-Level Design (LLD)](#low-level-design-lld)
 5. [API Reference](#api-reference)
 6. [Setup & Installation](#setup--installation)
-7. [Environment Variables](#environment-variables)
-8. [Default Credentials](#default-credentials)
-9. [Feature Guide](#feature-guide)
-10. [Deployment](#deployment)
+7. [Database Workflows](#database-workflows)
+8. [Environment Variables](#environment-variables)
+9. [Default Credentials](#default-credentials)
+10. [Feature Guide](#feature-guide)
+11. [Deployment](#deployment)
 
 ---
 
@@ -75,9 +76,13 @@ inventory-management/
 │           ├── Inventory.js         # Product CRUD + stock management
 │           ├── Sales.js             # POS / cart-based sales screen
 │           ├── Purchases.js         # Purchase recording + history + category mgmt
+│           ├── Suppliers.js         # Supplier directory, balances, open lots, returns
+│           ├── Transactions.js      # Banking, supplier payments, daily setup, cash-book
+│           ├── Returns.js           # Customer sales return workflow
 │           ├── Receipt.js           # Printable receipt view
 │           ├── Reports.js           # Analytics tabs + Recharts charts
 │           ├── ReportDownloader.js  # CSV export for all report types
+│           ├── Customers.js         # Customer directory and balance tracking
 │           ├── Users.js             # User management (admin only)
 │           └── shared/
 │               ├── Modal.js         # Reusable confirm/alert modal
@@ -94,6 +99,10 @@ inventory-management/
         ├── inventory.js             # /api/inventory
         ├── sales.js                 # /api/sales
         ├── purchases.js             # /api/purchases
+      ├── suppliers.js             # /api/suppliers
+      ├── transactions.js          # /api/transactions
+      ├── returns.js               # /api/returns
+      ├── customers.js             # /api/customers
         ├── reports.js               # /api/reports
         └── dashboard.js             # /api/dashboard
 ```
@@ -122,7 +131,8 @@ inventory-management/
 │   express-validator (body validation on all mutating endpoints)   │
 │                                                                   │
 │  /api/auth  /api/inventory  /api/sales  /api/purchases            │
-│  /api/reports               /api/dashboard                        │
+│  /api/suppliers  /api/transactions  /api/returns                  │
+│  /api/customers  /api/reports       /api/dashboard                │
 └─────────────────────────────┬────────────────────────────────────┘
                               │  sqlite3 driver
 ┌─────────────────────────────▼────────────────────────────────────┐
@@ -564,8 +574,13 @@ Purchases.js  (3 tabs)
 | POST | `/categories` | admin, operator | Add category — `{ "name": "pesticides" }` |
 | DELETE | `/categories/:id` | admin | Delete category (blocked if products use it) |
 | GET | `/` | Any | List purchases — `?start_date=&end_date=&product_id=` |
-| POST | `/` | admin, operator | Record purchase (updates stock + price) |
+| POST | `/` | admin, operator | Record purchase as ordered or delivered, with optional advance payment |
 | PUT | `/:id` | admin, operator | Edit purchase (adjusts stock by qty diff) |
+| POST | `/:id/mark-delivered` | admin, operator | Receive the remaining pending quantity into stock |
+| POST | `/:id/partial-delivery` | admin, operator | Receive part of a pending order and optionally close it |
+| POST | `/:id/cancel` | admin | Cancel a pending order and reverse advance payment effects |
+| GET | `/suppliers` | Any | Supplier summary from purchase history with live payable |
+| GET | `/suppliers/:name` | Any | Supplier drilldown: open lots, payments, purchases, itemized returns |
 
 **Record purchase:**
 ```json
@@ -575,7 +590,10 @@ Purchases.js  (3 tabs)
   "quantity": 50,
   "price_per_unit": 110.00,
   "supplier": "ABC Agro Pvt Ltd",
-  "purchase_date": "2026-03-16"
+  "purchase_date": "2026-03-16",
+  "purchase_status": "ordered",
+  "advance_amount": 1000,
+  "bank_account_id": 1
 }
 // Response 201: full purchase row with product + user info
 ```
@@ -590,6 +608,86 @@ Purchases.js  (3 tabs)
   "purchase_date": "2026-03-17"
 }
 // Stock adjusts by (60 - old_qty). Can be negative to correct over-entries.
+```
+
+**Partial delivery:**
+```json
+// POST /api/purchases/:id/partial-delivery
+{
+  "quantity_delivered": 20,
+  "mark_as_completed": false,
+  "delivery_date": "2026-04-10"
+}
+```
+
+**Live supplier balance rule:**
+```text
+balance_due = total_received_value - total_returned_value - total_paid
+```
+
+---
+
+### Suppliers — `/api/suppliers`
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/` | Any | Supplier directory with received, returned, paid, and live balance values |
+| GET | `/:id` | Any | Supplier detail with purchases, open lots, payments, and itemized supplier returns |
+| POST | `/:id/returns` | admin, operator | Return selected unsold lot quantities back to the supplier |
+| POST | `/` | admin | Create supplier master record |
+| PUT | `/:id` | admin | Update supplier master record and rename linked references |
+| PATCH | `/:id/toggle` | admin | Activate or deactivate a supplier |
+
+**Record supplier return:**
+```json
+// POST /api/suppliers/:id/returns
+{
+  "items": [
+    { "purchase_lot_id": 12, "quantity_returned": 5 },
+    { "purchase_lot_id": 13, "quantity_returned": 2 }
+  ],
+  "return_date": "2026-04-10",
+  "notes": "Financial year closing return"
+}
+```
+
+---
+
+### Transactions — `/api/transactions`
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/bank-accounts` | Any | Active bank accounts |
+| GET | `/bank-accounts/:id/statement` | Any | Date-range bank statement for one account |
+| POST | `/bank-accounts` | admin | Create bank account |
+| PUT | `/bank-accounts/:id` | admin | Update bank account metadata |
+| DELETE | `/bank-accounts/:id` | admin | Deactivate a bank account |
+| GET | `/daily-setup/status` | Any | Daily bank-selection and balance-review status |
+| POST | `/daily-setup/select-bank` | admin | Select today’s operating bank |
+| POST | `/daily-setup/review-balance` | admin | Mark daily balance as reviewed |
+| GET | `/expenditures` | Any | List expenditures |
+| POST | `/expenditures` | admin, operator | Create expenditure |
+| DELETE | `/expenditures/:id` | admin | Delete expenditure |
+| GET | `/bank-transfers` | Any | Manual bank transfers and linked entries |
+| POST | `/bank-transfers` | admin | Deposit or withdraw from a bank account |
+| DELETE | `/bank-transfers/:id` | admin | Delete a manual transfer and reverse its balance effect |
+| GET | `/supplier-payments` | Any | Supplier payment ledger |
+| POST | `/supplier-payments` | admin | Record supplier payment and linked bank movement |
+| DELETE | `/supplier-payments/:id` | admin | Delete supplier payment and reverse linked bank effect |
+| GET | `/supplier-balances` | Any | Live supplier settlement view |
+| GET | `/daily-summary` | Any | Daily cash-book summary |
+
+**Record supplier payment:**
+```json
+// POST /api/transactions/supplier-payments
+{
+  "supplier_name": "ABC Agro Pvt Ltd",
+  "amount": 2500,
+  "payment_mode": "bank",
+  "payment_date": "2026-04-10",
+  "bank_account_id": 1,
+  "description": "Part payment against April deliveries"
+}
 ```
 
 ---
@@ -643,10 +741,30 @@ npm run dev
 # 5. Production build + serve
 npm run build --prefix client   # builds React SPA → client/build/
 cd server && node index.js      # Express serves API + static React build
+
+# 6. Optional data workflows
+npm run clean-db                # wipe live data, keep only default users + base categories
+npm run seed                    # load the sample/demo dataset again
 ```
 
 > The SQLite database is created automatically on first server start.
 > Default admin + operator accounts and seed categories are inserted automatically.
+
+---
+
+## Database Workflows
+
+### Reset for manual testing
+- Run `npm run clean-db` from the repo root to clear the live SQLite data in place.
+- The reset removes transactional and master data such as products, customers, suppliers, purchases, sales, returns, payments, bank activity, warehouses, audit logs, and notifications.
+- After the reset, only the default login accounts and the base product categories (`seeds`, `fertilizers`, `pesticides`, `tools`) remain.
+- Existing JWT sessions become invalid because session and login data are cleared. Log in again after the reset.
+
+### Load sample data again
+- Run `npm run seed` when you want the prebuilt demo scenario back for exploratory testing or screenshots.
+
+### API testing assets
+- The Postman collection at `SLVT_Inventory_API.postman_collection.json` now includes supplier returns, supplier balances, supplier payments, bank-account setup, and purchase supplier-detail flows.
 
 ---
 
@@ -708,9 +826,21 @@ Email delivery:
 
 | Tab | What it does |
 |---|---|
-| **Record Purchase** | Select existing product from card grid or create a new product inline. Fill qty, price/unit, supplier, date. Confirmation popup shows total cost and stock impact before submitting. |
-| **Purchase History** | Sortable table of all past purchases. Each row has an Edit (pencil) button that opens a pre-filled modal with a live stock-adjustment indicator (+/- diff from current qty). |
+| **Record Purchase** | Record delivered stock immediately or place an ordered purchase with advance amount, selected bank account, and later delivery updates. |
+| **Purchase History** | Sortable table of all past purchases. Each row supports edit, cancel, mark-delivered, and partial-delivery actions with live stock and bank impact. |
+| **Supplier View** | Shows supplier-level received value, returned value, payments, balance due, open lots, purchase history, and itemized supplier returns. Returns can be recorded only for selected lots/products still on hand. |
 | **Manage Categories** | Add or delete categories used across Inventory and Purchases. Deletion blocked if any product uses the category. |
+
+### Suppliers
+- Dedicated supplier directory with contact details, latest purchases, open stock lots, payments, returns, and live balance due.
+- Supplier returns are itemized by product and reduce the operational supplier payable immediately.
+- Live supplier payable uses the formula: `received value - returned value - payments made`.
+
+### Transactions
+- Bank account management, statements, manual bank transfers, expenditures, supplier payments, and daily cash-book summary.
+- Daily setup supports selecting the operating bank for the day and marking the balance as reviewed.
+- Supplier payment create/delete operations are transactionally coupled to bank ledger entries.
+- Supplier settlement view exposes received value, returned value, stock on hand, total paid, and live payable/credit.
 
 ### Receipts
 - A4-formatted printable receipt: business name, address, contact (+91 70369 53734, dvvshivaram@gmail.com)

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "clean-db": "node scripts/clean-db.js",
     "seed": "node seed.js",
     "test": "jest --forceExit --detectOpenHandles --runInBand",
     "test:coverage": "jest --forceExit --detectOpenHandles --runInBand --coverage",

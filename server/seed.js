@@ -2,6 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const bcrypt = require('bcryptjs');
 const { db, runQuery, getRow, getAll } = require('./database/db');
+const { backfillPurchaseLotLedger, createSupplierReturn } = require('./services/purchaseLotLedger');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -129,6 +130,7 @@ async function clearScenarioData() {
   const deleteOrder = [
     'price_tiers', 'product_promotions', 'customer_pricing',
     'warehouse_transfers', 'warehouse_stock', 'warehouses', 'quotation_items', 'quotations',
+    'supplier_return_items', 'sale_allocations', 'supplier_returns', 'purchase_lots',
     'sales_returns', 'customer_payments', 'notifications', 'audit_log', 'customer_sales',
     'receipts', 'sales', 'supplier_payments', 'bank_transfers', 'expenditures',
     'daily_operation_setup', 'bank_accounts', 'purchases', 'customers', 'suppliers',
@@ -200,7 +202,8 @@ async function seedScenarioData() {
     { name: 'IFFCO Agri Inputs', contact_person: 'Harish Patel', mobile: '9011003300', email: 'iffco@example.com', address: 'Vijayawada', gstin: '37ABCDE1234F1Z3' },
     { name: 'Tata Chemicals', contact_person: 'Pradeep Singh', mobile: '9011004400', email: 'tatachem@example.com', address: 'Kakinada', gstin: '37ABCDE1234F1Z4' },
     { name: 'BioCrop Crop Science', contact_person: 'Anita Reddy', mobile: '9011005500', email: 'biocrop@example.com', address: 'Warangal', gstin: '36ABCDE1234F1Z5' },
-    { name: 'Kisan Tools Depot', contact_person: 'Manoj Sharma', mobile: '9011006600', email: 'kisantools@example.com', address: 'Nalgonda', gstin: '36ABCDE1234F1Z6' }
+    { name: 'Kisan Tools Depot', contact_person: 'Manoj Sharma', mobile: '9011006600', email: 'kisantools@example.com', address: 'Nalgonda', gstin: '36ABCDE1234F1Z6' },
+    { name: 'Year End Agro Supplier', contact_person: 'Vijay Kumar', mobile: '9011007700', email: 'yearend@example.com', address: 'Karimnagar', gstin: '36ABCDE1234F1Z7' }
   ];
   const supplierIds = {};
   for (const supplier of suppliers) {
@@ -259,6 +262,7 @@ async function seedScenarioData() {
     { code: 'SEED001', category: 'seeds', name: 'Tomato Seeds', variety: 'Hybrid F1', unit: 'packet', purchase_price: 80, selling_price: 120, supplier: 'Rasi Seeds Pvt Ltd', gst_percent: 5, hsn_code: '120991', reorder_point: 25, reorder_quantity: 80, barcode: '890100000001', expiry_date: dateOnlyIST(shiftDays(now, 150)), batch_number: 'TOM-LIVE-01', manufacturing_date: dateOnlyIST(shiftDays(now, -35)) },
     { code: 'SEED002', category: 'seeds', name: 'Paddy Seeds', variety: 'BPT 5204', unit: 'kg', purchase_price: 45, selling_price: 70, supplier: 'Mahyco Seeds', gst_percent: 5, hsn_code: '100610', reorder_point: 40, reorder_quantity: 120, barcode: '890100000002', expiry_date: dateOnlyIST(shiftDays(now, 220)), batch_number: 'PAD-LIVE-01', manufacturing_date: dateOnlyIST(shiftDays(now, -48)) },
     { code: 'SEED003', category: 'seeds', name: 'Chilli Seeds', variety: 'Teja', unit: 'packet', purchase_price: 110, selling_price: 160, supplier: 'Rasi Seeds Pvt Ltd', gst_percent: 5, hsn_code: '120991', reorder_point: 35, reorder_quantity: 70, barcode: '890100000003', expiry_date: dateOnlyIST(shiftDays(now, 105)), batch_number: 'CHI-LIVE-04', manufacturing_date: dateOnlyIST(shiftDays(now, -42)) },
+    { code: 'SEED004', category: 'seeds', name: 'Financial Year Return Seeds', variety: 'Carry Forward Batch', unit: 'packet', purchase_price: 100, selling_price: 150, supplier: 'Year End Agro Supplier', gst_percent: 5, hsn_code: '120991', reorder_point: 15, reorder_quantity: 50, barcode: '890100000011', expiry_date: dateOnlyIST(shiftDays(now, 95)), batch_number: 'FYR-LIVE-01', manufacturing_date: dateOnlyIST(shiftDays(now, -18)) },
     { code: 'FERT001', category: 'fertilizers', name: 'Urea', variety: 'Neem Coated', unit: 'bag', purchase_price: 300, selling_price: 380, supplier: 'IFFCO Agri Inputs', gst_percent: 5, hsn_code: '310210', reorder_point: 35, reorder_quantity: 100, barcode: '890100000004', expiry_date: dateOnlyIST(shiftDays(now, 18)), batch_number: 'URE-LIVE-02', manufacturing_date: dateOnlyIST(shiftDays(now, -70)) },
     { code: 'FERT002', category: 'fertilizers', name: 'DAP', variety: '18-46-0', unit: 'bag', purchase_price: 1250, selling_price: 1450, supplier: 'Tata Chemicals', gst_percent: 5, hsn_code: '310530', reorder_point: 20, reorder_quantity: 60, barcode: '890100000005', expiry_date: dateOnlyIST(shiftDays(now, 45)), batch_number: 'DAP-LIVE-03', manufacturing_date: dateOnlyIST(shiftDays(now, -80)) },
     { code: 'FERT003', category: 'fertilizers', name: 'Potash', variety: 'MOP 60%', unit: 'kg', purchase_price: 38, selling_price: 52, supplier: 'IFFCO Agri Inputs', gst_percent: 5, hsn_code: '310420', reorder_point: 30, reorder_quantity: 90, barcode: '890100000006', expiry_date: dateOnlyIST(shiftDays(now, 170)), batch_number: 'POT-LIVE-02', manufacturing_date: dateOnlyIST(shiftDays(now, -55)) },
@@ -369,6 +373,7 @@ async function seedScenarioData() {
     { key: 'pestDeliveredTwo', id: buildPurchaseId(shiftDays(now, -13), 'D08'), code: 'PEST002', quantity: 70, delivered: 70, price: 260, supplier: 'BioCrop Crop Science', status: 'delivered', date: formatIST(shiftDays(now, -13)), actor: operator.id },
     { key: 'toolDeliveredOne', id: buildPurchaseId(shiftDays(now, -12), 'D09'), code: 'TOOL001', quantity: 18, delivered: 18, price: 1650, supplier: 'Kisan Tools Depot', status: 'delivered', date: formatIST(shiftDays(now, -12)), actor: admin.id },
     { key: 'toolDeliveredTwo', id: buildPurchaseId(shiftDays(now, -11), 'D10'), code: 'TOOL002', quantity: 60, delivered: 60, price: 180, supplier: 'Kisan Tools Depot', status: 'delivered', date: formatIST(shiftDays(now, -11)), actor: operator.id },
+    { key: 'yearEndReturnDelivered', id: buildPurchaseId(shiftDays(now, -10), 'YR1'), code: 'SEED004', quantity: 100, delivered: 100, price: 100, supplier: 'Year End Agro Supplier', status: 'delivered', date: formatIST(shiftDays(now, -10)), advance_amount: 2000, actor: admin.id },
     { key: 'partialFertOrder', id: buildPurchaseId(shiftDays(now, -8), 'P01'), code: 'FERT001', quantity: 100, delivered: 40, price: 310, supplier: 'IFFCO Agri Inputs', status: 'ordered', date: formatIST(shiftDays(now, -8)), delivery_date: formatIST(shiftDays(now, -2)), advance_amount: 4000, actor: admin.id },
     { key: 'pendingFertOrder', id: buildPurchaseId(shiftDays(now, -5), 'O01'), code: 'FERT002', quantity: 40, delivered: 0, price: 1300, supplier: 'Tata Chemicals', status: 'ordered', date: formatIST(shiftDays(now, -5)), advance_amount: 5000, actor: operator.id },
     { key: 'pendingPestOrder', id: buildPurchaseId(shiftDays(now, -4), 'O02'), code: 'PEST001', quantity: 24, delivered: 0, price: 530, supplier: 'BioCrop Crop Science', status: 'ordered', date: formatIST(shiftDays(now, -4)), advance_amount: 2500, actor: operator.id },
@@ -381,6 +386,7 @@ async function seedScenarioData() {
   supplierPaymentIds.partial = await insertRow('supplier_payments', { supplier_name: 'IFFCO Agri Inputs', supplier_id: supplierIds['IFFCO Agri Inputs'], amount: 4000, payment_mode: 'bank', bank_account_id: bankAccountIds.ops, description: `Advance payment for purchase ${purchaseRowsByKey.partialFertOrder.id}`, payment_date: dateOnlyIST(shiftDays(now, -8)), created_by: admin.id, created_at: formatIST(shiftDays(now, -8)) });
   supplierPaymentIds.pending = await insertRow('supplier_payments', { supplier_name: 'Tata Chemicals', supplier_id: supplierIds['Tata Chemicals'], amount: 5000, payment_mode: 'bank', bank_account_id: bankAccountIds.main, description: `Advance payment for purchase ${purchaseRowsByKey.pendingFertOrder.id}`, payment_date: dateOnlyIST(shiftDays(now, -5)), created_by: operator.id, created_at: formatIST(shiftDays(now, -5)) });
   supplierPaymentIds.biocrop = await insertRow('supplier_payments', { supplier_name: 'BioCrop Crop Science', supplier_id: supplierIds['BioCrop Crop Science'], amount: 2500, payment_mode: 'bank', bank_account_id: bankAccountIds.main, description: `Advance payment for purchase ${purchaseRowsByKey.pendingPestOrder.id}`, payment_date: dateOnlyIST(shiftDays(now, -4)), created_by: operator.id, created_at: formatIST(shiftDays(now, -4)) });
+  supplierPaymentIds.yearEnd = await insertRow('supplier_payments', { supplier_name: 'Year End Agro Supplier', supplier_id: supplierIds['Year End Agro Supplier'], amount: 2000, payment_mode: 'bank', bank_account_id: bankAccountIds.main, description: `Advance payment for purchase ${purchaseRowsByKey.yearEndReturnDelivered.id}`, payment_date: dateOnlyIST(shiftDays(now, -10)), created_by: admin.id, created_at: formatIST(shiftDays(now, -10)) });
 
   for (const paymentId of Object.values(supplierPaymentIds)) {
     const payment = await getRow('SELECT * FROM supplier_payments WHERE id = ?', [paymentId]);
@@ -399,8 +405,9 @@ async function seedScenarioData() {
     });
   }
 
+  const purchaseRecordIds = {};
   for (const purchase of purchaseRows) {
-    await insertRow('purchases', {
+    const purchaseRecordId = await insertRow('purchases', {
       purchase_id: purchase.id,
       product_id: productIds[purchase.code],
       quantity: purchase.quantity,
@@ -419,12 +426,15 @@ async function seedScenarioData() {
           ? supplierPaymentIds.pending
           : purchase.key === 'pendingPestOrder'
             ? supplierPaymentIds.biocrop
+            : purchase.key === 'yearEndReturnDelivered'
+              ? supplierPaymentIds.yearEnd
             : null,
       added_by: purchase.actor,
       created_at: purchase.date,
       updated_at: purchase.delivery_date || purchase.date
     });
 
+    purchaseRecordIds[purchase.key] = purchaseRecordId;
     stockLevels[purchase.code] += purchase.delivered;
   }
 
@@ -516,6 +526,23 @@ async function seedScenarioData() {
       items: [
         { code: 'SEED002', quantity: 30, price: 66, gst: 5, tax: 99, total: 2079, pricingRuleType: 'customer', pricingRuleLabel: 'Paddy season rate' },
         { code: 'SEED001', quantity: 12, price: 112, gst: 5, tax: 67.2, total: 1411.2, pricingRuleType: 'tier', pricingRuleLabel: 'Bulk farmer price (10+)' }
+      ]
+    },
+    {
+      key: 'yearEndReturnSale',
+      saleId: buildSaleId(shiftDays(now, -7), '006'),
+      date: formatIST(shiftDays(now, -7)),
+      receiptNumber: buildReceiptNumber(shiftDays(now, -7), 'Walk-in Farmer', '06'),
+      customerName: 'Walk-in Farmer',
+      customerMobile: '9000000001',
+      customerAddress: 'Mandal Main Road',
+      customerId: customers.walkIn,
+      paymentMode: 'cash',
+      paymentStatus: 'paid',
+      bankAccountId: null,
+      operatorId: admin.id,
+      items: [
+        { code: 'SEED004', quantity: 50, price: 150, gst: 5, tax: 375, total: 7875 }
       ]
     }
   ];
@@ -684,6 +711,37 @@ async function seedScenarioData() {
     stockLevels[adjustment.code] = afterQty;
   }
 
+  for (const product of productCatalog) {
+    await updateRow('products', { quantity_available: stockLevels[product.code], updated_at: formatIST(shiftDays(now, -1)) }, 'id = ?', [productIds[product.code]]);
+  }
+
+  await backfillPurchaseLotLedger({
+    getRow,
+    getAll,
+    runQuery,
+    nowIST: () => formatIST(shiftDays(now, -1))
+  });
+
+  const yearEndReturnTimestamp = formatIST(shiftDays(now, -1));
+  const yearEndReturnLot = await getRow(
+    'SELECT * FROM purchase_lots WHERE purchase_id = ?',
+    [purchaseRecordIds.yearEndReturnDelivered]
+  );
+
+  if (yearEndReturnLot) {
+    await createSupplierReturn({
+      supplierId: supplierIds['Year End Agro Supplier'],
+      supplierName: 'Year End Agro Supplier',
+      items: [{ purchase_lot_id: yearEndReturnLot.id, quantity_returned: 50 }],
+      returnDate: yearEndReturnTimestamp,
+      notes: 'Financial year closing return of unsold stock',
+      userId: admin.id,
+      eventTimestamp: yearEndReturnTimestamp
+    }, { getRow, getAll, runQuery });
+
+    stockLevels.SEED004 = 0;
+  }
+
   await updateRow('customers', { outstanding_balance: Number(lakshmiOutstanding.toFixed(2)) }, 'id = ?', [customers.lakshmi]);
 
   const quotationIds = {};
@@ -802,6 +860,7 @@ async function seedScenarioData() {
     purchases: await getRow('SELECT COUNT(*) AS count FROM purchases'),
     sales: await getRow('SELECT COUNT(DISTINCT sale_id) AS count FROM sales'),
     returns: await getRow('SELECT COUNT(*) AS count FROM sales_returns'),
+    supplierReturns: await getRow('SELECT COUNT(*) AS count FROM supplier_returns'),
     quotations: await getRow('SELECT COUNT(*) AS count FROM quotations'),
     warehouses: await getRow('SELECT COUNT(*) AS count FROM warehouses'),
     priceTiers: await getRow('SELECT COUNT(*) AS count FROM price_tiers'),
@@ -817,6 +876,7 @@ async function seedScenarioData() {
   console.log(`Purchases: ${summary.purchases.count}`);
   console.log(`Sales: ${summary.sales.count}`);
   console.log(`Returns: ${summary.returns.count}`);
+  console.log(`Supplier returns: ${summary.supplierReturns.count}`);
   console.log(`Quotations: ${summary.quotations.count}`);
   console.log(`Warehouses: ${summary.warehouses.count}`);
   console.log(`Price tiers: ${summary.priceTiers.count}`);

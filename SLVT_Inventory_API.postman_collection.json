@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Shri Lakshmi Vigneswara Traders — Inventory API",
-    "description": "Complete Postman collection for the Inventory Management System.\nBase URL: {{baseUrl}}\nAuthentication: After login, copy the token into the 'token' collection variable.",
+    "description": "Complete Postman collection for the Inventory Management System.\nBase URL: {{baseUrl}}\nAuthentication: After login, copy the token into the 'token' collection variable.\nFor a clean database, create the needed products, suppliers, purchases, lots, and bank accounts first, then fill the ID variables below before running the supplier-return and transaction requests.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -12,6 +12,41 @@
     },
     {
       "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "productId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "purchaseId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "supplierId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "supplierName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "purchaseLotId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bankAccountId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "supplierPaymentId",
       "value": "",
       "type": "string"
     }
@@ -1385,6 +1420,789 @@
                 }
               }
             }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Purchase Delivered",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchases/{{purchaseId}}/mark-delivered",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchases",
+                "{{purchaseId}}",
+                "mark-delivered"
+              ]
+            },
+            "description": "Use this after creating an ordered purchase. It receives the full remaining quantity into inventory.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"delivery_date\": \"2026-04-10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Partial Purchase Delivery",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchases/{{purchaseId}}/partial-delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchases",
+                "{{purchaseId}}",
+                "partial-delivery"
+              ]
+            },
+            "description": "Receives part of a pending purchase. Set mark_as_completed=true to close the order early.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity_delivered\": 10,\n  \"mark_as_completed\": false,\n  \"delivery_date\": \"2026-04-10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Pending Purchase",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchases/{{purchaseId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchases",
+                "{{purchaseId}}",
+                "cancel"
+              ]
+            },
+            "description": "Cancels a pending purchase. If the purchase had an advance payment, the linked supplier payment and bank effect are reversed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Purchase Supplier Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchases/suppliers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchases",
+                "suppliers"
+              ]
+            },
+            "description": "Supplier summary built from purchase lots, returns, and supplier payments. Live payable = received value - returned value - payments made."
+          },
+          "response": []
+        },
+        {
+          "name": "Purchase Supplier Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchases/suppliers/{{supplierName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchases",
+                "suppliers",
+                "{{supplierName}}"
+              ]
+            },
+            "description": "Returns supplier summary, open lots, purchase history, payments, and itemized supplier-return rows for the named supplier."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Suppliers",
+      "item": [
+        {
+          "name": "List Suppliers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers"
+              ]
+            },
+            "description": "Supplier directory with total received value, returned value, total paid, stock on hand, and live remaining balance."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Supplier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers"
+              ]
+            },
+            "description": "Create a supplier record first when you are testing a clean database manually.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Manual Test Supplier\",\n  \"contact_person\": \"Ravi Kumar\",\n  \"mobile\": \"9876543210\",\n  \"email\": \"supplier@example.com\",\n  \"address\": \"Nalgonda\",\n  \"gstin\": \"36ABCDE1234F1Z1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Supplier Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}"
+              ]
+            },
+            "description": "Detail endpoint returns purchases, open_lots, payments, summary, and itemized supplier-return rows."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Supplier",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}"
+              ]
+            },
+            "description": "Update supplier master details. If the name changes, linked supplier references are renamed too.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Manual Test Supplier Updated\",\n  \"contact_person\": \"Ravi Kumar\",\n  \"mobile\": \"9876543210\",\n  \"email\": \"supplier.updated@example.com\",\n  \"address\": \"Nalgonda\",\n  \"gstin\": \"36ABCDE1234F1Z1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Supplier Active Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}/toggle",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}",
+                "toggle"
+              ]
+            },
+            "description": "Toggles supplier active status.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record Supplier Return",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/suppliers/{{supplierId}}/returns",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "suppliers",
+                "{{supplierId}}",
+                "returns"
+              ]
+            },
+            "description": "Return only the selected open-lot quantities. Use Get Supplier Detail first to copy a live purchase_lot_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"purchase_lot_id\": {{purchaseLotId}}, \"quantity_returned\": 5 }\n  ],\n  \"return_date\": \"2026-04-10\",\n  \"notes\": \"Manual year-end supplier return\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "item": [
+        {
+          "name": "List Bank Accounts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/bank-accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "bank-accounts"
+              ]
+            },
+            "description": "Lists active bank accounts used in purchases, supplier payments, and daily setup."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Bank Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/bank-accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "bank-accounts"
+              ]
+            },
+            "description": "Create a bank account first if you want to test advance payments or supplier payments from a clean DB.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_name\": \"Main Current Account\",\n  \"bank_name\": \"SBI\",\n  \"account_number\": \"1234567890\",\n  \"balance\": 50000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bank Statement",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/bank-accounts/{{bankAccountId}}/statement?start_date=2026-04-01&end_date=2026-04-10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "bank-accounts",
+                "{{bankAccountId}}",
+                "statement"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2026-04-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2026-04-10"
+                }
+              ]
+            },
+            "description": "Shows opening balance, closing balance, credits, debits, and running balance entries for one account."
+          },
+          "response": []
+        },
+        {
+          "name": "Daily Setup Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/daily-setup/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "daily-setup",
+                "status"
+              ]
+            },
+            "description": "Returns whether today’s operating bank is selected and whether the balance review has been completed."
+          },
+          "response": []
+        },
+        {
+          "name": "Select Daily Bank",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/daily-setup/select-bank",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "daily-setup",
+                "select-bank"
+              ]
+            },
+            "description": "Required before operator-led financial writes such as deliveries, returns, or expenditures.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bank_account_id\": {{bankAccountId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Review Daily Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/daily-setup/review-balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "daily-setup",
+                "review-balance"
+              ]
+            },
+            "description": "Marks the current business day’s cash/bank balance snapshot as reviewed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Supplier Payments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/supplier-payments?supplier_name={{supplierName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "supplier-payments"
+              ],
+              "query": [
+                {
+                  "key": "supplier_name",
+                  "value": "{{supplierName}}"
+                }
+              ]
+            },
+            "description": "Lists supplier payments. Add supplier_name to filter one supplier’s payment ledger."
+          },
+          "response": []
+        },
+        {
+          "name": "Record Supplier Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/supplier-payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "supplier-payments"
+              ]
+            },
+            "description": "Creates a supplier payment. For bank or upi modes, provide a live bank_account_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplier_name\": \"{{supplierName}}\",\n  \"amount\": 2500,\n  \"payment_mode\": \"bank\",\n  \"payment_date\": \"2026-04-10\",\n  \"bank_account_id\": {{bankAccountId}},\n  \"description\": \"Manual supplier payment test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Supplier Payment",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/supplier-payments/{{supplierPaymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "supplier-payments",
+                "{{supplierPaymentId}}"
+              ]
+            },
+            "description": "Deletes a supplier payment and reverses the linked bank movement atomically."
+          },
+          "response": []
+        },
+        {
+          "name": "Supplier Balances",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/supplier-balances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "supplier-balances"
+              ]
+            },
+            "description": "Live supplier settlement data. Remaining balance is received value - returned value - total paid."
+          },
+          "response": []
+        },
+        {
+          "name": "Daily Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/daily-summary?start_date=2026-04-01&end_date=2026-04-10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "transactions",
+                "daily-summary"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2026-04-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2026-04-10"
+                }
+              ]
+            },
+            "description": "Cash-book style day-by-day summary of sales, supplier payments, deposits, withdrawals, expenditures, and setup status."
           },
           "response": []
         }

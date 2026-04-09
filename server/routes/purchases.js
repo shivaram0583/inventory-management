@@ -22,6 +22,7 @@ const {
 const { resolveSupplier } = require('../services/supplierDirectory');
 const { syncPurchaseLotForPurchase } = require('../services/purchaseLotLedger');
 const { logAudit } = require('../middleware/auditLog');
+const { calculateOutstandingSupplierBalance } = require('../services/supplierFinancials');
 
 const router = express.Router();
 
@@ -35,7 +36,12 @@ const purchaseSelect = `
     pur.*,
     COALESCE(pur.purchase_status, 'delivered') AS purchase_status,
     COALESCE(pur.advance_amount, 0) AS advance_amount,
-    MAX(COALESCE(pur.total_amount, 0) - COALESCE(pur.advance_amount, 0), 0) AS balance_due,
+    MAX(
+      COALESCE(pur.total_amount, 0)
+      - COALESCE(pur.advance_amount, 0)
+      - (COALESCE(pl.quantity_returned, 0) * COALESCE(pur.price_per_unit, 0)),
+      0
+    ) AS balance_due,
     COALESCE(pl.quantity_received, COALESCE(NULLIF(pur.quantity_delivered, 0), pur.quantity, 0)) AS quantity_received,
     COALESCE(pl.quantity_sold, 0) AS quantity_sold,
     COALESCE(pl.quantity_returned, 0) AS quantity_returned,
@@ -725,7 +731,7 @@ router.post('/:id/mark-delivered', [
 // GET list of all unique suppliers with summary stats
 router.get('/suppliers', authenticateToken, async (req, res) => {
   try {
-    const suppliers = await getAll(`
+    const supplierRows = await getAll(`
       SELECT
         s.id AS supplier_id,
         s.name AS supplier,
@@ -738,8 +744,9 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
         COALESCE(lot_summary.total_remaining_qty, 0) AS total_remaining_qty,
         COALESCE(lot_summary.total_returned_qty, 0) AS total_returned_qty,
         COALESCE(lot_summary.sold_value, 0) AS sold_value,
+        COALESCE(return_summary.total_returned_value, 0) AS total_returned_value,
         COALESCE(payment_summary.total_paid, 0) AS total_paid,
-        COALESCE(lot_summary.sold_value, 0) - COALESCE(payment_summary.total_paid, 0) AS balance_due
+        0 AS balance_due
       FROM suppliers s
       LEFT JOIN (
         SELECT
@@ -767,6 +774,14 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
       LEFT JOIN (
         SELECT
           supplier_id,
+          COALESCE(SUM(total_amount), 0) AS total_returned_value
+        FROM supplier_returns
+        WHERE supplier_id IS NOT NULL
+        GROUP BY supplier_id
+      ) return_summary ON return_summary.supplier_id = s.id
+      LEFT JOIN (
+        SELECT
+          supplier_id,
           COALESCE(SUM(amount), 0) AS total_paid
         FROM supplier_payments
         WHERE supplier_id IS NOT NULL
@@ -774,6 +789,16 @@ router.get('/suppliers', authenticateToken, async (req, res) => {
       ) payment_summary ON payment_summary.supplier_id = s.id
       ORDER BY sold_value DESC, total_spent DESC, s.name ASC
     `);
+
+    const suppliers = supplierRows.map((supplier) => ({
+      ...supplier,
+      balance_due: calculateOutstandingSupplierBalance({
+        totalReceivedValue: supplier.total_spent,
+        totalReturnedValue: supplier.total_returned_value,
+        totalPaid: supplier.total_paid
+      })
+    }));
+
     res.json(suppliers);
   } catch (error) {
     console.error('Get suppliers error:', error);
@@ -968,19 +993,43 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
       supplierRecord,
       supplierName
     });
+    const supplierReturnParams = [...supplierReturnFilter.params];
+    let supplierReturnDateFilter = '';
+    if (start_date && end_date) {
+      supplierReturnDateFilter = ' AND DATE(sr.return_date) BETWEEN ? AND ?';
+      supplierReturnParams.push(start_date, end_date);
+    }
+
+    const supplierReturnSummary = await getRow(`
+      SELECT
+        COALESCE(SUM(sr.total_quantity), 0) AS total_returned_qty,
+        COALESCE(SUM(sr.total_amount), 0) AS total_returned_value
+      FROM supplier_returns sr
+      WHERE ${supplierReturnFilter.clause}${supplierReturnDateFilter}
+    `, supplierReturnParams);
+
     const supplierReturns = await getAll(`
       SELECT
+        sri.id AS return_item_id,
         sr.return_id,
-        sr.total_quantity,
-        sr.total_amount,
-        sr.notes,
         sr.return_date,
-        u.username AS created_by_name
+        sr.notes,
+        u.username AS created_by_name,
+        p.product_name,
+        p.product_id AS product_code,
+        p.unit,
+        COALESCE(pl.quantity_received, 0) AS original_quantity,
+        sri.quantity_returned,
+        sr.total_amount,
+        sri.total_amount AS item_total_amount
       FROM supplier_returns sr
+      JOIN supplier_return_items sri ON sri.supplier_return_id = sr.id
+      LEFT JOIN purchase_lots pl ON pl.id = sri.purchase_lot_id
+      LEFT JOIN products p ON p.id = sri.product_id
       LEFT JOIN users u ON u.id = sr.created_by
-      WHERE ${supplierReturnFilter.clause}
-      ORDER BY sr.return_date DESC
-    `, supplierReturnFilter.params);
+      WHERE ${supplierReturnFilter.clause}${supplierReturnDateFilter}
+      ORDER BY sr.return_date DESC, sr.id DESC, sri.id ASC
+    `, supplierReturnParams);
 
     res.json({
       supplier: supplierRecord?.name || supplierName,
@@ -991,11 +1040,16 @@ router.get('/suppliers/:name', authenticateToken, async (req, res) => {
         products_supplied: summary?.products_supplied || 0,
         total_sold_qty: summary?.total_sold_qty || 0,
         total_remaining_qty: summary?.total_remaining_qty || 0,
-        total_returned_qty: summary?.total_returned_qty || 0,
+        total_returned_qty: supplierReturnSummary?.total_returned_qty || 0,
         total_cost: summary?.total_cost || 0,
         sold_value: summary?.sold_value || 0,
+        total_returned_value: supplierReturnSummary?.total_returned_value || 0,
         total_paid: paymentSummary?.total_paid || 0,
-        balance_due: toNumber(summary?.sold_value) - toNumber(paymentSummary?.total_paid)
+        balance_due: calculateOutstandingSupplierBalance({
+          totalReceivedValue: summary?.total_cost,
+          totalReturnedValue: supplierReturnSummary?.total_returned_value,
+          totalPaid: paymentSummary?.total_paid
+        })
       },
       products,
       history,

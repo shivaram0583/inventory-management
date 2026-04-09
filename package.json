@@ -8,6 +8,7 @@
     "server": "cd server && npm run dev",
     "client": "cd client && npm start",
     "build": "cd client && npm run build",
+    "clean-db": "cd server && npm run clean-db",
     "seed": "cd server && npm run seed",
     "install-deps": "npm install && cd server && npm install && cd ../client && npm install"
   },

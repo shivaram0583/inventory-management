@@ -580,16 +580,36 @@ const Purchases = () => {
       return_date: getISTDateString(),
       notes: '',
       items: openLots.map((lot) => ({
+        selected: false,
         purchase_lot_id: lot.id,
         product_name: lot.product_name,
         product_code: lot.product_code,
         purchase_reference: lot.purchase_reference,
         unit: lot.unit,
         quantity_remaining: num(lot.quantity_remaining),
-        quantity_returned: String(num(lot.quantity_remaining)),
+        quantity_returned: '',
         price_per_unit: num(lot.price_per_unit)
       }))
     });
+  };
+
+  const toggleSupplierReturnItemSelection = (purchaseLotId, checked) => {
+    setSupplierReturnModal((current) => ({
+      ...current,
+      items: current.items.map((item) => {
+        if (item.purchase_lot_id !== purchaseLotId) {
+          return item;
+        }
+
+        return {
+          ...item,
+          selected: checked,
+          quantity_returned: checked
+            ? (item.quantity_returned === '' ? String(item.quantity_remaining) : item.quantity_returned)
+            : ''
+        };
+      })
+    }));
   };
 
   const updateSupplierReturnItem = (purchaseLotId, nextValue) => {
@@ -603,6 +623,7 @@ const Purchases = () => {
         const parsed = nextValue === '' ? '' : Math.max(0, Math.min(num(nextValue), item.quantity_remaining));
         return {
           ...item,
+          selected: item.selected || parsed !== '',
           quantity_returned: String(parsed)
         };
       })
@@ -610,7 +631,7 @@ const Purchases = () => {
   };
 
   const handleSupplierReturnSubmit = async (event) => {
-    event.preventDefault();
+    if (event?.preventDefault) event.preventDefault();
     if (!supplierDetail?.supplier_id) {
       setError('Supplier record is not available for this return');
       return;
@@ -618,13 +639,14 @@ const Purchases = () => {
 
     const items = supplierReturnModal.items
       .map((item) => ({
+        selected: item.selected,
         purchase_lot_id: item.purchase_lot_id,
         quantity_returned: num(item.quantity_returned)
       }))
-      .filter((item) => item.quantity_returned > 0);
+      .filter((item) => item.selected && item.quantity_returned > 0);
 
     if (items.length === 0) {
-      setError('Enter at least one quantity to return');
+      setError('Select at least one product and enter a return quantity');
       return;
     }
 
@@ -1170,8 +1192,8 @@ const Purchases = () => {
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-right">
-                            <p className="text-sm font-bold text-teal-700">{fmtMoney(supplier.sold_value || 0)}</p>
-                            <p className="text-xs text-gray-400">Sold liability</p>
+                              <p className="text-sm font-bold text-teal-700">{fmtMoney(supplier.total_spent || 0)}</p>
+                              <p className="text-xs text-gray-400">Received value</p>
                           </div>
                           <div className="text-right">
                             <p className={`text-sm font-bold ${num(supplier.balance_due) > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
@@ -1226,7 +1248,6 @@ const Purchases = () => {
                             onClick={openSupplierReturnModal}
                             className="inline-flex items-center gap-2 self-start rounded-xl bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-100 transition-colors"
                           >
-                            <ArrowLeft className="h-4 w-4" />
                             Return Remaining Stock
                           </button>
                         )}
@@ -1249,9 +1270,9 @@ const Purchases = () => {
                         <p className="mt-1 text-xs text-gray-400">{Number(supplierDetail.summary?.total_items || 0)} units received</p>
                       </div>
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#eff6ff,#eef2ff)' }}>
-                        <p className="text-xs font-semibold text-gray-500 uppercase">Sold Liability</p>
-                        <p className="text-2xl font-extrabold text-blue-700">{fmtMoney(supplierDetail.summary?.sold_value || 0)}</p>
-                        <p className="mt-1 text-xs text-gray-400">{Number(supplierDetail.summary?.total_sold_qty || 0)} units sold</p>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Returned Value</p>
+                        <p className="text-2xl font-extrabold text-blue-700">{fmtMoney(supplierDetail.summary?.total_returned_value || 0)}</p>
+                        <p className="mt-1 text-xs text-gray-400">{Number(supplierDetail.summary?.total_returned_qty || 0)} units returned</p>
                       </div>
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#faf5ff,#f5f3ff)' }}>
                         <p className="text-xs font-semibold text-gray-500 uppercase">Payments Made</p>
@@ -1263,12 +1284,12 @@ const Purchases = () => {
                         <p className={`text-2xl font-extrabold ${num(supplierDetail.summary?.balance_due) > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
                           {fmtMoney(Math.abs(supplierDetail.summary?.balance_due || 0))}
                         </p>
-                        <p className="mt-1 text-xs text-gray-400">{num(supplierDetail.summary?.balance_due) > 0 ? 'Payable for sold stock' : 'Settled or prepaid'}</p>
+                        <p className="mt-1 text-xs text-gray-400">{num(supplierDetail.summary?.balance_due) > 0 ? 'Net payable after returns and payments' : 'Settled or supplier credit'}</p>
                       </div>
                       <div className="rounded-xl p-4" style={{ background: 'linear-gradient(135deg,#fef2f2,#fff1f2)' }}>
                         <p className="text-xs font-semibold text-gray-500 uppercase">Stock On Hand</p>
                         <p className="text-2xl font-extrabold text-rose-700">{Number(supplierDetail.summary?.total_remaining_qty || 0)}</p>
-                        <p className="mt-1 text-xs text-gray-400">{Number(supplierDetail.summary?.total_returned_qty || 0)} units already returned</p>
+                        <p className="mt-1 text-xs text-gray-400">Unsold quantity still with you</p>
                       </div>
                     </div>
                   </div>
@@ -1361,23 +1382,22 @@ const Purchases = () => {
                       <table className="table">
                         <thead>
                           <tr>
-                            <th>Return ID</th>
-                            <th>Date</th>
-                            <th>Quantity</th>
+                            <th>Product Name</th>
+                            <th>Original Quantity</th>
+                            <th>Return Quantity</th>
                             <th>Amount</th>
-                            <th>Notes</th>
-                            <th>By</th>
                           </tr>
                         </thead>
                         <tbody>
                           {(supplierDetail.returns || []).map((entry) => (
-                            <tr key={entry.return_id}>
-                              <td className="font-mono text-xs">{entry.return_id}</td>
-                              <td>{fmtDateTime(entry.return_date)}</td>
-                              <td>{entry.total_quantity}</td>
-                              <td className="font-medium">{fmtMoney(entry.total_amount || 0)}</td>
-                              <td>{entry.notes || '—'}</td>
-                              <td>{entry.created_by_name || '—'}</td>
+                            <tr key={entry.return_item_id || `${entry.return_id}-${entry.product_code || 'item'}`}>
+                              <td>
+                                <p className="font-medium text-gray-900">{entry.product_name || '—'}</p>
+                                <p className="text-xs text-gray-400">{entry.return_id} · {fmtDateTime(entry.return_date)}</p>
+                              </td>
+                              <td>{entry.original_quantity} {entry.unit}</td>
+                              <td>{entry.quantity_returned} {entry.unit}</td>
+                              <td className="font-medium">{fmtMoney(entry.item_total_amount || 0)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1572,16 +1592,25 @@ const Purchases = () => {
           </div>
 
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
-            Only the remaining unsold quantities can be returned. The supplier balance will stay based on sold quantity only.
+            Choose only the products you want to return. Leave the other rows blank or 0. The supplier payable balance will reduce only for the selected returned stock.
           </div>
 
           <div className="max-h-80 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100">
             {supplierReturnModal.items.map((item) => (
               <div key={item.purchase_lot_id} className="p-4 space-y-2">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(item.selected)}
+                      onChange={(e) => toggleSupplierReturnItemSelection(item.purchase_lot_id, e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
                     <p className="font-semibold text-gray-900">{item.product_name}</p>
                     <p className="text-xs text-gray-400">{item.product_code} · {item.purchase_reference || 'Opening stock lot'}</p>
+                    <p className="mt-1 text-[11px] text-gray-500">Tick this product to include it in the return.</p>
+                    </div>
                   </div>
                   <div className="text-right text-xs text-gray-500">
                     <p>Available: <span className="font-semibold text-amber-700">{item.quantity_remaining} {item.unit}</span></p>
@@ -1598,7 +1627,9 @@ const Purchases = () => {
                       step="1"
                       className="input-field !text-sm"
                       value={item.quantity_returned}
+                      disabled={!item.selected}
                       onChange={(e) => updateSupplierReturnItem(item.purchase_lot_id, e.target.value)}
+                      placeholder={item.selected ? `Max ${item.quantity_remaining}` : 'Select the checkbox first'}
                     />
                   </div>
                   <div className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600">

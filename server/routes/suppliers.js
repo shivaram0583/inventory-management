@@ -2,11 +2,12 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { requireDailySetupForOperatorWrites } = require('../middleware/dailySetup');
-const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime } = require('../database/db');
+const { getRow, runQuery, getAll, nowIST, combineISTDateWithCurrentTime, runTransaction } = require('../database/db');
 const { backfillSupplierDirectory, renameSupplierReferences } = require('../services/supplierDirectory');
 const { createSupplierReturn } = require('../services/purchaseLotLedger');
 const { addReviewNotification } = require('../services/reviewNotifications');
 const { logAudit } = require('../middleware/auditLog');
+const { calculateOutstandingSupplierBalance } = require('../services/supplierFinancials');
 
 const requireAdmin = authorizeRole(['admin']);
 
@@ -29,7 +30,7 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     await backfillSupplierDirectory();
 
-    const suppliers = await getAll(
+    const supplierRows = await getAll(
       `SELECT
          s.*,
          COALESCE(order_summary.total_orders, 0) AS total_orders,
@@ -43,7 +44,7 @@ router.get('/', authenticateToken, async (req, res) => {
          COALESCE(return_summary.total_returned_qty, 0) AS total_returned_qty,
          COALESCE(return_summary.total_returned_value, 0) AS total_returned_value,
          COALESCE(payment_summary.total_paid, 0) AS total_paid,
-         COALESCE(lot_summary.sold_value, 0) - COALESCE(payment_summary.total_paid, 0) AS remaining_balance
+         0 AS remaining_balance
        FROM suppliers s
        LEFT JOIN (
          SELECT
@@ -86,6 +87,16 @@ router.get('/', authenticateToken, async (req, res) => {
        ) payment_summary ON payment_summary.supplier_id = s.id
        ORDER BY s.name ASC`
     );
+
+    const suppliers = supplierRows.map((supplier) => ({
+      ...supplier,
+      remaining_balance: calculateOutstandingSupplierBalance({
+        totalReceivedValue: supplier.total_received_value,
+        totalReturnedValue: supplier.total_returned_value,
+        totalPaid: supplier.total_paid
+      })
+    }));
+
     res.json(suppliers);
   } catch (error) {
     console.error('List suppliers error:', error);
@@ -223,16 +234,24 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     const supplierReturns = await getAll(
       `SELECT
+         sri.id AS return_item_id,
          sr.return_id,
-         sr.total_quantity,
-         sr.total_amount,
-         sr.notes,
          sr.return_date,
+         sr.notes,
          u.username AS created_by_name
+         ,pr.product_name,
+         pr.product_id AS product_code,
+         pr.unit,
+         COALESCE(pl.quantity_received, 0) AS original_quantity,
+         sri.quantity_returned,
+         sri.total_amount AS item_total_amount
        FROM supplier_returns sr
+       JOIN supplier_return_items sri ON sri.supplier_return_id = sr.id
+       LEFT JOIN purchase_lots pl ON pl.id = sri.purchase_lot_id
+       LEFT JOIN products pr ON pr.id = sri.product_id
        LEFT JOIN users u ON u.id = sr.created_by
        WHERE ${returnFilter.clause}
-       ORDER BY sr.return_date DESC
+       ORDER BY sr.return_date DESC, sr.id DESC, sri.id ASC
        LIMIT 20`,
       returnFilter.params
     );
@@ -251,7 +270,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
         sold_value: toNumber(summary?.sold_value),
         total_paid: toNumber(paymentsSummary?.total_paid),
         total_returned_value: toNumber(supplierReturnsSummary?.total_returned_value),
-        balance_due: toNumber(summary?.sold_value) - toNumber(paymentsSummary?.total_paid)
+        balance_due: calculateOutstandingSupplierBalance({
+          totalReceivedValue: summary?.total_received_value,
+          totalReturnedValue: supplierReturnsSummary?.total_returned_value,
+          totalPaid: paymentsSummary?.total_paid
+        })
       },
       purchases,
       payments,
@@ -291,10 +314,8 @@ router.post('/:id/returns', [
       ? combineISTDateWithCurrentTime(suppliedDate, eventTimestamp)
       : eventTimestamp;
 
-    let supplierReturn;
-    await runQuery('BEGIN TRANSACTION');
-    try {
-      supplierReturn = await createSupplierReturn({
+    const supplierReturn = await runTransaction(async (ops) => (
+      createSupplierReturn({
         supplierId: supplier.id,
         supplierName: supplier.name,
         items: req.body.items,
@@ -302,17 +323,8 @@ router.post('/:id/returns', [
         notes: req.body.notes,
         userId: req.user.id,
         eventTimestamp
-      }, { getRow, getAll, runQuery, nowIST });
-
-      await runQuery('COMMIT');
-    } catch (transactionError) {
-      try {
-        await runQuery('ROLLBACK');
-      } catch (rollbackError) {
-        console.error('Rollback supplier return error:', rollbackError);
-      }
-      throw transactionError;
-    }
+      }, ops)
+    ));
 
     addReviewNotification({
       actorId: req.user.id,

@@ -1036,7 +1036,7 @@ const SupplierTab = ({ supplierBalances, supplierPayments, bankAccounts, isAdmin
       <div className="flex justify-between items-center mb-3">
         <div>
           <h3 className="text-lg font-bold text-gray-800">Supplier Settlement</h3>
-          <p className="text-xs text-gray-500">Balance is calculated only on sold supplier stock. Unsold stock remains returnable.</p>
+          <p className="text-xs text-gray-500">Balance due = received value - returned value - payments made.</p>
         </div>
         {isAdmin && (
           <button onClick={() => onAdd('')} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 shadow transition-all">
@@ -1057,7 +1057,7 @@ const SupplierTab = ({ supplierBalances, supplierPayments, bankAccounts, isAdmin
                 <tr>
                   <th>Supplier</th>
                   <th className="text-right">Received Value</th>
-                  <th className="text-right">Sold Value</th>
+                  <th className="text-right">Returned Value</th>
                   <th className="text-right">On Hand Qty</th>
                   <th className="text-right">Total Paid</th>
                   <th className="text-right">Balance Due</th>
@@ -1069,11 +1069,11 @@ const SupplierTab = ({ supplierBalances, supplierPayments, bankAccounts, isAdmin
                   <tr key={s.supplier_name} className={s.remaining_balance > 0 ? 'bg-orange-50/50' : ''}>
                     <td className="font-semibold">{s.supplier_name}</td>
                     <td className="text-right">₹{fmt(s.total_received_value)}</td>
-                    <td className="text-right font-medium text-slate-700">₹{fmt(s.sold_value)}</td>
+                    <td className="text-right font-medium text-slate-700">₹{fmt(s.total_returned_value)}</td>
                     <td className="text-right">{num(s.total_remaining_qty)}</td>
                     <td className="text-right text-emerald-600 font-medium">₹{fmt(s.total_paid)}</td>
                     <td className={`text-right font-bold ${s.remaining_balance > 0 ? 'text-orange-600' : 'text-emerald-600'}`}>
-                      {s.remaining_balance > 0 ? `₹${fmt(s.remaining_balance)}` : 'Paid ✓'}
+                      {s.remaining_balance > 0 ? `₹${fmt(s.remaining_balance)}` : s.remaining_balance < 0 ? `Credit ₹${fmt(Math.abs(s.remaining_balance))}` : 'Settled ✓'}
                     </td>
                     {isAdmin && (
                       <td>

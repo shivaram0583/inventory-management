@@ -6,5 +6,4 @@ server/.env
 server/.env.*
 !server/.env.example
 client/build/
-server/database/inventory.db
 server/backups/

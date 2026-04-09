@@ -515,7 +515,7 @@ describe('Transactions', () => {
       expect(Array.isArray(res.body)).toBe(true);
     });
 
-    test('should calculate supplier balance from sold stock only', async () => {
+    test('should calculate supplier balance from received value minus returns and payments', async () => {
       const product = await createTestProduct(testDb, {
         product_id: 'TXNSUP001',
         product_name: 'Supplier Balance Product',
@@ -525,7 +525,7 @@ describe('Transactions', () => {
         supplier: null
       });
 
-      await request(app)
+      const purchaseRes = await request(app)
         .post('/api/purchases')
         .set('Authorization', `Bearer ${adminAuth.token}`)
         .send({
@@ -536,14 +536,7 @@ describe('Transactions', () => {
           purchase_status: 'delivered'
         });
 
-      await request(app)
-        .post('/api/sales')
-        .set('Authorization', `Bearer ${adminAuth.token}`)
-        .send({
-          items: [{ product_id: product.id, quantity: 3 }],
-          customer_name: 'Balance Customer',
-          payment_mode: 'cash'
-        });
+      expect(purchaseRes.status).toBe(201);
 
       await request(app)
         .post('/api/transactions/supplier-payments')
@@ -562,10 +555,40 @@ describe('Transactions', () => {
       expect(res.status).toBe(200);
       const supplierBalance = res.body.find((row) => row.supplier_name === 'Balance Supplier');
       expect(Number(supplierBalance.total_received_value)).toBe(400);
-      expect(Number(supplierBalance.sold_value)).toBe(120);
-      expect(Number(supplierBalance.total_remaining_qty)).toBe(7);
+      expect(Number(supplierBalance.total_returned_value)).toBe(0);
+      expect(Number(supplierBalance.total_remaining_qty)).toBe(10);
       expect(Number(supplierBalance.total_paid)).toBe(50);
-      expect(Number(supplierBalance.remaining_balance)).toBe(70);
+      expect(Number(supplierBalance.remaining_balance)).toBe(350);
+
+      const supplier = await testDb.getRow(
+        'SELECT * FROM suppliers WHERE LOWER(name) = LOWER(?)',
+        ['Balance Supplier']
+      );
+      const purchaseLot = await testDb.getRow(
+        'SELECT * FROM purchase_lots WHERE purchase_id = ?',
+        [purchaseRes.body.id]
+      );
+
+      const returnRes = await request(app)
+        .post(`/api/suppliers/${supplier.id}/returns`)
+        .set('Authorization', `Bearer ${adminAuth.token}`)
+        .send({
+          items: [{ purchase_lot_id: purchaseLot.id, quantity_returned: 2 }],
+          return_date: '2026-04-04',
+          notes: 'Supplier took back slow-moving stock'
+        });
+
+      expect(returnRes.status).toBe(201);
+
+      const updatedRes = await request(app)
+        .get('/api/transactions/supplier-balances')
+        .set('Authorization', `Bearer ${adminAuth.token}`);
+
+      expect(updatedRes.status).toBe(200);
+      const updatedSupplierBalance = updatedRes.body.find((row) => row.supplier_name === 'Balance Supplier');
+      expect(Number(updatedSupplierBalance.total_returned_value)).toBe(80);
+      expect(Number(updatedSupplierBalance.total_remaining_qty)).toBe(8);
+      expect(Number(updatedSupplierBalance.remaining_balance)).toBe(270);
     });
   });
 
