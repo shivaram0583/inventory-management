@@ -280,7 +280,7 @@ const Layout = () => {
             <p className="text-xs text-gray-400">
               Developed by{' '}
               <a
-                href="https://github.com/dvvshivaram"
+                href="https://github.com/shivaram0583"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-medium text-indigo-500 hover:text-indigo-700 transition-colors"

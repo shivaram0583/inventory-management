@@ -134,7 +134,7 @@ async function restoreDefaults(db) {
       password_changed_at,
       created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ['admin', adminPassword, 'admin', 1, 0, timestamp, timestamp]
+    ['admin', adminPassword, 'admin', 1, 1, null, timestamp]
   );
 
   await run(
@@ -148,7 +148,7 @@ async function restoreDefaults(db) {
       password_changed_at,
       created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ['operator', operatorPassword, 'operator', 1, 0, timestamp, timestamp]
+    ['operator', operatorPassword, 'operator', 1, 1, null, timestamp]
   );
 
   for (const category of ['seeds', 'fertilizers', 'pesticides', 'tools']) {
