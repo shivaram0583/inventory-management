@@ -1,10 +1,9 @@
-﻿# Shri Lakshmi Vigneswara Traders — Inventory Management System
+# Shri Lakshmi Vigneswara Traders — Inventory Management System
 
 > **Business Contact:** +91 70369 53734 · dvvshivaram@gmail.com
 > **Developed by:** dvvshivaram © 2026
 
-A full-stack web application for managing inventory, sales, purchases, receipts,
-and business analytics for an agricultural inputs trading business (seeds & fertilizers).
+A full-stack web application for managing inventory, sales, purchases, supplier relations, banking, quotations, customer accounts, warehouse operations, and business analytics for an agricultural inputs trading business (seeds, fertilizers, pesticides & tools).
 
 ---
 
@@ -13,14 +12,18 @@ and business analytics for an agricultural inputs trading business (seeds & fert
 1. [Tech Stack](#tech-stack)
 2. [Project Structure](#project-structure)
 3. [High-Level Design (HLD)](#high-level-design-hld)
-4. [Low-Level Design (LLD)](#low-level-design-lld)
+4. [Database Schema](#database-schema)
 5. [API Reference](#api-reference)
-6. [Setup & Installation](#setup--installation)
-7. [Database Workflows](#database-workflows)
-8. [Environment Variables](#environment-variables)
-9. [Default Credentials](#default-credentials)
-10. [Feature Guide](#feature-guide)
-11. [Deployment](#deployment)
+6. [Frontend Guide](#frontend-guide)
+7. [Core Business Workflows](#core-business-workflows)
+8. [Setup & Installation](#setup--installation)
+9. [Database Workflows](#database-workflows)
+10. [Environment Variables](#environment-variables)
+11. [Default Credentials](#default-credentials)
+12. [Feature Guide](#feature-guide)
+13. [Security Design](#security-design)
+14. [Testing](#testing)
+15. [Deployment](#deployment)
 
 ---
 
@@ -31,28 +34,29 @@ and business analytics for an agricultural inputs trading business (seeds & fert
 | Dependency | Version | Purpose |
 |---|---|---|
 | Node.js + Express | ^4.18.2 | HTTP server & routing |
-| SQLite3 | ^5.1.6 | Embedded relational database |
+| SQLite3 | ^5.1.6 | Embedded relational database (34 tables) |
 | jsonwebtoken | ^9.0.2 | JWT token generation & verification |
-| bcryptjs | ^2.4.3 | Password hashing (salt rounds: 10) |
+| bcryptjs | ^2.4.3 | Password hashing (10 salt rounds) |
 | express-validator | ^7.0.1 | Request body validation |
 | moment | ^2.29.4 | Date/time formatting (IST UTC+5:30) |
 | dotenv | ^16.3.1 | Environment variable loading |
-| cors | ^2.8.5 | Cross-origin request handling |
-| Nodemailer | latest | SMTP email delivery for quotations & receipts |
-| qrcode | latest | Receipt QR generation |
+| cors | ^2.8.5 | Configurable cross-origin handling |
+| nodemailer | ^8.0.4 | SMTP email delivery for quotations & receipts |
+| qrcode | ^1.5.4 | Receipt QR code generation |
 | nodemon | ^3.0.1 | Dev auto-restart |
+| jest + supertest | — | API integration testing |
 
 ### Frontend (`client/`)
 
 | Dependency | Version | Purpose |
 |---|---|---|
-| React | ^18.2.0 | UI framework |
-| React Router DOM | ^6.8.1 | Client-side routing |
-| Axios | ^1.3.4 | HTTP client (proxy → localhost:5000) |
+| React | ^18.2.0 | UI framework (CRA) |
+| React Router DOM | ^6.8.1 | Client-side SPA routing |
+| Axios | ^1.3.4 | HTTP client with interceptors |
 | Tailwind CSS | ^3.2.7 | Utility-first styling |
-| Lucide React | ^0.263.1 | Icon library |
+| Lucide React | ^0.263.1 | SVG icon library |
 | Recharts | ^3.8.0 | Charts & data visualisation |
-| react-to-print | ^2.14.7 | Browser print for receipts |
+| react-to-print | ^2.14.7 | Browser print for receipts & bank statements |
 
 ---
 
@@ -60,51 +64,125 @@ and business analytics for an agricultural inputs trading business (seeds & fert
 
 ```
 inventory-management/
+├── package.json                     # Root scripts (dev, build, clean-db, seed)
+├── LLD.md                           # Low-Level Design document
+├── TEST_STRATEGY.md                 # Test strategy document
+├── SLVT_Inventory_API.postman_collection.json
+├── netlify.toml / railway.toml / render.yaml   # Deployment configs
+│
 ├── client/
+│   ├── package.json
+│   ├── tailwind.config.js
+│   ├── postcss.config.js
+│   ├── public/
+│   │   ├── index.html
+│   │   └── _redirects                # SPA routing for Netlify
+│   ├── build/                        # Production build output
 │   └── src/
-│       ├── App.js                   # Route definitions & ProtectedRoute / AdminRoute guards
-│       ├── index.css                # Global Tailwind styles & animations
-│       ├── contexts/AuthContext.js  # JWT auth context + axios header injection
-│       ├── hooks/useSortableData.js # Reusable multi-column table sort hook
+│       ├── App.js                    # Routes, guards (ProtectedRoute/AdminRoute/PasswordChangeRoute)
+│       ├── index.js                  # CRA entry point
+│       ├── index.css                 # Tailwind layers, custom classes, animations
+│       ├── contexts/
+│       │   └── AuthContext.js        # JWT auth, idle timeout, daily setup polling, session management
+│       ├── hooks/
+│       │   └── useSortableData.js    # Multi-column table sort hook
 │       ├── utils/
-│       │   ├── dateUtils.js         # UTC→IST display formatters + getISTDateString()
-│       │   └── csvExport.js         # CSV download utility
+│       │   ├── dateUtils.js          # IST formatters, financial year helpers
+│       │   ├── csvExport.js          # BOM-prefixed CSV download
+│       │   ├── pdfExport.js          # HTML table → print dialog
+│       │   └── productCreation.js    # Product form validation & payload builder
 │       └── components/
-│           ├── Login.js             # Login page
-│           ├── Layout.js            # Sidebar nav + copyright footer
-│           ├── Dashboard.js         # Role-specific KPI dashboard
-│           ├── Inventory.js         # Product CRUD + stock management
-│           ├── Sales.js             # POS / cart-based sales screen
-│           ├── Purchases.js         # Purchase recording + history + category mgmt
-│           ├── Suppliers.js         # Supplier directory, balances, open lots, returns
-│           ├── Transactions.js      # Banking, supplier payments, daily setup, cash-book
-│           ├── Returns.js           # Customer sales return workflow
-│           ├── Receipt.js           # Printable receipt view
-│           ├── Reports.js           # Analytics tabs + Recharts charts
-│           ├── ReportDownloader.js  # CSV export for all report types
-│           ├── Customers.js         # Customer directory and balance tracking
-│           ├── Users.js             # User management (admin only)
+│           ├── Login.js              # Animated login page
+│           ├── ForcePasswordChange.js # Mandatory password change
+│           ├── Layout.js             # Sidebar nav, notifications, DailySetupGate, footer
+│           ├── Dashboard.js          # Role-specific KPI dashboard with live clock
+│           ├── Inventory.js          # Product CRUD, stock, pricing rules
+│           ├── InventoryFlowPanel.js # Stock movement timeline
+│           ├── Sales.js              # POS cart, dynamic pricing, customer lookup
+│           ├── SalesRecordsPanel.js  # Sales history with metrics
+│           ├── Purchases.js          # Purchase recording, history, suppliers, categories
+│           ├── Suppliers.js          # Supplier directory, returns, balance tracking
+│           ├── Transactions.js       # Banking, expenditures, supplier payments, daily summary
+│           ├── Returns.js            # Customer sales returns
+│           ├── Customers.js          # Customer directory, payments, customer pricing
+│           ├── Quotations.js         # Quotation lifecycle, email, convert to sale
+│           ├── StockAdjustments.js   # Stock corrections (damage/theft/spoilage/counting)
+│           ├── Warehouses.js         # Multi-warehouse stock & transfers
+│           ├── Receipt.js            # Printable receipt with QR, email delivery
+│           ├── Reports.js            # 12 report tabs with charts
+│           ├── ReportDownloader.js   # CSV/PDF export for all reports
+│           ├── Users.js              # User management, login history (admin)
+│           ├── AuditLog.js           # Audit trail viewer (admin)
+│           ├── Backup.js             # DB backup/restore (admin)
 │           └── shared/
-│               ├── Modal.js         # Reusable confirm/alert modal
-│               └── SortableHeader.js# Sortable table column header
+│               ├── Modal.js          # Portal-rendered modal with theme variants
+│               ├── CustomSelect.js   # Styled dropdown with portal
+│               ├── DailySetupGate.js # Daily bank selection + balance review gate
+│               └── SortableHeader.js # Sortable table column header
 │
 └── server/
-    ├── index.js                     # CORS, body parser, route mounts, static serve
-    ├── .env                         # Secret env vars (not committed)
+    ├── index.js                      # Express app, 19 route mounts, CORS, backup scheduler
     ├── Dockerfile
-    ├── middleware/auth.js           # JWT verify + 5-min idle session enforcement
-    ├── database/db.js               # SQLite init, CREATE TABLE, schema migrations
-    └── routes/
-        ├── auth.js                  # /api/auth
-        ├── inventory.js             # /api/inventory
-        ├── sales.js                 # /api/sales
-        ├── purchases.js             # /api/purchases
-      ├── suppliers.js             # /api/suppliers
-      ├── transactions.js          # /api/transactions
-      ├── returns.js               # /api/returns
-      ├── customers.js             # /api/customers
-        ├── reports.js               # /api/reports
-        └── dashboard.js             # /api/dashboard
+    ├── package.json
+    ├── seed.js                       # Demo data seeder
+    ├── database/
+    │   └── db.js                     # SQLite init, 34 tables, migrations, helpers
+    ├── middleware/
+    │   ├── auth.js                   # JWT verify, session idle (5min), role gate
+    │   ├── auditLog.js               # logAudit() — writes to audit_log table
+    │   └── dailySetup.js             # requireDailySetupForOperatorWrites
+    ├── routes/
+    │   ├── auth.js                   # /api/auth — login, users, passwords (10 endpoints)
+    │   ├── inventory.js              # /api/inventory — products, stock, alerts (9 endpoints)
+    │   ├── sales.js                  # /api/sales — POS, receipts (8 endpoints)
+    │   ├── purchases.js              # /api/purchases — orders, delivery, categories (12 endpoints)
+    │   ├── suppliers.js              # /api/suppliers — directory, returns (6 endpoints)
+    │   ├── transactions.js           # /api/transactions — banking, payments (18 endpoints)
+    │   ├── returns.js                # /api/returns — customer returns (3 endpoints)
+    │   ├── customers.js              # /api/customers — directory, payments, ledger (8 endpoints)
+    │   ├── quotations.js             # /api/quotations — quotes, convert (7 endpoints)
+    │   ├── stockAdjustments.js       # /api/stock-adjustments — corrections (3 endpoints)
+    │   ├── reports.js                # /api/reports — analytics (16 endpoints)
+    │   ├── dashboard.js              # /api/dashboard — role dashboards (3 endpoints)
+    │   ├── warehouses.js             # /api/warehouses — multi-warehouse (7 endpoints)
+    │   ├── notifications.js          # /api/notifications — admin alerts (5 endpoints)
+    │   ├── auditLog.js               # /api/audit-log — audit viewer (2 endpoints)
+    │   ├── backup.js                 # /api/backup — backup/restore (6 endpoints)
+    │   ├── delivery.js               # /api/delivery — email delivery (3 endpoints)
+    │   ├── pricing.js                # /api/pricing — dynamic pricing rules (5 endpoints)
+    │   └── publicPages.js            # / — public receipt/quotation pages (2 endpoints)
+    ├── services/
+    │   ├── purchaseLotLedger.js      # FIFO lot tracking, allocation, reversal, supplier return
+    │   ├── bankLedger.js             # Bank balance management for supplier payments
+    │   ├── pricing.js                # Dynamic pricing resolution engine
+    │   ├── supplierDirectory.js      # Auto-create suppliers, FK sync, rename propagation
+    │   ├── supplierFinancials.js     # Supplier balance calculation
+    │   ├── dailySetup.js             # Daily bank setup status + balance snapshots
+    │   ├── communications.js         # SMTP email, link builders
+    │   ├── backupScheduler.js        # Automated SQLite backup with retention
+    │   └── reviewNotifications.js    # Hybrid in-memory + DB notification system
+    ├── scripts/
+    │   └── clean-db.js               # Database reset utility
+    ├── backups/                      # Auto/manual backup files
+    └── tests/
+        ├── setup/
+        │   ├── testDb.js             # In-memory SQLite for tests
+        │   └── testHelpers.js        # Auth helpers, factories
+        ├── auth.test.js
+        ├── customers.test.js
+        ├── dailySetup.test.js
+        ├── dashboard.test.js
+        ├── e2e.test.js
+        ├── inventory.test.js
+        ├── notifications.test.js
+        ├── pricing.test.js
+        ├── purchases.test.js
+        ├── reports.test.js
+        ├── returns.test.js
+        ├── sales.test.js
+        ├── stockAdjustments.test.js
+        ├── suppliers.test.js
+        └── transactions.test.js
 ```
 
 ---
@@ -114,32 +192,46 @@ inventory-management/
 ### System Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Browser (Client)                           │
-│  React 18 SPA · React Router v6 · Tailwind CSS · Recharts        │
-│                                                                   │
-│  Dashboard  Inventory  Sales  Purchases  Reports  Users  Receipt  │
-│                    AuthContext (JWT)                              │
-│                    Axios (dev proxy → :5000)                      │
-└─────────────────────────────┬────────────────────────────────────┘
-                              │  HTTP / REST  JSON
-                              │  Authorization: Bearer <JWT>
-┌─────────────────────────────▼────────────────────────────────────┐
-│              Express.js API Server  (port 5000)                   │
-│                                                                   │
-│   CORS MW    authenticateToken (JWT + session)    authorizeRole   │
-│   express-validator (body validation on all mutating endpoints)   │
-│                                                                   │
-│  /api/auth  /api/inventory  /api/sales  /api/purchases            │
-│  /api/suppliers  /api/transactions  /api/returns                  │
-│  /api/customers  /api/reports       /api/dashboard                │
-└─────────────────────────────┬────────────────────────────────────┘
-                              │  sqlite3 driver
-┌─────────────────────────────▼────────────────────────────────────┐
-│              SQLite Database  (inventory.db)                      │
-│  users · products · sales · receipts · purchases                  │
-│  customer_sales · product_categories · sessions · login_logs      │
-└────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Browser (Client)                                │
+│   React 18 SPA · React Router v6 · Tailwind CSS · Recharts             │
+│                                                                         │
+│   Dashboard  Inventory  Sales  Purchases  Suppliers  Transactions       │
+│   Returns  Customers  Quotations  Reports  Warehouses  Users            │
+│                                                                         │
+│   AuthContext (JWT + idle timeout) · DailySetupGate · Axios             │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │  REST / JSON
+                                │  Authorization: Bearer <JWT>
+┌───────────────────────────────▼─────────────────────────────────────────┐
+│                 Express.js API Server (port 5000)                       │
+│                                                                         │
+│   ┌──────────────────── Middleware Pipeline ─────────────────────────┐  │
+│   │ CORS → JSON → authenticateToken → authorizeRole                 │  │
+│   │ → requireDailySetupForOperatorWrites → express-validator        │  │
+│   └─────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│   19 Route Modules · 9 Service Modules · 3 Middleware · ~131 Endpoints  │
+└───────────────────────────────┬─────────────────────────────────────────┘
+                                │  sqlite3 driver
+┌───────────────────────────────▼─────────────────────────────────────────┐
+│                    SQLite Database (inventory.db)                        │
+│                                                                         │
+│   34 Tables · FIFO lot tracking · IST timestamps · Foreign keys ON      │
+│                                                                         │
+│   Core:     users · products · product_categories · sessions · logs     │
+│   Sales:    sales · receipts · customer_sales · sale_allocations        │
+│   Purchase: purchases · purchase_lots                                   │
+│   Supplier: suppliers · supplier_payments · supplier_returns/items      │
+│   Customer: customers · customer_payments · sales_returns               │
+│   Pricing:  price_tiers · product_promotions · customer_pricing         │
+│   Banking:  bank_accounts · bank_transfers · expenditures               │
+│             daily_operation_setup                                        │
+│   Warehouse: warehouses · warehouse_stock · warehouse_transfers         │
+│   Quotes:   quotations · quotation_items                                │
+│   Ops:      stock_adjustments · audit_log · notifications               │
+│   System:   app_migrations                                              │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Design Decisions
@@ -147,573 +239,418 @@ inventory-management/
 | Decision | Rationale |
 |---|---|
 | **SQLite** | Zero-config embedded DB for single-node small-business deployment |
-| **UTC storage for all timestamps** | `CURRENT_TIMESTAMP` is UTC; frontend `dateUtils.js` converts to IST for display |
+| **IST timestamps** | All business timestamps stored as IST strings via `nowIST()`; display matches storage |
 | **Session + JWT dual auth** | JWT carries identity; DB `sessions` table enables 5-min idle timeout and instant logout |
-| **Two roles only** | `admin` (full access) and `operator` (no user management, no deletes) |
-| **Dynamic categories** | `product_categories` table — owner adds/removes categories at runtime without code changes |
-| **Monorepo** | Client + server share one git repo; root scripts run both concurrently |
-
-### Data Flow — Making a Sale
-
-```
-Operator fills cart → POST /api/sales
-  ├─ Validate stock availability per item
-  ├─ INSERT INTO sales (one row per line item, shared sale_id)
-  ├─ UPDATE products.quantity_available  (deduct sold qty)
-  ├─ INSERT INTO receipts  (customer info + unique receipt_number)
-  ├─ INSERT INTO customer_sales  (archival denormalised snapshot)
-  └─ Return { saleId, receiptNumber, items, receipt }
-         ↓
-Frontend navigates to /receipt/:saleId
-  ├─ GET /api/sales/:saleId  → line items + receipt row
-  ├─ Render printable receipt with business details
-  └─ PUT /api/sales/receipts/:id/print  (mark printed)
-```
-
-### Data Flow — Recording a Purchase
-
-```
-Purchases tab → select product (or create new inline)
-  └─ Fill qty, price/unit, supplier, date
-  └─ "Review & Confirm" → confirmation popup (no API call yet)
-  └─ Operator confirms → POST /api/purchases
-       ├─ Convert user's IST date → UTC for storage
-       ├─ INSERT INTO purchases
-       └─ UPDATE products SET quantity_available += qty,
-                               purchase_price = new_price
-```
-
-### Data Flow — Edit Purchase
-
-```
-Purchase History table → Edit (pencil icon) → pre-filled modal
-  → PUT /api/purchases/:id
-       ├─ qty_diff = new_qty - old_qty
-       ├─ UPDATE products.quantity_available += qty_diff
-       ├─ UPDATE products.purchase_price = new_price
-       └─ UPDATE purchases row
-```
+| **Two roles only** | `admin` (full access) and `operator` (daily-setup-gated writes, no admin functions) |
+| **FIFO lot tracking** | `purchase_lots` + `sale_allocations` enable per-lot P&L, supplier returns, and stock traceability |
+| **Dynamic pricing** | 4-tier priority: customer-specific > promotion > quantity tier > base price |
+| **Daily setup gate** | Admin must select a bank each day before operators can create sales/purchases |
+| **Monorepo** | Client + server share one Git repo; root scripts run both concurrently |
 
 ---
 
-## Low-Level Design (LLD)
+## Database Schema
 
-### Database Schema
+> **34 tables** — full column-level schema documented in [LLD.md](LLD.md#4-database-design)
 
-#### `users`
-| Column | Type | Constraints |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| username | TEXT | UNIQUE NOT NULL |
-| password | TEXT | bcrypt hash, NOT NULL |
-| role | TEXT | CHECK IN ('admin','operator') |
-| is_active | INTEGER | DEFAULT 1, CHECK IN (0,1) |
-| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+### Overview by Domain
 
-#### `product_categories`
-| Column | Type | Constraints |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| name | TEXT | UNIQUE NOT NULL (lowercase) |
-| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP |
+| Domain | Tables |
+|---|---|
+| **Core** | `users`, `products`, `product_categories`, `sessions`, `login_logs` |
+| **Sales** | `sales`, `receipts`, `customer_sales`, `sale_allocations` |
+| **Purchases** | `purchases`, `purchase_lots` |
+| **Suppliers** | `suppliers`, `supplier_payments`, `supplier_returns`, `supplier_return_items` |
+| **Customers** | `customers`, `customer_payments`, `sales_returns` |
+| **Pricing** | `price_tiers`, `product_promotions`, `customer_pricing` |
+| **Banking** | `bank_accounts`, `bank_transfers`, `expenditures`, `daily_operation_setup` |
+| **Warehouses** | `warehouses`, `warehouse_stock`, `warehouse_transfers` |
+| **Quotations** | `quotations`, `quotation_items` |
+| **Operations** | `stock_adjustments`, `audit_log`, `notifications` |
+| **System** | `app_migrations` |
 
-> Seeded with `seeds` and `fertilizers` on first run. New categories added from Purchases → Manage Categories.
+### Key Relationships
 
-#### `products`
-| Column | Type | Constraints |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| product_id | TEXT | UNIQUE NOT NULL (user code e.g. PROD001) |
-| category | TEXT | Validated against product_categories.name |
-| product_name | TEXT | NOT NULL |
-| variety | TEXT | nullable |
-| quantity_available | REAL | DEFAULT 0 |
-| unit | TEXT | CHECK IN ('kg','packet','bag','liters') |
-| purchase_price | REAL | DEFAULT 0 |
-| selling_price | REAL | DEFAULT 0 |
-| supplier | TEXT | nullable |
-| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
-| updated_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
+- **Sales → Lots (FIFO):** `sale_allocations` links each sale line item to specific `purchase_lots`, enabling per-lot cost tracking and accurate P&L
+- **Supplier Balance:** `received_value (purchase_lots) − returned_value (supplier_return_items) − paid (supplier_payments)`
+- **Customer Balance:** `outstanding_balance` on `customers` table, updated on credit sales and payment collection
+- **Bank Ledger:** `bank_transfers` tracks all deposits/withdrawals with `source_type` linking to originating transaction
 
-#### `sales`
-| Column | Type | Constraints |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| sale_id | TEXT | UNIQUE — `SALE{IST-YYYYMMDDHHmmss}{4rand}` |
-| product_id | INTEGER | FK → products.id |
-| quantity_sold | REAL | NOT NULL |
-| price_per_unit | REAL | NOT NULL |
-| total_amount | REAL | NOT NULL |
-| sale_date | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
-| operator_id | INTEGER | FK → users.id |
+### Database Helpers (exported from `db.js`)
 
-> **One row per line item.** Multiple rows share the same `sale_id` for a multi-product transaction.
-
-#### `receipts`
-| Column | Type | Constraints |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| receipt_number | TEXT | UNIQUE — `R-{YYYYMMDD}-{customerName15}-{2rand}` |
-| sale_id | INTEGER | FK → sales.id |
-| customer_name | TEXT | nullable |
-| customer_mobile | TEXT | nullable |
-| customer_address | TEXT | nullable |
-| payment_mode | TEXT | DEFAULT 'cash' — (cash / card / upi) |
-| total_amount | REAL | NOT NULL |
-| receipt_date | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
-| printed | BOOLEAN | DEFAULT FALSE |
-
-#### `purchases`
-| Column | Type | Constraints |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| purchase_id | TEXT | UNIQUE — `PUR{IST-YYYYMMDDHHmmss}{4hexChars}` |
-| product_id | INTEGER | FK → products.id |
-| quantity | REAL | NOT NULL |
-| price_per_unit | REAL | NOT NULL |
-| total_amount | REAL | NOT NULL |
-| supplier | TEXT | nullable |
-| purchase_date | DATETIME | UTC — converted from user's IST date selection on write |
-| added_by | INTEGER | FK → users.id |
-| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
-
-#### `customer_sales`
-Archival denormalised snapshot; survives product edits/deletes.
-
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| sale_id | TEXT | Reference to sale |
-| receipt_id | INTEGER | Reference to receipt |
-| customer_name / mobile / address | TEXT | Snapshots at time of sale |
-| product_name | TEXT | Snapshot |
-| quantity | REAL | Snapshot |
-| sale_date | DATETIME | DEFAULT CURRENT_TIMESTAMP (UTC) |
-
-#### `sessions`
-| Column | Type | Purpose |
-|---|---|---|
-| id | TEXT | PK (UUID v4) |
-| user_id | INTEGER | FK → users.id |
-| last_activity | DATETIME | Updated on every authenticated request |
-
-> Session expires when `last_activity` is more than **300 seconds** (5 min) ago — enforced in `auth.js` on every request.
-
-#### `login_logs`
-| Column | Type | Purpose |
-|---|---|---|
-| id | INTEGER | PK AUTOINCREMENT |
-| user_id / username / role | — | Snapshots |
-| ip | TEXT | Client IP (handles X-Forwarded-For) |
-| user_agent | TEXT | Browser user-agent string |
-| logged_in_at | DATETIME | Stored as IST string for audit readability |
-
----
-
-### Backend Architecture
-
-#### Route mount order (`server/index.js`)
-```
-Express app
-  cors({ origin:'*', methods:['GET','POST','PUT','DELETE'] })
-  express.json()
-  /api/auth        → routes/auth.js
-  /api/inventory   → routes/inventory.js
-  /api/sales       → routes/sales.js
-  /api/purchases   → routes/purchases.js
-  /api/reports     → routes/reports.js
-  /api/dashboard   → routes/dashboard.js
-  /* (production)  → serve React build via express.static
-```
-
-#### Auth Middleware (`middleware/auth.js`)
-```
-authenticateToken(req, res, next):
-  1. Extract Bearer <token> from Authorization header  →  401 if absent
-  2. jwt.verify(token, JWT_SECRET)  →  { userId, username, role, sessionId }
-  3. SELECT session WHERE id = sessionId
-     ├─ not found           →  401 "Session expired"
-     └─ idle_seconds > 300  →  DELETE session  →  401 "Session expired"
-  4. UPDATE sessions SET last_activity = CURRENT_TIMESTAMP
-  5. SELECT user WHERE id = userId; check is_active  →  403 if disabled
-  6. req.user = user; req.sessionId = sessionId; next()
-
-authorizeRole(allowedRoles)(req, res, next):
-  └─ req.user.role not in allowedRoles  →  403 "Insufficient permissions"
-```
-
-#### ID / Number Generation
-
-| Entity | Format | Example |
-|---|---|---|
-| Product ID | Auto: first 4 chars of category uppercased + 3-digit sequence | `SEED001`, `FERT003`, `PEST002` |
-| Sale ID | `SALE` + IST YYYYMMDDHHmmss + 4 random alphanumeric | `SALE20260316231000XK2A` |
-| Receipt Number | `R-` + YYYYMMDD + `-` + sanitised customer name (≤15 chars, a-z0-9) + `-` + 2 random chars | `R-20260316-rameshkumar-4K` |
-| Purchase ID | `PUR` + IST YYYYMMDDHHmmss + 4 random hex uppercase | `PUR20260316231000AB3F` |
-
-#### Timestamp Strategy
-
-| Source | Stored as | How displayed |
-|---|---|---|
-| SQLite `CURRENT_TIMESTAMP` (sales, receipts, sessions, etc.) | UTC `YYYY-MM-DD HH:MM:SS` | `dateUtils.toDate()` appends `Z` → parses as UTC → `toLocaleString` in IST |
-| User-picked purchase date (`YYYY-MM-DD` IST) | UTC: `moment.utc(date + 'T00:00:00+05:30')` | Displays correctly as the chosen IST date |
-| Login log `logged_in_at` | IST string (intentional) | Displayed as-is |
-
----
-
-### Frontend Architecture
-
-#### Route Guard Pattern
-```
-<ProtectedRoute>   Redirects to /login if no token in localStorage
-<AdminRoute>       Redirects to /    if user.role !== 'admin'
-
-/              →  Dashboard    (ProtectedRoute)
-/inventory     →  Inventory    (ProtectedRoute)
-/sales         →  Sales        (ProtectedRoute)
-/purchases     →  Purchases    (ProtectedRoute)
-/reports       →  Reports      (ProtectedRoute)
-/users         →  Users        (AdminRoute)
-/receipt/:id   →  Receipt      (ProtectedRoute)
-/login         →  Login        (public)
-```
-
-#### `AuthContext` (`contexts/AuthContext.js`)
-- Stores `{ user, token }` in React state + `localStorage`
-- On login: sets `axios.defaults.headers.common['Authorization'] = 'Bearer ' + token`
-- Exposes `login(token, user)` and `logout()` consumed by all components
-
-#### `useSortableData` Hook
-Accepts array → returns `{ sortedItems, sortConfig, requestSort }`.
-Each `requestSort(key)` call cycles: `asc → desc → none → asc`. Used by every table.
-
-#### `dateUtils.js`
-```
-toDate(str)          Appends 'Z' to treat stored UTC string correctly → Date object
-fmtDateTime(str)     "16 Mar 2026, 11:10 PM"  (IST, en-IN locale)
-fmtDate(str)         "16 March 2026"
-fmtTime(str)         "11:10 PM"
-getISTDateString()   "2026-03-16"  (today in IST, for date-picker defaults)
-```
-
-#### Key Component Data Flows
-```
-Sales.js
-  GET /api/inventory          → product list for cart
-  POST /api/sales             → { saleId, receiptNumber }
-  navigate('/receipt/' + saleId)
-
-Receipt.js
-  GET /api/sales/:saleId      → line items + receipt
-  react-to-print              → window.print()  (documentTitle = receipt_number → used as PDF filename)
-
-Reports.js
-  activeTab state → calls different /api/reports/* endpoint
-  Recharts visuals:
-    AreaChart  — monthly revenue trend
-    BarChart   — monthly transactions + items sold
-    PieChart   — product revenue share
-    BarChart   — top/least selling products
-  <ReportDownloader> → CSV via csvExport.js
-
-Purchases.js  (3 tabs)
-  Tab 1 "Record Purchase"
-    Product card grid (filterable) + "New Product" button
-    New Product modal → POST /api/inventory → auto-selects created product
-    Confirmation popup → POST /api/purchases
-  Tab 2 "Purchase History"
-    Sortable table + Edit pencil → PUT /api/purchases/:id
-    Edit modal shows live stock-adjustment diff (new qty − old qty)
-  Tab 3 "Manage Categories"
-    POST /api/purchases/categories
-    DELETE /api/purchases/categories/:id
-```
-
----
-
-### Authentication & Session Flow
-
-```
-1. POST /api/auth/login  { username, password }
-   ├─ bcrypt.compare(password, stored_hash)
-   ├─ INSERT INTO sessions (id = UUIDv4, user_id)
-   ├─ INSERT INTO login_logs (IST timestamp, IP, user-agent)
-   └─ jwt.sign({ userId, username, role, sessionId }, JWT_SECRET, { expiresIn: '24h' })
-      → Response: { token, user: { id, username, role } }
-
-2. Client stores token in localStorage
-   └─ axios default header: Authorization: Bearer <token>
-
-3. Every protected request:
-   └─ auth.js: verify JWT + session idle check + UPDATE last_activity
-
-4. POST /api/auth/logout
-   └─ DELETE FROM sessions WHERE id = sessionId
-   └─ Client: clear localStorage → navigate /login
-
-5. Auto-expiry:
-   └─ idle_seconds > 300 → DELETE session → 401
-   └─ Axios interceptor on client catches 401 → logout() → /login
-```
+| Function | Returns |
+|---|---|
+| `runQuery(sql, params)` | `{ id, changes }` |
+| `getRow(sql, params)` | Single row or `undefined` |
+| `getAll(sql, params)` | Array of rows |
+| `runTransaction(callback)` | Executes callback in BEGIN/COMMIT with auto-rollback |
+| `paginate(sql, params, page, limit)` | `{ data, pagination: { page, limit, total, totalPages } }` |
+| `nowIST()` | Current IST timestamp `YYYY-MM-DD HH:mm:ss` |
 
 ---
 
 ## API Reference
 
-> All endpoints except `POST /api/auth/login` require:
-> `Authorization: Bearer <JWT_TOKEN>`
+> All endpoints except login and public pages require: `Authorization: Bearer <JWT_TOKEN>`
+>
+> Detailed request/response shapes for every endpoint are in [LLD.md](LLD.md#5-backend-module-design)
 
-### Auth — `/api/auth`
+### Auth — `/api/auth` (10 endpoints)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
-| POST | `/login` | Public | Login; returns JWT + user object |
-| POST | `/logout` | Any | Invalidate current session |
+| POST | `/login` | Public | Login → JWT + user object (includes `force_password_change`) |
+| POST | `/logout` | Any | Invalidate session |
 | GET | `/me` | Any | Current user info |
-| POST | `/users` | admin | Create user (username≥3, password≥6) |
-| GET | `/users` | admin | List all users |
-| PUT | `/users/:id/status` | admin | Enable / disable user |
-| DELETE | `/users/:id` | admin | Delete user (cannot delete self) |
-| GET | `/login-logs` | admin | Last 10 login audit entries |
+| PUT | `/change-password` | Any | Change own password (validates strength, clears force flag) |
+| PUT | `/users/:id/reset-password` | Admin | Reset user password (re-enables force flag) |
+| POST | `/users` | Admin | Create user (strong password: 8+ chars, upper, lower, digit, special) |
+| GET | `/users` | Admin | List all users |
+| PUT | `/users/:id/status` | Admin | Enable/disable user (cannot toggle self) |
+| DELETE | `/users/:id` | Admin | Delete user (cannot delete self) |
+| GET | `/login-logs` | Admin | Last 10 login audit entries |
 
-**Login:**
-```json
-// POST /api/auth/login
-// Request
-{ "username": "admin", "password": "admin123" }
-
-// Response 200
-{ "token": "<jwt>", "user": { "id": 1, "username": "admin", "role": "admin" } }
-```
-
----
-
-### Inventory — `/api/inventory`
+### Inventory — `/api/inventory` (9 endpoints)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
-| GET | `/` | Any | All products — `?category=&search=` |
-| GET | `/next-id` | Any | Next auto-generated product ID — `?category=seeds` → `{ nextId: "SEED005" }` |
-| GET | `/:id` | Any | Single product by DB id |
-| POST | `/` | admin, operator | Create product (`product_id` optional — auto-generated from category if omitted) |
-| PUT | `/:id` | admin, operator | Update fields (partial) |
-| DELETE | `/:id` | admin | Delete (blocked if has sales records) |
-| POST | `/:id/add-stock` | admin, operator | Add qty to existing stock |
-| GET | `/alerts/low-stock` | Any | Products where `quantity_available <= 10` |
+| GET | `/` | Any | All products (`?category=&search=`). Excludes soft-deleted and order-only |
+| GET | `/next-id` | Any | Auto-generate next product ID → `?category=seeds` → `{ nextId: "SD005" }` |
+| GET | `/flow` | Any | Inventory flow timeline with filters (type, category, date range, pagination) |
+| GET | `/:id` | Any | Single product with purchase and sale history |
+| POST | `/` | Admin/Op | Create product (auto-ID, supports inventory or order creation mode) |
+| PUT | `/:id` | Admin/Op | Update product fields (selling price, GST, HSN, reorder, barcode, expiry, batch) |
+| DELETE | `/:id` | Admin | Soft-delete if has purchases; hard-delete otherwise |
+| POST | `/:id/add-stock` | Admin/Op | Add stock (creates purchase record + lot sync) |
+| GET | `/alerts/low-stock` | Any | Products at/below reorder_point |
+| GET | `/alerts/expiring` | Any | Products expiring within `?days=30` |
 
-**Create product:**
-```json
-// POST /api/inventory
-{
-  "category": "seeds",
-  "product_name": "Tomato Seeds",
-  "variety": "Hybrid F1",
-  "quantity_available": 100,
-  "unit": "packet",
-  "purchase_price": 120.00,
-  "selling_price": 150.00,
-  "supplier": "ABC Agro Pvt Ltd"
-}
-// Response 201: full product object
-```
-
-**Add stock:**
-```json
-// POST /api/inventory/:id/add-stock
-{ "quantity": 50 }
-// Response: { "message": "Added 50 packet to stock", "product": { ... } }
-```
-
----
-
-### Sales — `/api/sales`
+### Sales — `/api/sales` (8 endpoints)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
-| POST | `/` | Any | Create sale (multi-item checkout) |
-| GET | `/` | Any | List sales — `?start_date=&end_date=&product_id=` |
-| GET | `/receipts/all` | Any | List receipts — `?start_date=&end_date=` |
-| GET | `/:saleId` | Any | Sale details + receipt |
+| POST | `/` | Any | Create multi-item sale (FIFO lot allocation, receipt, bank auto-deposit) |
+| GET | `/` | Any | List sales with pagination (`?start_date&end_date&page&limit`) |
+| GET | `/summary` | Any | Receipt-level summary with search, totals, pagination |
+| GET | `/archive` | Any | Customer sales archive |
+| GET | `/:saleId` | Any | Sale detail: items, receipt, returns, QR |
+| GET | `/receipts/verify/:receiptNumber` | Public | Receipt verification (redirect or JSON) |
+| GET | `/receipts/all` | Any | All receipts |
 | PUT | `/receipts/:id/print` | Any | Mark receipt as printed |
 
-**Create sale:**
-```json
-// POST /api/sales
-{
-  "items": [
-    { "product_id": 1, "quantity": 5 },
-    { "product_id": 3, "quantity": 2 }
-  ],
-  "customer_name": "Ramesh Kumar",
-  "customer_mobile": "9876543210",
-  "customer_address": "12 MG Road, Hyderabad",
-  "payment_mode": "cash"
-}
-```
-
-**Response 201:**
-```json
-{
-  "saleId": "SALE20260316231000AB12",
-  "receiptNumber": "R-20260316-rameshkumar-4K",
-  "totalAmount": 1050.00,
-  "items": [
-    { "product_name": "Tomato Seeds", "quantity_sold": 5, "price_per_unit": 150, "total_amount": 750 }
-  ],
-  "receipt": { "id": 1, "receipt_number": "R-20260316-rameshkumar-4K", "payment_mode": "cash", "printed": false }
-}
-```
-
----
-
-### Purchases — `/api/purchases`
+### Purchases — `/api/purchases` (12 endpoints)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
-| GET | `/categories` | Any | List all product categories |
-| POST | `/categories` | admin, operator | Add category — `{ "name": "pesticides" }` |
-| DELETE | `/categories/:id` | admin | Delete category (blocked if products use it) |
-| GET | `/` | Any | List purchases — `?start_date=&end_date=&product_id=` |
-| POST | `/` | admin, operator | Record purchase as ordered or delivered, with optional advance payment |
-| PUT | `/:id` | admin, operator | Edit purchase (adjusts stock by qty diff) |
-| POST | `/:id/mark-delivered` | admin, operator | Receive the remaining pending quantity into stock |
-| POST | `/:id/partial-delivery` | admin, operator | Receive part of a pending order and optionally close it |
-| POST | `/:id/cancel` | admin | Cancel a pending order and reverse advance payment effects |
-| GET | `/suppliers` | Any | Supplier summary from purchase history with live payable |
-| GET | `/suppliers/:name` | Any | Supplier drilldown: open lots, payments, purchases, itemized returns |
+| GET | `/` | Any | List purchases (`?start_date&end_date&product_id&status&page&limit`) |
+| POST | `/` | Admin/Op | Record purchase (delivered or ordered, with optional advance payment) |
+| PUT | `/:id` | Admin/Op | Edit purchase (adjusts stock by qty diff, syncs lot) |
+| POST | `/:id/mark-delivered` | Admin/Op | Mark pending order as fully delivered |
+| POST | `/:id/partial-delivery` | Admin/Op | Partial delivery with lot sync |
+| POST | `/:id/cancel` | Admin | Cancel pending order + reverse advance payment |
+| GET | `/categories` | Any | List product categories |
+| POST | `/categories` | Admin/Op | Add category |
+| DELETE | `/categories/:id` | Admin | Delete category (blocked if products use it) |
+| GET | `/suppliers` | Any | Supplier summary (purchases, paid, balance_due) |
+| GET | `/suppliers/:name` | Any | Supplier detail (lots, returns, payments, purchases) |
+| DELETE | `/suppliers/:name` | Admin | Delete supplier + reverse bank effects |
 
-**Record purchase:**
-```json
-// POST /api/purchases
-{
-  "product_id": 1,
-  "quantity": 50,
-  "price_per_unit": 110.00,
-  "supplier": "ABC Agro Pvt Ltd",
-  "purchase_date": "2026-03-16",
-  "purchase_status": "ordered",
-  "advance_amount": 1000,
-  "bank_account_id": 1
-}
-// Response 201: full purchase row with product + user info
-```
-
-**Edit purchase:**
-```json
-// PUT /api/purchases/:id
-{
-  "quantity": 60,
-  "price_per_unit": 115.00,
-  "supplier": "XYZ Seeds Co",
-  "purchase_date": "2026-03-17"
-}
-// Stock adjusts by (60 - old_qty). Can be negative to correct over-entries.
-```
-
-**Partial delivery:**
-```json
-// POST /api/purchases/:id/partial-delivery
-{
-  "quantity_delivered": 20,
-  "mark_as_completed": false,
-  "delivery_date": "2026-04-10"
-}
-```
-
-**Live supplier balance rule:**
-```text
-balance_due = total_received_value - total_returned_value - total_paid
-```
-
----
-
-### Suppliers — `/api/suppliers`
+### Suppliers — `/api/suppliers` (6 endpoints)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
-| GET | `/` | Any | Supplier directory with received, returned, paid, and live balance values |
-| GET | `/:id` | Any | Supplier detail with purchases, open lots, payments, and itemized supplier returns |
-| POST | `/:id/returns` | admin, operator | Return selected unsold lot quantities back to the supplier |
-| POST | `/` | admin | Create supplier master record |
-| PUT | `/:id` | admin | Update supplier master record and rename linked references |
-| PATCH | `/:id/toggle` | admin | Activate or deactivate a supplier |
+| GET | `/` | Any | Supplier directory with aggregated stats |
+| GET | `/:id` | Any | Supplier detail: summary, purchases, payments, lots, returns |
+| POST | `/` | Admin | Create supplier master record |
+| PUT | `/:id` | Admin | Update supplier (renames references across all tables) |
+| PATCH | `/:id/toggle` | Admin | Toggle active/inactive |
+| POST | `/:id/returns` | Admin/Op | Record lot-level supplier return |
 
-**Record supplier return:**
-```json
-// POST /api/suppliers/:id/returns
-{
-  "items": [
-    { "purchase_lot_id": 12, "quantity_returned": 5 },
-    { "purchase_lot_id": 13, "quantity_returned": 2 }
-  ],
-  "return_date": "2026-04-10",
-  "notes": "Financial year closing return"
-}
-```
-
----
-
-### Transactions — `/api/transactions`
+### Transactions — `/api/transactions` (18 endpoints)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
 | GET | `/bank-accounts` | Any | Active bank accounts |
-| GET | `/bank-accounts/:id/statement` | Any | Date-range bank statement for one account |
-| POST | `/bank-accounts` | admin | Create bank account |
-| PUT | `/bank-accounts/:id` | admin | Update bank account metadata |
-| DELETE | `/bank-accounts/:id` | admin | Deactivate a bank account |
-| GET | `/daily-setup/status` | Any | Daily bank-selection and balance-review status |
-| POST | `/daily-setup/select-bank` | admin | Select today’s operating bank |
-| POST | `/daily-setup/review-balance` | admin | Mark daily balance as reviewed |
+| GET | `/bank-accounts/:id/statement` | Any | Bank statement with running balance |
+| POST | `/bank-accounts` | Admin | Create bank account |
+| PUT | `/bank-accounts/:id` | Admin | Update bank account |
+| DELETE | `/bank-accounts/:id` | Admin | Soft-deactivate bank account |
+| GET | `/daily-setup/status` | Any | Daily setup status (isReady, blocking reason) |
+| POST | `/daily-setup/select-bank` | Admin | Select today's operating bank |
+| POST | `/daily-setup/review-balance` | Admin | Review + snapshot opening/closing balances |
 | GET | `/expenditures` | Any | List expenditures |
-| POST | `/expenditures` | admin, operator | Create expenditure |
-| DELETE | `/expenditures/:id` | admin | Delete expenditure |
-| GET | `/bank-transfers` | Any | Manual bank transfers and linked entries |
-| POST | `/bank-transfers` | admin | Deposit or withdraw from a bank account |
-| DELETE | `/bank-transfers/:id` | admin | Delete a manual transfer and reverse its balance effect |
+| POST | `/expenditures` | Admin/Op | Create expenditure (category: general/renovation/utilities/transport/salary/maintenance/other) |
+| DELETE | `/expenditures/:id` | Admin | Delete expenditure |
+| GET | `/bank-transfers` | Any | Bank transfer ledger |
+| POST | `/bank-transfers` | Admin | Deposit/withdrawal (purpose: cash_registry/business_expense/personal) |
+| DELETE | `/bank-transfers/:id` | Admin | Delete transfer + reverse balance |
 | GET | `/supplier-payments` | Any | Supplier payment ledger |
-| POST | `/supplier-payments` | admin | Record supplier payment and linked bank movement |
-| DELETE | `/supplier-payments/:id` | admin | Delete supplier payment and reverse linked bank effect |
-| GET | `/supplier-balances` | Any | Live supplier settlement view |
-| GET | `/daily-summary` | Any | Daily cash-book summary |
+| POST | `/supplier-payments` | Admin | Record supplier payment (auto bank ledger entry) |
+| DELETE | `/supplier-payments/:id` | Admin | Delete + reverse bank effect |
+| GET | `/supplier-balances` | Any | Supplier settlement view |
+| GET | `/daily-summary` | Any | Daily cash-book with opening/closing balance |
 
-**Record supplier payment:**
-```json
-// POST /api/transactions/supplier-payments
-{
-  "supplier_name": "ABC Agro Pvt Ltd",
-  "amount": 2500,
-  "payment_mode": "bank",
-  "payment_date": "2026-04-10",
-  "bank_account_id": 1,
-  "description": "Part payment against April deliveries"
-}
-```
-
----
-
-### Reports — `/api/reports`
-
-| Method | Path | Query Params | Description |
-|---|---|---|---|
-| GET | `/daily-sales` | `?date=YYYY-MM-DD` | Product-wise sales for one date |
-| GET | `/sales-range` | `?start_date=&end_date=` | Sales grouped by day |
-| GET | `/inventory-status` | `?category=seeds` | Full product snapshot + stats |
-| GET | `/product-performance` | `?start_date=&end_date=&limit=10` | Top + least selling |
-| GET | `/monthly-trend` | `?months=12` | Revenue/transactions by month |
-| GET | `/purchases` | `?start_date=&end_date=` | Purchase history + cost summary |
-| GET | `/customer-sales` | `?start_date=&end_date=` | Customer-level archive |
-| DELETE | `/customer-sales/:id` | — | Delete archive record (admin) |
-
----
-
-### Dashboard — `/api/dashboard`
+### Returns — `/api/returns` (3 endpoints)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
-| GET | `/admin` | admin | Total stock, today sales, low-stock list, 7-day chart, category breakdown |
-| GET | `/operator` | admin, operator | Available inventory, operator's own today sales, popular items |
-| GET | `/quick-stats` | Any | KPIs: total products, stock, today/month revenue + transactions |
+| POST | `/` | Any | Create multi-item sales return (refund: cash/credit/bank, FIFO lot reversal) |
+| GET | `/` | Any | Paginated return list |
+| GET | `/:returnId` | Any | Return detail |
+
+### Customers — `/api/customers` (8 endpoints)
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| POST | `/` | Any | Create customer |
+| GET | `/` | Any | List with search (name, mobile, GSTIN) |
+| GET | `/reports/aging` | Any | Aging report (0-30, 31-60, 61-90, 90+ day buckets) |
+| GET | `/lookup/by-mobile` | Any | Customer lookup by mobile |
+| GET | `/:id` | Any | Customer detail: sales, payments, summary |
+| PUT | `/:id` | Any | Update customer |
+| DELETE | `/:id` | Admin | Deactivate (blocked if outstanding_balance > 0) |
+| POST | `/:id/payments` | Any | Collect payment (updates outstanding_balance) |
+| GET | `/:id/ledger` | Any | Ledger statement with running balance |
+
+### Quotations — `/api/quotations` (7 endpoints)
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| POST | `/` | Any | Create quotation with pricing resolution |
+| GET | `/` | Any | List with status filter, search, pagination |
+| GET | `/public/:quotationNumber` | Public | Public quotation view |
+| GET | `/:id` | Any | Quotation detail with items |
+| PUT | `/:id/status` | Any | Update status (draft→sent→accepted→rejected) |
+| POST | `/:id/convert` | Any | Convert to sale (returns pre-filled data, marks converted) |
+| DELETE | `/:id` | Admin | Delete (must not be converted) |
+
+### Stock Adjustments — `/api/stock-adjustments` (3 endpoints)
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| POST | `/` | Any | Create adjustment (damage/theft/spoilage/counting_error/other) with FIFO lot impact |
+| GET | `/` | Any | Paginated list with filters |
+| POST | `/variance-check` | Admin | Physical count vs system quantity variance report |
+
+### Pricing — `/api/pricing` (5 endpoints)
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| POST | `/resolve` | Any | Batch pricing resolution (priority: customer > promotion > tier > base) |
+| GET | `/products/:productId` | Any | Product tiers + promotions |
+| PUT | `/products/:productId` | Admin/Op | Replace product pricing rules |
+| GET | `/customers/:customerId` | Any | Customer-specific pricing rules |
+| PUT | `/customers/:customerId` | Admin/Op | Replace customer pricing rules |
+
+### Reports — `/api/reports` (16 endpoints)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/daily-sales` | Product-wise sales for one date |
+| GET | `/sales-range` | Sales grouped by day |
+| GET | `/inventory-status` | Full product snapshot + category stats |
+| GET | `/product-performance` | Top/least selling products by revenue |
+| GET | `/monthly-trend` | Monthly revenue/transaction trend |
+| GET | `/purchases` | Purchase report with summary |
+| GET | `/purchases/search` | Search purchases |
+| GET | `/customer-sales` | Customer sales archive |
+| GET | `/customer-sales/search` | Search archive |
+| DELETE | `/customer-sales/:id` | Delete archive record (admin) |
+| GET | `/suppliers` | Supplier report with items |
+| GET | `/supplier-settlement` | Financial year settlement (opening/closing due, activity) |
+| GET | `/transactions` | Day-by-day cash-book report |
+| GET | `/audit` | Cash flow, payment verification, expenditure, supplier balances, bank reconciliation |
+| GET | `/profit-loss` | P&L: revenue, COGS, gross profit, expenses, net profit, product-level margins |
+| GET | `/profit-loss/daily` | Daily P&L trend |
+
+### Dashboard — `/api/dashboard` (3 endpoints)
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/admin` | Admin | Stock value, today's sales, low-stock alerts, expiring items, week comparison, category performance |
+| GET | `/operator` | Any | Inventory summary, today's personal sales, popular items |
+| GET | `/quick-stats` | Any | KPIs: product count, stock, today/month revenue + transactions |
+
+### Additional Routes
+
+| Mount | Endpoints | Description |
+|---|---|---|
+| `/api/warehouses` | 7 | Warehouse CRUD, stock assignment, transfers, transfer history |
+| `/api/notifications` | 5 | Admin notification list, mark read, clear, delete |
+| `/api/audit-log` | 2 | Audit log viewer with filters + summary |
+| `/api/backup` | 6 | Backup create, list, download, delete, restore, automation status |
+| `/api/delivery` | 3 | Email capabilities check, send quotation, send receipt |
+| `/` | 2 | Public HTML pages for receipt verification and quotation sharing |
+
+---
+
+## Frontend Guide
+
+### Route Map
+
+| Path | Component | Guard | Description |
+|---|---|---|---|
+| `/login` | Login | — | Animated login page |
+| `/change-password` | ForcePasswordChange | PasswordChangeRoute | Mandatory first-login password change |
+| `/` | Dashboard | ProtectedRoute | Role-specific KPI dashboard |
+| `/inventory` | Inventory | ProtectedRoute | Products, stock, pricing rules, inventory flow |
+| `/sales` | Sales | ProtectedRoute | POS cart, dynamic pricing, sales history |
+| `/purchases` | Purchases | ProtectedRoute | Record, history, suppliers, categories |
+| `/suppliers` | Suppliers | ProtectedRoute | Supplier directory, returns, balance |
+| `/transactions` | Transactions | ProtectedRoute | Banking, expenditures, supplier payments, daily summary |
+| `/returns` | Returns | ProtectedRoute | Customer sales returns |
+| `/customers` | Customers | ProtectedRoute | Customer directory, payments, pricing |
+| `/quotations` | Quotations | ProtectedRoute | Quotation lifecycle, email, convert to sale |
+| `/stock-adjustments` | StockAdjustments | ProtectedRoute | Stock corrections |
+| `/warehouses` | Warehouses | ProtectedRoute | Multi-warehouse operations |
+| `/reports` | Reports | ProtectedRoute | 12 report tabs with charts and exports |
+| `/receipt/:saleId` | Receipt | ProtectedRoute | Printable receipt with QR |
+| `/users` | Users | AdminRoute | User management, login history |
+| `/audit-log` | AuditLog | AdminRoute | Audit trail viewer |
+| `/backup` | Backup | AdminRoute | Database backup/restore |
+
+### Route Guards
+
+| Guard | Logic |
+|---|---|
+| **ProtectedRoute** | No user → `/login`; `force_password_change` → `/change-password`; otherwise render children |
+| **PasswordChangeRoute** | No user → `/login`; `force_password_change` false → `/`; otherwise render children |
+| **AdminRoute** | All ProtectedRoute checks + `role !== 'admin'` → `/` |
+
+### State Management
+
+| Concern | Mechanism |
+|---|---|
+| Auth state | `AuthContext` — user, token, loading, sessionExpired, dailySetupStatus |
+| Idle timeout | 5-min timer on user activity events → forced logout |
+| Daily setup | Polled every 30 seconds; blocks operators via `DailySetupGate` |
+| Component data | Local `useState`/`useEffect` per component |
+| Table sorting | `useSortableData` hook (reusable across all tables) |
+
+### Key Component Details
+
+#### Dashboard
+- **Admin view:** Total stock quantity + value, today's revenue + transactions, low-stock alerts (≤ reorder_point), expiring items, recent sales, pending orders, week-over-week comparison, category performance
+- **Operator view:** Available products, own today's sales summary, popular items, pending orders
+- **Live IST clock** displayed in header
+
+#### Inventory (2 tabs)
+- **Inventory tab:** Product catalog table with search + category filter. Modals for add product (auto-ID, inventory/order creation mode), edit product (selling price, GST, HSN, reorder, barcode, expiry, batch), add stock, manage pricing tiers + promotions, delete confirm
+- **Inventory Flow tab:** Timeline of all stock movements (purchases, sales, returns, adjustments, deletions) with event type badges, impact quantities, references. Filterable, paginated (25/page)
+
+#### Sales (2 tabs)
+- **Record Sale tab:** Full POS cart with product search, dynamic pricing resolution, per-item quantity/price editing, customer lookup by mobile, payment mode selection (cash/card/upi/credit), quotation conversion support
+- **Sales Done tab:** Receipt-level history with metrics (count, gross, refunded, returned, net), multi-field search, date range filter, CSV export
+
+#### Purchases (4 tabs)
+- **Record Purchase:** Product card grid, new product creation inline, delivered/ordered mode, advance payment with bank account
+- **Purchase History:** Status filters, edit/cancel/deliver/partial-delivery actions
+- **Suppliers:** Supplier detail cards with summary, open lots, returns, purchase history
+- **Manage Categories:** Add/delete product categories
+
+#### Transactions (4 tabs)
+- **Daily Summary:** Expandable daily rows with opening/closing balance, sales, expenditure, bank activity
+- **Expenditures:** CRUD with categories (general/renovation/utilities/transport/salary/maintenance/other)
+- **Bank:** Account management, manual deposits/withdrawals (purpose types), printable bank statements
+- **Supplier Payments:** Balance overview, payment history, record new payment
+
+#### Reports (12 tabs)
+1. **Daily Sales** — single day or date range
+2. **Inventory Status** — full snapshot with category stats
+3. **Product Performance** — top/least selling, bar chart, pie chart
+4. **Purchases** — purchase report with costs
+5. **Customer Sales** — archive with search
+6. **Suppliers** — summary + detailed breakdown
+7. **Supplier Settlement** — financial year view (opening/closing due)
+8. **Audit Report** — 5 sections: cash flow, payment mode verification, expenditure, supplier advances, bank reconciliation
+9. **Transactions** — day-by-day cash-book
+10. **GST Report** — GST breakdown
+11. **Profit & Loss** — revenue, COGS, gross/net profit, product-level margins
+12. **Monthly Trend** — area + bar charts
+
+All reports support CSV and PDF download via `ReportDownloader`.
+
+---
+
+## Core Business Workflows
+
+### Making a Sale
+
+```
+1. GET /api/inventory         → Load products with stock
+2. POST /api/pricing/resolve  → Resolve dynamic prices
+3. GET /api/customers/lookup/by-mobile → Customer auto-fill
+4. POST /api/sales            → Create sale
+   ├─ BEGIN TRANSACTION
+   ├─ Validate stock per item
+   ├─ INSERT sales (one row per line item, shared sale_id)
+   ├─ UPDATE products.quantity_available (deduct)
+   ├─ FIFO lot allocation via allocateSaleToLots()
+   ├─ INSERT receipt (unique receipt_number)
+   ├─ INSERT customer_sales (archival snapshot)
+   ├─ If card/upi: INSERT bank_transfer (auto-deposit to daily bank)
+   ├─ If credit: UPDATE customer.outstanding_balance
+   ├─ If quotation: UPDATE quotation.status = 'converted'
+   ├─ logAudit() + addReviewNotification()
+   └─ COMMIT
+5. Navigate to /receipt/:saleId → Print with QR
+```
+
+### Purchase Lifecycle
+
+```
+ordered → partial-delivery(s) → delivered
+ordered → cancelled (reverses advance)
+
+Delivered: stock += qty, lot created, supplier auto-resolved
+Ordered: no stock change, advance recorded in bank ledger
+Partial: stock += delivered_qty, lot updated incrementally
+Edit: stock adjusted by (new_qty − old_qty), lot re-synced
+```
+
+### FIFO Lot Tracking
+
+```
+Purchase → creates purchase_lot (quantity_received, quantity_remaining)
+Sale → allocateSaleToLots (oldest lots first, ORDER BY delivery_date ASC)
+     → creates sale_allocations (links sale line to specific lots)
+Return → reverseSaleFromLots (restores lot quantities)
+Supplier Return → deducts lot quantity_remaining + product stock
+Adjustment → positive: standalone lot; negative: reduces oldest lots
+```
+
+### Dynamic Pricing
+
+```
+Priority: customer(1) > promotion(2) > tier(3) > base(4)
+  1. Customer-specific price (customer_pricing table, date range)
+  2. Active promotion (product_promotions, today in range)
+  3. Best matching tier (price_tiers, highest min_qty ≤ order qty)
+  4. Base selling_price from products table
+Tie-break at same priority: lowest price wins
+```
+
+### Supplier Balance
+
+```
+Balance Due = Received Value − Returned Value − Total Paid
+
+Received Value: SUM(purchase_lots.quantity_received × price_per_unit)
+Returned Value: SUM(supplier_return_items.quantity_returned × price_per_unit)
+Total Paid:     SUM(supplier_payments.amount)
+```
+
+### Daily Setup Gate
+
+```
+Each business day:
+  1. Admin selects operating bank account
+  2. Admin reviews opening + closing balance
+  3. System sets isReady = true
+  
+Operators are blocked from write operations until setup is complete.
+Admin is never blocked.
+```
 
 ---
 
@@ -728,64 +665,95 @@ git clone <repository-url>
 cd inventory-management
 
 # 2. Install all dependencies
+npm run install-deps
+# or manually:
 npm install
 npm install --prefix server
 npm install --prefix client
 
-# 3. Review / edit environment (server/.env already provided with safe defaults)
-#    Change JWT_SECRET before any production use.
+# 3. Configure environment (server/.env — safe defaults provided)
+#    ⚠️ Change JWT_SECRET before production use
 
-# 4. Start in development mode (server :5000 + client :3000 concurrently)
+# 4. Development mode (server :5000 + client :3000 concurrently)
 npm run dev
 
-# 5. Production build + serve
-npm run build --prefix client   # builds React SPA → client/build/
-cd server && node index.js      # Express serves API + static React build
+# 5. Production build
+npm run build                   # Builds React SPA → client/build/
+cd server && node index.js      # Express serves API + static build
 
-# 6. Optional data workflows
-npm run clean-db                # wipe live data, keep only default users + base categories
-npm run seed                    # load the sample/demo dataset again
+# 6. Data management
+npm run clean-db                # Wipe data, keep default users + base categories
+npm run seed                    # Load demo dataset
 ```
 
-> The SQLite database is created automatically on first server start.
-> Default admin + operator accounts and seed categories are inserted automatically.
+> The SQLite database is auto-created on first server start.
+> Default users and seed categories are inserted automatically.
 
 ---
 
 ## Database Workflows
 
-### Reset for manual testing
-- Run `npm run clean-db` from the repo root to clear the live SQLite data in place.
-- The reset removes transactional and master data such as products, customers, suppliers, purchases, sales, returns, payments, bank activity, warehouses, audit logs, and notifications.
-- After the reset, only the default login accounts and the base product categories (`seeds`, `fertilizers`, `pesticides`, `tools`) remain.
-- Existing JWT sessions become invalid because session and login data are cleared. Log in again after the reset.
+### Reset for Testing
+```bash
+npm run clean-db
+```
+- Clears all transactional and master data (products, customers, suppliers, purchases, sales, returns, payments, bank activity, warehouses, audit logs, notifications)
+- Preserves default login accounts (`admin`, `operator`) with `force_password_change = 1`
+- Preserves base product categories (`seeds`, `fertilizers`, `pesticides`, `tools`)
+- Existing JWT sessions become invalid — log in again
 
-### Load sample data again
-- Run `npm run seed` when you want the prebuilt demo scenario back for exploratory testing or screenshots.
+### Load Demo Data
+```bash
+npm run seed
+```
+Loads a prebuilt scenario for exploratory testing/screenshots.
 
-### API testing assets
-- The Postman collection at `SLVT_Inventory_API.postman_collection.json` now includes supplier returns, supplier balances, supplier payments, bank-account setup, and purchase supplier-detail flows.
+### Run Tests
+```bash
+cd server
+npm test                        # All tests
+npm run test:coverage          # With coverage
+npm run test:auth              # Auth tests only
+npm run test:sales             # Sales tests only
+npm run test:e2e               # End-to-end workflows
+```
+
+### API Testing
+The Postman collection at `SLVT_Inventory_API.postman_collection.json` includes all endpoint categories.
 
 ---
 
 ## Environment Variables
 
-Core:
-`PORT`, `CORS_ORIGIN`, `SQLITE_DB_PATH`, `FRONTEND_BASE_URL`, `PUBLIC_API_BASE_URL`
-
-Email delivery:
-`SMTP_HOST`
-`SMTP_PORT`
-`SMTP_SECURE`
-`SMTP_USER`
-`SMTP_PASS`
-`SMTP_FROM`
+### Core
 
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `5000` | Express server listen port |
-| `JWT_SECRET` | `your-secret-key` | **Must change in production** — signs all JWTs |
-| `SQLITE_DB_PATH` | `./database/inventory.db` | Absolute or relative path to SQLite file |
+| `JWT_SECRET` | `your-secret-key` | **Must change in production** |
+| `SQLITE_DB_PATH` | `./database/inventory.db` | Database file path |
+| `CORS_ORIGIN` | `*` | Comma-separated allowed origins |
+| `FRONTEND_BASE_URL` | — | Frontend URL for email links |
+| `PUBLIC_API_BASE_URL` | — | Public API URL for QR/share links |
+
+### Email (SMTP)
+
+| Variable | Default | Description |
+|---|---|---|
+| `SMTP_HOST` | — | SMTP server hostname |
+| `SMTP_PORT` | — | SMTP port |
+| `SMTP_SECURE` | — | Use TLS |
+| `SMTP_USER` | — | SMTP username |
+| `SMTP_PASS` | — | SMTP password |
+| `SMTP_FROM` | — | Sender address |
+
+### Backup Automation
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUTO_BACKUP_ENABLED` | `true` | Enable/disable auto backup |
+| `BACKUP_INTERVAL_HOURS` | `24` | Backup frequency |
+| `BACKUP_RETENTION_DAYS` | `14` | Retention period |
 
 ---
 
@@ -796,87 +764,193 @@ Email delivery:
 | Admin (Business Owner) | `admin` | `admin123` |
 | Operator (Shop In-Charge) | `operator` | `operator123` |
 
-> **Change these immediately after first login.** Admin can update passwords from the Users tab.
+> **On first login, users are forced to change their password.** The system redirects to a password change screen and blocks all other access until the password is updated.
+>
+> Password requirements: ≥ 8 characters, uppercase, lowercase, digit, special character.
 
 ---
 
 ## Feature Guide
 
 ### Dashboard
-- **Admin**: total stock quantity + value, today's revenue + transactions, low-stock alerts (≤10 units), last 7-day daily revenue bar chart, category-level performance
-- **Operator**: available product list (top 20), own today's sales summary, most-sold products today
+- **Admin:** Total stock value, today's revenue, low-stock alerts, expiring items, recent sales, pending orders, week-over-week comparison, category performance
+- **Operator:** Available products (top 20), own today's sales, popular items, pending orders
+- **Live IST clock** in header
 
 ### Inventory
-- Add / edit / delete products with dynamically managed categories
-- **Auto-generated Product IDs** based on category: `SEED001`, `FERT001`, `PEST001`, etc.
-- Units supported: `kg`, `packet`, `bag`, `liters`
-- Low-stock items highlighted in red (≤10 units)
-- "Add Stock" on each product row logs an automatic purchase record
+- Product CRUD with dynamically managed categories and auto-generated IDs (e.g. `SD001`, `FR003`)
+- Units: kg, grams, packet, bag, liters, ml, pieces, bottles, tonnes
+- Fields: GST%, HSN code, barcode, expiry date, batch number, manufacturing date, reorder point/quantity
+- Two creation modes: **Inventory** (immediate stock) and **Order** (pending purchase)
+- Tier pricing and promotional pricing per product
+- Low-stock highlighting (≤ reorder_point), expiry alerts
+- Inventory flow timeline: all stock movement history
 
 ### Sales (POS)
-- **Multi-item cart**: add multiple products, adjust quantities, then checkout all at once
-- **Editable quantity**: type a number directly or use +/− buttons (ideal for large quantities like 20 bags)
-- Customer details capture: name, mobile, address (all optional)
-- Payment modes: Cash / Card / UPI
-- Real-time stock validation — sale blocked if insufficient stock
-- Unique receipt generated: `R-YYYYMMDD-customername-XX`
-- Receipt number used as the **default PDF filename** when saving via browser print
+- **Multi-item cart** with dynamic pricing resolution
+- **Customer lookup** by mobile number → auto-fill name/address
+- **Payment modes:** Cash, Card, UPI, Credit (credit requires existing customer)
+- **Quotation conversion:** Pre-fills cart with locked prices from accepted quotation
+- Unique receipt number (default PDF filename for browser print)
+- QR code on receipt linking to public verification page
+- Email delivery of receipts
 
 ### Purchases
-
-| Tab | What it does |
-|---|---|
-| **Record Purchase** | Record delivered stock immediately or place an ordered purchase with advance amount, selected bank account, and later delivery updates. |
-| **Purchase History** | Sortable table of all past purchases. Each row supports edit, cancel, mark-delivered, and partial-delivery actions with live stock and bank impact. |
-| **Supplier View** | Shows supplier-level received value, returned value, payments, balance due, open lots, purchase history, and itemized supplier returns. Returns can be recorded only for selected lots/products still on hand. |
-| **Manage Categories** | Add or delete categories used across Inventory and Purchases. Deletion blocked if any product uses the category. |
+- **Delivered purchases:** Stock updated immediately, lot created
+- **Ordered purchases:** With advance payment, pending delivery
+- **Partial delivery:** Receive portions over time
+- **Cancel:** Reverse advance payment bank effects
+- **Edit:** Adjusts stock by quantity difference
+- Inline product creation with full field support
+- Supplier auto-resolution (creates directory entry automatically)
 
 ### Suppliers
-- Dedicated supplier directory with contact details, latest purchases, open stock lots, payments, returns, and live balance due.
-- Supplier returns are itemized by product and reduce the operational supplier payable immediately.
-- Live supplier payable uses the formula: `received value - returned value - payments made`.
+- Dedicated directory with contact details, GSTIN
+- **Live balance:** received value − returned value − payments made
+- **Lot-level returns:** Select specific purchase lots, return quantities
+- **Rename propagation:** Updating supplier name cascades across all tables
+- Activate/deactivate suppliers
+
+### Customers
+- Directory with credit limits and outstanding balance tracking
+- **Customer-specific pricing:** Override product prices per customer with date ranges
+- **Payment collection:** Cash, bank, UPI with automatic balance reduction
+- **Ledger:** Running balance statement
+- **Aging report:** 0-30, 31-60, 61-90, 90+ day buckets
+
+### Quotations
+- **Lifecycle:** Draft → Sent → Accepted → Converted | Rejected | Expired
+- Dynamic pricing resolution for quotation items
+- Email delivery, PDF export
+- **Convert to sale:** Pre-fills Sales POS with quoted prices
+- Public shareable quotation page
 
 ### Transactions
-- Bank account management, statements, manual bank transfers, expenditures, supplier payments, and daily cash-book summary.
-- Daily setup supports selecting the operating bank for the day and marking the balance as reviewed.
-- Supplier payment create/delete operations are transactionally coupled to bank ledger entries.
-- Supplier settlement view exposes received value, returned value, stock on hand, total paid, and live payable/credit.
+- **Daily Setup:** Admin selects operating bank + reviews balance each day
+- **Bank Accounts:** CRUD, printable statements with running balance
+- **Bank Transfers:** Manual deposits/withdrawals with purpose tracking
+- **Expenditures:** Categorised business expenses
+- **Supplier Payments:** Linked to bank ledger, with settlement view
+- **Daily Cash-Book:** Day-by-day summary with opening/closing balance
 
-### Receipts
-- A4-formatted printable receipt: business name, address, contact (+91 70369 53734, dvvshivaram@gmail.com)
-- Itemised line items, unit prices, subtotals, payment mode, receipt number
-- Print status tracked per receipt (`printed` flag)
+### Warehouses
+- Multiple warehouse locations
+- Stock assignment per warehouse
+- Inter-warehouse transfers with history tracking
 
-### Reports
+### Returns
+- **Customer returns:** Lookup sale by ID, select products, enter return quantity
+- **Refund modes:** Cash, credit (reduces outstanding), bank (creates withdrawal)
+- FIFO lot reversal: returned quantities restore to original lots
 
-| Tab | Charts | CSV Export |
-|---|---|---|
-| Daily Sales | — | Yes |
-| Sales Range | — | Yes |
-| Inventory Status | — | Yes |
-| Product Performance | Bar chart (top/least), Pie chart (revenue share) | Yes |
-| Monthly Trend | Area chart (revenue), Bar chart (transactions + items) | Yes |
-| Purchases | — | Yes |
-| Customer Sales | — | Yes |
+### Stock Adjustments
+- **Types:** Damage, theft, spoilage, counting error, other
+- Loss types auto-reduce stock; counting errors accept positive/negative
+- FIFO lot-level adjustment
+- **Variance check:** Admin can compare physical count vs system quantity
 
-### Users (Admin only)
-- Create operator accounts with role assignment
-- Enable / disable accounts (disabled users are blocked at login)
-- Delete users (self-delete protected)
-- Login audit log: last 10 entries with IP address and browser info
+### Reports (12 types)
+| Report | Key Features |
+|---|---|
+| Daily Sales | Product-wise for single date or range |
+| Inventory Status | Full snapshot with category-level stats |
+| Product Performance | Top/least selling, BarChart, PieChart |
+| Purchases | Purchase summary with cost analysis |
+| Customer Sales | Archive with search |
+| Suppliers | Summary + itemised breakdown |
+| Supplier Settlement | Financial year opening/closing due |
+| Audit | Cash flow, payment verification, expenditure audit, supplier advances, bank reconciliation |
+| Transactions | Day-by-day cash-book report |
+| GST | GST breakdown by product |
+| Profit & Loss | Revenue, COGS, gross/net profit, product margins |
+| Monthly Trend | Revenue + transaction trend charts |
+
+All reports support **CSV download** and **PDF print**.
+
+### Admin-Only Features
+- **User Management:** Create, enable/disable, delete users, reset passwords, login history
+- **Audit Log:** Searchable/filterable audit trail with summary
+- **Backup/Restore:** Manual + automated backups with retention, download, restore
+
+---
+
+## Security Design
+
+| Area | Implementation |
+|---|---|
+| **Password hashing** | bcrypt, 10 salt rounds |
+| **Password strength** | ≥8 chars with uppercase, lowercase, digit, special character |
+| **Force password change** | All new users and admin-reset users must change on first login |
+| **Token security** | JWT with 24h expiry, secret from environment variable |
+| **Session management** | Server-side session table with 5-minute idle timeout |
+| **Client idle detection** | 5-minute timer on user activity → auto-logout |
+| **Input validation** | express-validator on all mutating endpoints |
+| **SQL injection prevention** | Parameterised queries throughout (`?` placeholders) |
+| **XSS prevention** | `escapeHtml()` in server-rendered pages; React auto-escapes JSX |
+| **Role enforcement** | `authorizeRole()` middleware on every sensitive route |
+| **CORS** | Configurable origin whitelist from `CORS_ORIGIN` env |
+| **Self-protection** | Admin cannot disable/delete own account |
+| **Soft deletes** | Products, customers, suppliers, bank accounts use soft-delete |
+| **Audit trail** | All mutations logged to `audit_log` table with IP |
+| **Automated backups** | Configurable interval with retention-based pruning |
+| **Daily setup gate** | Operator writes blocked until admin completes daily bank setup |
+
+---
+
+## Testing
+
+### Test Architecture
+
+```
+server/tests/
+├── setup/
+│   ├── testDb.js         # In-memory SQLite (mirrors production schema)
+│   └── testHelpers.js    # Auth helpers, factories
+├── auth.test.js          # Authentication, user management, password flows
+├── customers.test.js     # Customer CRUD, payments, ledger
+├── dailySetup.test.js    # Daily setup workflow
+├── dashboard.test.js     # Dashboard endpoints
+├── e2e.test.js           # Multi-step business workflows
+├── inventory.test.js     # Product/category CRUD, stock
+├── notifications.test.js # Notification system
+├── pricing.test.js       # Dynamic pricing resolution
+├── purchases.test.js     # Purchase lifecycle, advance, delivery
+├── reports.test.js       # Report generation
+├── returns.test.js       # Sales/supplier returns
+├── sales.test.js         # Sales, receipts, FIFO allocation
+├── stockAdjustments.test.js # Stock corrections
+├── suppliers.test.js     # Supplier directory, returns
+└── transactions.test.js  # Banking, expenditures, payments
+```
+
+### Running Tests
+```bash
+cd server
+npm test                   # All tests (sequential, force exit)
+npm run test:coverage      # With coverage report
+npm run test:watch         # Watch mode
+npm run test:auth          # Single suite
+```
+
+### Test Tools
+| Tool | Purpose |
+|---|---|
+| Jest | Test framework with `--runInBand` for sequential execution |
+| Supertest | HTTP assertion library for Express endpoints |
+| In-memory SQLite | Isolated test database (mirrors production schema) |
 
 ---
 
 ## Deployment
 
 ### Railway / Render
-- `railway.toml` and `render.yaml` are included
-- Set `JWT_SECRET` and `SQLITE_DB_PATH` as platform environment variables
+- `railway.toml` and `render.yaml` included
+- Set `JWT_SECRET`, `SQLITE_DB_PATH`, and SMTP vars as platform environment variables
 - Start command: `cd server && node index.js`
 
 ### Netlify (frontend-only)
-- `netlify.toml` included with `_redirects` for SPA routing
-- Point `REACT_APP_API_URL` to your hosted backend if deployed separately
+- `netlify.toml` + `_redirects` for SPA routing
+- Set `REACT_APP_API_BASE_URL` pointing to hosted backend
 
 ### Docker
 ```dockerfile
@@ -890,19 +964,27 @@ EXPOSE 5000
 CMD ["node", "index.js"]
 ```
 
+### Production Checklist
+- [ ] Change `JWT_SECRET` from default
+- [ ] Set `CORS_ORIGIN` to specific frontend domain
+- [ ] Configure SMTP for email delivery
+- [ ] Set `FRONTEND_BASE_URL` and `PUBLIC_API_BASE_URL` for links
+- [ ] Verify `AUTO_BACKUP_ENABLED=true` with appropriate interval
+- [ ] Change default passwords on first login
+
 ---
 
-## Security Notes
+## ID & Number Formats
 
-| Area | Implementation |
-|---|---|
-| Password hashing | bcrypt, 10 salt rounds |
-| Token expiry | JWT 24h; session idle timeout 5 min (server-enforced) |
-| Input validation | express-validator on all POST/PUT endpoints |
-| Role enforcement | `authorizeRole` middleware on every sensitive route |
-| Category validation | Against `product_categories` table (not hardcoded) |
-| Self-protection | Admin cannot disable or delete their own account |
-| Stock protection | Sales blocked server-side if stock is insufficient |
+| Entity | Format | Example |
+|---|---|---|
+| Product ID | 2-char prefix + 3-digit seq | `SD001`, `FR003` |
+| Sale ID | `SALE` + YYYYMMDDHHmmss + 4 random | `SALE20260316231000XK2A` |
+| Receipt | `R-` + YYYYMMDD + `-` + name + `-` + 2 random | `R-20260316-rameshkumar-4K` |
+| Purchase ID | `PUR` + YYYYMMDDHHmmss + 4 hex | `PUR20260316231000AB3F` |
+| Quotation | `Q-` + YYYYMMDD + `-` + 4 random | `Q-20260410-A7F3` |
+| Return (sales) | `RET-` + YYYYMMDD + `-` + 4 random | `RET-20260410-B2C1` |
+| Return (supplier) | `SRET-` + YYYYMMDD + `-` + 4 random | `SRET-20260410-D4E5` |
 
 ---
 
